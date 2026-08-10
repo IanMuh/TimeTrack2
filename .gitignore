@@ -66,3 +66,6 @@ secrets.*
 # 临时目录
 /tmp/
 *.tmp
+
+# ZCode 会话内部文件
+.zcode/
