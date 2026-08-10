@@ -12,18 +12,28 @@ class UpdateConfig {
 
   /// 清单默认地址：本仓库 raw.githubusercontent（规避 Releases API 60 req/h 限额）。
   /// 可通过 `--dart-define=UPDATE_MANIFEST_URL=...` 覆盖；
-  /// 注入串非法时回退默认仓库地址（不因构建配置失误击穿更新流程）。
-  static final Uri defaultManifestUrl =
-      Uri.tryParse(
-        AppBuildConfig.getString(
-          AppBuildConfig.updateManifestUrlKey,
-          defaultValue:
-              'https://raw.githubusercontent.com/IanMuh/TimeTrack2/main/update.json',
-        ),
-      ) ??
-      Uri.parse(
-        'https://raw.githubusercontent.com/IanMuh/TimeTrack2/main/update.json',
-      );
+  /// 注入串非法（不可解析/非绝对/非 http·https）时回退默认仓库地址，
+  /// 不因构建配置失误击穿更新流程。
+  static final Uri defaultManifestUrl = _resolveManifestUrl();
+
+  static Uri _resolveManifestUrl() {
+    const fallback =
+        'https://raw.githubusercontent.com/IanMuh/TimeTrack2/main/update.json';
+    final uri = Uri.tryParse(
+      AppBuildConfig.getString(
+        AppBuildConfig.updateManifestUrlKey,
+        defaultValue: fallback,
+      ),
+    );
+    // tryParse 对相对 URI（如 `foobar`、`localhost:8080/x`）也会返回非 null，
+    // 故须额外校验绝对地址且 scheme 为 http/https。
+    if (uri != null &&
+        uri.isAbsolute &&
+        (uri.scheme == 'http' || uri.scheme == 'https')) {
+      return uri;
+    }
+    return Uri.parse(fallback);
+  }
 
   /// 检查超时（网络请求）。
   static const checkTimeout = Duration(seconds: 8);

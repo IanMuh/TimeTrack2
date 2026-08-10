@@ -1,6 +1,10 @@
 /// 正式指令定义（声明式配置，单一注册点）。
 library;
 
+// 依赖说明：`CommandDefinition` 是零依赖纯类型，定义于 viewmodels/commands/
+// （批准计划决策——viewmodels 为最底层纯类型层，constants/utils 均引用它，
+// 不构成循环；viewmodels 自身不反向依赖 constants）。
+
 import '../../viewmodels/commands/command_definition.dart';
 
 /// 所有用户操作（UI 按钮/快捷键/深链/未来 AI）经 `utils/command_parser.dart`
@@ -62,6 +66,8 @@ final List<CommandDefinition> commandDefinitions = [
     minPositionalArgs: 1,
     maxPositionalArgs: 1,
     allowedOptions: {'direction'},
+    // 注意：--direction 取值白名单（previous|next）由阶段 3 分发器校验——
+    // 解析器只做选项键/时间值校验，不做取值枚举校验。
     description: '与相邻条目合并：merge <id> --direction=previous|next',
   ),
 
@@ -89,7 +95,8 @@ final List<CommandDefinition> commandDefinitions = [
     minPositionalArgs: 0,
     maxPositionalArgs: 1,
     allowedOptions: {'path'},
-    description: '导出数据：export [<路径>] [--path=<路径>]（位置参数与 --path 均可指定目标路径）',
+    description:
+        '导出数据：export [<路径>] [--path=<路径>]（二选一；同时给出由分发器报错，优先级约定见分发器）',
   ),
   CommandDefinition(
     name: 'import',

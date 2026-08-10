@@ -18,12 +18,21 @@ class AppBuildConfig {
 
   /// 读取 bool 型 dart-define；未提供时返回 [defaultValue]。
   ///
-  /// 识别 `true`/`1`/`yes`（忽略大小写）为真，`false`/`0`/`no` 为假；
+  /// 识别 `true`/`1`/`yes`（忽略大小写与首尾空白）为真，`false`/`0`/`no` 为假；
   /// 无法识别的非空值回退 [defaultValue]（避免 `TRUE`/`1.0` 等被静默误判）。
   static bool getBool(String key, {required bool defaultValue}) {
-    final raw = String.fromEnvironment(key);
-    if (raw.isEmpty) return defaultValue;
+    return parseBool(String.fromEnvironment(key), defaultValue: defaultValue);
+  }
+
+  /// 解析布尔字符串（纯函数，可独立单测）。
+  ///
+  /// - 空串/纯空白 → [defaultValue]（未注入）
+  /// - `true`/`1`/`yes`（忽略大小写与首尾空白）→ true
+  /// - `false`/`0`/`no`（忽略大小写与首尾空白）→ false
+  /// - 其他无法识别的非空值 → [defaultValue]
+  static bool parseBool(String raw, {required bool defaultValue}) {
     final normalized = raw.trim().toLowerCase();
+    if (normalized.isEmpty) return defaultValue;
     if (normalized == 'true' || normalized == '1' || normalized == 'yes') {
       return true;
     }

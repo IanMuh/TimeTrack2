@@ -79,10 +79,8 @@ void main() {
 
     test('maxDateTime 哨兵：晚于任何实际业务时间', () {
       // 锁定"无限"哨兵值，防误改破坏重叠判断（TimeEntry.overlaps 依赖）。
-      expect(
-        AppConstants.maxDateTime,
-        DateTime.fromMillisecondsSinceEpoch(8640000000000000),
-      );
+      // 断言毫秒值（不绑定 isUtc/本地时区构造方式，避免实现变更误报）。
+      expect(AppConstants.maxDateTime.millisecondsSinceEpoch, 8640000000000000);
       expect(AppConstants.maxDateTime.isAfter(DateTime(2999)), isTrue);
       expect(AppConstants.maxDateTime.isAfter(AppConstants.farFutureDate), isTrue);
     });
@@ -111,25 +109,32 @@ void main() {
 
   group('AppBuildConfig', () {
     test('dart-define 读取与默认值', () {
-      // 未注入时返回默认值
       expect(
         AppBuildConfig.getString('SOME_UNSET_KEY', defaultValue: 'fallback'),
         'fallback',
       );
-      expect(
-        AppBuildConfig.getBool('SOME_UNSET_BOOL', defaultValue: true),
-        isTrue,
-      );
+      expect(AppBuildConfig.getBool('SOME_UNSET_BOOL', defaultValue: true),
+          isTrue);
     });
 
-    test('getBool：大小写归一化/显式 false/无法识别回退默认', () {
-      // 大小写归一化（dart-define 不可在测试注入，行为由纯逻辑保证——此处直接
-      // 无法传参验证，逻辑见实现注释；编译期注入需 --dart-define 运行验证）。
-      // 该测试保留为回归锚点：若实现改为区分大小写或静默返回 false 将在此暴露。
-      // （注：String.fromEnvironment 在测试进程内无法注入，真实注入路径
-      // 由阶段 5 双平台冒烟 + --dart-define 覆盖验证。）
-      expect(AppBuildConfig.getBool('_UNSET_', defaultValue: false), isFalse);
-      expect(AppBuildConfig.getBool('_UNSET_', defaultValue: true), isTrue);
+    test('parseBool：大小写归一化/显式 true·false/无法识别回退默认（纯函数单测）', () {
+      // 真值（忽略大小写与首尾空白）
+      expect(AppBuildConfig.parseBool('true', defaultValue: false), isTrue);
+      expect(AppBuildConfig.parseBool('TRUE', defaultValue: false), isTrue);
+      expect(AppBuildConfig.parseBool(' 1 ', defaultValue: false), isTrue);
+      expect(AppBuildConfig.parseBool('yes', defaultValue: false), isTrue);
+      // 假值
+      expect(AppBuildConfig.parseBool('false', defaultValue: true), isFalse);
+      expect(AppBuildConfig.parseBool('False', defaultValue: true), isFalse);
+      expect(AppBuildConfig.parseBool('0', defaultValue: true), isFalse);
+      expect(AppBuildConfig.parseBool('no', defaultValue: true), isFalse);
+      // 未注入（空/纯空白）→ 默认值
+      expect(AppBuildConfig.parseBool('', defaultValue: true), isTrue);
+      expect(AppBuildConfig.parseBool('   ', defaultValue: false), isFalse);
+      // 无法识别的非空值 → 回退默认（不静默反转为 false）
+      expect(AppBuildConfig.parseBool('banana', defaultValue: true), isTrue);
+      expect(AppBuildConfig.parseBool('1.0', defaultValue: true), isTrue);
+      expect(AppBuildConfig.parseBool('是', defaultValue: false), isFalse);
     });
 
     test('键名常量', () {
@@ -147,20 +152,38 @@ void main() {
       // secondary 两侧一致（accent 风格）
       expect(LightThemeTokens.secondary, DarkThemeTokens.secondary);
     });
+
+    test('完整令牌集：关键精确值 + 深色 outlineVariant 有意更亮', () {
+      // 浅色套关键值
+      expect(LightThemeTokens.background, 0xfff8fafc);
+      expect(LightThemeTokens.surfaceMuted, 0xfff1f5f9);
+      expect(LightThemeTokens.outline, 0xffcbd5e1);
+      expect(LightThemeTokens.outlineVariant, 0xffe2e8f0);
+      expect(LightThemeTokens.mutedText, 0xff64748b);
+      // 深色套关键值
+      expect(DarkThemeTokens.outline, 0xff334155);
+      expect(DarkThemeTokens.outlineVariant, 0xff475569);
+      expect(DarkThemeTokens.mutedText, 0xffcbd5e1);
+      // 深色 outlineVariant(475569) 比 outline(334155) 更亮是有意设计（选中/焦点
+      // 描边高对比）；浅色 variant(e2e8f0) 也比 outline(cbd5e1) 数值更大——
+      // 两侧数值方向一致（variant 更亮）；视觉对比方向因背景深浅相反。
+      expect(
+        DarkThemeTokens.outlineVariant.compareTo(DarkThemeTokens.outline),
+        greaterThan(0),
+      );
+      expect(
+        LightThemeTokens.outlineVariant.compareTo(LightThemeTokens.outline),
+        greaterThan(0),
+      );
+    });
   });
 
   group('存储键', () {
-    test('键名非空且唯一', () {
-      final keys = [
-        AppMetadataKeys.deviceId,
-        AppMetadataKeys.lastSyncAt,
-        AppMetadataKeys.ignoredUpdateVersion,
-        AppMetadataKeys.lastCheckedManifestVersion,
-        AppMetadataKeys.lastCleanupAt,
-      ];
-      expect(keys.toSet().length, keys.length);
-      for (final key in keys) {
+    test('键名非空且唯一（遍历 AppMetadataKeys.all，新增键自动纳入）', () {
+      expect(AppMetadataKeys.all.toSet().length, AppMetadataKeys.all.length);
+      for (final key in AppMetadataKeys.all) {
         expect(key, isNotEmpty);
+        expect(key.trim(), key, reason: '键名不应含首尾空白');
       }
     });
   });
