@@ -549,6 +549,35 @@ void main() {
       expect(fromEmpty.parentId, isNull);
     });
 
+    test('id 归一化：trim 参与自引用检测、纯空白 id 抛错、round-trip 身份一致', () {
+      // id 带周围空白且 parent_id 指向 trim 后同值 → 自引用抛错（归一化后判定）
+      expect(
+        () => ActivityCategory.fromMap({
+          'id': ' c1 ',
+          'parent_id': 'c1',
+          'updated_at': '2026-08-10T04:00:00Z',
+        }),
+        throwsFormatException,
+      );
+      // 纯空白 id → 抛错
+      expect(
+        () => ActivityCategory.fromMap({
+          'id': '   ',
+          'updated_at': '2026-08-10T04:00:00Z',
+        }),
+        throwsFormatException,
+      );
+      // round-trip 身份一致：toMap 写路径同样 trim
+      final category = ActivityCategory.fromMap({
+        'id': ' c1 ',
+        'updated_at': '2026-08-10T04:00:00Z',
+      });
+      expect(category.id, 'c1');
+      final roundTrip = ActivityCategory.fromMap(category.toMap());
+      expect(roundTrip.id, 'c1');
+      expect(category.toMap()['id'], 'c1');
+    });
+
     test('parentId round-trip 保真', () {
       final category = ActivityCategory(
         id: 'c2',

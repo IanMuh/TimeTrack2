@@ -51,18 +51,19 @@ class CommandInvocation {
   /// 反斜杠、不以 `-` 开头（避免被解析器误判为选项）——保证 toString 输出的
   /// 指令名始终是干净的单 token。
   static String _validateName(String name) {
-    if (name != name.trim() ||
-        name.trim().isEmpty ||
-        name.trim().contains(RegExp(r'\s')) ||
-        name.trim().contains(RegExp(r'"|\\')) ||
-        name.trim().startsWith('-')) {
+    final trimmed = name.trim();
+    if (name != trimmed ||
+        trimmed.isEmpty ||
+        trimmed.contains(RegExp(r'\s')) ||
+        trimmed.contains(RegExp(r'"|\\')) ||
+        trimmed.startsWith('-')) {
       throw ArgumentError.value(
         name,
         'name',
         '指令名必须为单 token（无空白/引号/反斜杠，不以 - 开头，多词请用点分/连字符形式）',
       );
     }
-    return name.trim();
+    return trimmed;
   }
 
   /// 合法选项键：非空、仅 [0-9A-Za-z_.-]（不含空白/等号/引号/反斜杠）。

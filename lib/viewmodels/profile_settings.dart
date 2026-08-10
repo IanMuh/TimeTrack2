@@ -43,7 +43,8 @@ class ProfileSettings {
             mergeNeighborThresholdMinutes <=
                 maxMergeNeighborThresholdMinutes),
         // timezone 语义上非空（fromMap/copyWith 均有空白兜底，直接构造是唯一旁路）。
-        assert(timezone != '', 'timezone 不能为空') {
+        // 与构造体硬校验条件一致（均按 trim 判空），debug/release 行为统一。
+        assert(timezone.trim().isNotEmpty, 'timezone 不能为空') {
     // release 下 assert 被移除：直接构造空白 timezone 是绕过 fromMap/copyWith
     // 兜底的旁路，空白时区值会随 toMap 持久化污染数据。
     if (timezone.trim().isEmpty) {

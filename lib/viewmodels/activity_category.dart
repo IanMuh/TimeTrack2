@@ -89,7 +89,9 @@ class ActivityCategory {
 
   Map<String, Object?> toMap() {
     return {
-      'id': id,
+      // id 与读取路径（fromMap）保持同样 trim 归一化：保证内存对象与存储主键
+      // 身份一致，round-trip 不产生带空白 id（否则查找/更新会落空）。
+      'id': id.trim(),
       'user_id': userId,
       'name': name,
       'color': color,
