@@ -12,27 +12,35 @@ class UpdateConfig {
 
   /// 清单默认地址：本仓库 raw.githubusercontent（规避 Releases API 60 req/h 限额）。
   /// 可通过 `--dart-define=UPDATE_MANIFEST_URL=...` 覆盖；
-  /// 注入串非法（不可解析/非绝对/非 http·https）时回退默认仓库地址，
+  /// 注入串非法（不可解析/非绝对/非 http·https/无主机名）时回退默认仓库地址，
   /// 不因构建配置失误击穿更新流程。
-  static final Uri defaultManifestUrl = _resolveManifestUrl();
+  static final Uri defaultManifestUrl =
+      resolveManifestUrl(
+        AppBuildConfig.getString(
+          AppBuildConfig.updateManifestUrlKey,
+          defaultValue:
+              'https://raw.githubusercontent.com/IanMuh/TimeTrack2/main/update.json',
+        ),
+      ) ??
+      Uri.parse(
+        'https://raw.githubusercontent.com/IanMuh/TimeTrack2/main/update.json',
+      );
 
-  static Uri _resolveManifestUrl() {
-    const fallback =
-        'https://raw.githubusercontent.com/IanMuh/TimeTrack2/main/update.json';
-    final uri = Uri.tryParse(
-      AppBuildConfig.getString(
-        AppBuildConfig.updateManifestUrlKey,
-        defaultValue: fallback,
-      ),
-    );
-    // tryParse 对相对 URI（如 `foobar`、`localhost:8080/x`）也会返回非 null，
-    // 故须额外校验绝对地址且 scheme 为 http/https。
+  /// 校验清单 URL（纯函数，可独立单测）：合法返回 Uri，非法返回 null（调用方回退默认）。
+  ///
+  /// 合法性：绝对地址 + scheme 为 http/https + 含主机名
+  /// （`Uri.tryParse` 对相对 URI（`foobar`）、scheme-only（`https:`）、
+  /// 无 host（`https://`）也会返回非 null，故须额外校验）。
+  static Uri? resolveManifestUrl(String raw) {
+    final uri = Uri.tryParse(raw);
     if (uri != null &&
         uri.isAbsolute &&
-        (uri.scheme == 'http' || uri.scheme == 'https')) {
+        (uri.scheme == 'http' || uri.scheme == 'https') &&
+        uri.hasAuthority &&
+        uri.host.isNotEmpty) {
       return uri;
     }
-    return Uri.parse(fallback);
+    return null;
   }
 
   /// 检查超时（网络请求）。

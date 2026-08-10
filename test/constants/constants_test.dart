@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart' show Color;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timetrack2/constants/app_constants.dart';
 import 'package:timetrack2/constants/build_config.dart';
@@ -105,6 +106,30 @@ void main() {
       expect(UpdateConfig.pendingInstallMarkerFile, 'pending-install.json');
       expect(UpdateConfig.windowsStagingDirName, 'staging');
     });
+
+    test('resolveManifestUrl：合法/非法/相对/scheme-only/无 host（纯函数单测）', () {
+      // 合法 http/https
+      expect(
+        UpdateConfig.resolveManifestUrl('https://example.com/update.json')!.host,
+        'example.com',
+      );
+      expect(
+        UpdateConfig.resolveManifestUrl('http://example.com/x')!.scheme,
+        'http',
+      );
+      // 非法：相对 URI（tryParse 返回非 null 但非绝对）
+      expect(UpdateConfig.resolveManifestUrl('foobar'), isNull);
+      expect(UpdateConfig.resolveManifestUrl('localhost:8080/update.json'),
+          isNull);
+      // 非法：scheme-only / 无 host
+      expect(UpdateConfig.resolveManifestUrl('https:'), isNull);
+      expect(UpdateConfig.resolveManifestUrl('https://'), isNull);
+      // 非法：非 http/https scheme
+      expect(UpdateConfig.resolveManifestUrl('ftp://example.com/x'), isNull);
+      // 非法：空/空白
+      expect(UpdateConfig.resolveManifestUrl(''), isNull);
+      expect(UpdateConfig.resolveManifestUrl('   '), isNull);
+    });
   });
 
   group('AppBuildConfig', () {
@@ -164,27 +189,34 @@ void main() {
       expect(DarkThemeTokens.outline, 0xff334155);
       expect(DarkThemeTokens.outlineVariant, 0xff475569);
       expect(DarkThemeTokens.mutedText, 0xffcbd5e1);
-      // 深色 outlineVariant(475569) 比 outline(334155) 更亮是有意设计（选中/焦点
-      // 描边高对比）；浅色 variant(e2e8f0) 也比 outline(cbd5e1) 数值更大——
-      // 两侧数值方向一致（variant 更亮）；视觉对比方向因背景深浅相反。
+      // outlineVariant 感知亮度更高（用 computeLuminance 而非 ARGB 整数比较——
+      // 整数比较按 R/G/B 字节字典序，不代表感知亮度）
       expect(
-        DarkThemeTokens.outlineVariant.compareTo(DarkThemeTokens.outline),
-        greaterThan(0),
+        Color(DarkThemeTokens.outlineVariant).computeLuminance(),
+        greaterThan(Color(DarkThemeTokens.outline).computeLuminance()),
       );
       expect(
-        LightThemeTokens.outlineVariant.compareTo(LightThemeTokens.outline),
-        greaterThan(0),
+        Color(LightThemeTokens.outlineVariant).computeLuminance(),
+        greaterThan(Color(LightThemeTokens.outline).computeLuminance()),
       );
     });
   });
 
   group('存储键', () {
-    test('键名非空且唯一（遍历 AppMetadataKeys.all，新增键自动纳入）', () {
+    test('键名非空且唯一（遍历 AppMetadataKeys.all）', () {
       expect(AppMetadataKeys.all.toSet().length, AppMetadataKeys.all.length);
       for (final key in AppMetadataKeys.all) {
         expect(key, isNotEmpty);
         expect(key.trim(), key, reason: '键名不应含首尾空白');
       }
+      // 显式锚点：all 必须包含全部已知键（新增键常量忘同步列表时暴露）
+      expect(AppMetadataKeys.all, containsAll([
+        AppMetadataKeys.deviceId,
+        AppMetadataKeys.lastSyncAt,
+        AppMetadataKeys.ignoredUpdateVersion,
+        AppMetadataKeys.lastCheckedManifestVersion,
+        AppMetadataKeys.lastCleanupAt,
+      ]));
     });
   });
 }
