@@ -8,18 +8,21 @@ import '../utils/model_utils.dart';
 /// 深度成环由仓储层在落库前校验（parentId 环检测）。
 class ActivityCategory {
   ActivityCategory({
-    required this.id,
+    required String id,
     this.userId,
     required this.name,
     required this.color,
     required this.updatedAt,
     this.deletedAt,
     this.parentId,
-  }) : assert(parentId != id, '分类不能是自身的父分类（自引用环）') {
-    // 自引用运行时硬校验（release 下 assert 被移除，此处兜底）：
+  }) : id = id.trim() {
+    // 自引用运行时硬校验（debug 下 assert + release 下构造体，双保险）：
     // 直接构造是绕过 fromMap/copyWith 的旁路入口，必须同样拦截自引用环，
     // 否则分类树遍历/递归软删可能无法终止。
-    if (parentId == id) {
+    // 注：id 已在 initializer 中 trim 归一化（内存对象身份与存储主键一致），
+    // 此处 this.id 即归一化后的值。
+    assert(parentId != this.id, '分类不能是自身的父分类（自引用环）');
+    if (parentId == this.id) {
       throw ArgumentError.value(
         parentId,
         'parentId',

@@ -576,6 +576,25 @@ void main() {
       final roundTrip = ActivityCategory.fromMap(category.toMap());
       expect(roundTrip.id, 'c1');
       expect(category.toMap()['id'], 'c1');
+      // 直接构造带空白 id → 构造器归一化（内存对象身份与存储主键一致）
+      final direct = ActivityCategory(
+        id: ' c2 ',
+        name: 'x',
+        color: 0,
+        updatedAt: DateTime.utc(2026, 8, 10, 4),
+      );
+      expect(direct.id, 'c2');
+      // 构造器归一化后自引用判定同样生效（id 与 parentId 归一化一致）
+      expect(
+        () => ActivityCategory(
+          id: ' c3 ',
+          name: 'x',
+          color: 0,
+          updatedAt: DateTime.utc(2026, 8, 10, 4),
+          parentId: 'c3',
+        ),
+        throwsA(anyOf(isA<AssertionError>(), isA<ArgumentError>())),
+      );
     });
 
     test('parentId round-trip 保真', () {
