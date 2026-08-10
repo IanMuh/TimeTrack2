@@ -30,7 +30,10 @@ enum StatsDimension {
 
 /// 统计分组行（聚合结果的一行）。
 ///
-/// 值相等：按 [id] 判定（同一分组行视作相同，用于集合去重/变更判定）。
+/// 值相等：按 [id] 判定（与 Activity/TimeEntry 等持久实体一致）。
+/// ⚠️ 变更检测注意：`totalDuration`/`count`/`label`/`depth` 变化**不会**反映在
+/// `==` 上——同 id 的新旧行判等。UI 刷新/列表 diff 必须显式比较统计字段
+/// （totalDuration/count 等），不要依赖 `==` 判断"统计值是否变化"。
 class StatsGroupRow {
   StatsGroupRow({
     required this.id,
@@ -107,6 +110,14 @@ class StatsEntrySlice {
                   primaryCategoryLabel != null &&
                   primaryCategoryColor != null),
           'primaryCategory 的 id/label/color 必须同时存在或同时为 null',
+        ),
+        assert(
+          primaryCategoryId == null || categoryAncestorIds.isNotEmpty,
+          '有主分类时 categoryAncestorIds 不能为空',
+        ),
+        assert(
+          primaryCategoryId != null || categoryAncestorIds.isEmpty,
+          '无主分类时 categoryAncestorIds 必须为空',
         ),
         assert(duration >= Duration.zero, 'duration 必须非负（debug 快速失败）'),
         linkedCategoryIds = Set.unmodifiable(linkedCategoryIds),

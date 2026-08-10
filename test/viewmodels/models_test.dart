@@ -88,6 +88,7 @@ void main() {
       );
       final restored = Activity.fromMap(deleted.toMap());
       expect(restored.id, base.id);
+      expect(restored.userId, base.userId, reason: 'user_id 序列化必须保真');
       expect(restored.name, base.name);
       expect(restored.color, base.color);
       expect(restored.isFavorite, base.isFavorite);
@@ -308,7 +309,7 @@ void main() {
         'note': 999,
         'start_at': '2026-08-10T04:00:00Z',
         'updated_at': '2026-08-10T04:00:00Z',
-        'end_at': '', // 非法结束时间 → null（视为运行中，而非伪造）
+        'end_at': null, // 缺失/null → 运行中
       });
       expect(restored.userId, isNull);
       expect(restored.activityId, '');
@@ -316,6 +317,26 @@ void main() {
       expect(restored.note, '');
       expect(restored.endAt, isNull);
       expect(restored.isRunning, isTrue);
+    });
+
+    test('end_at 非 null 但非法（空串/无偏移/损坏）→ FormatException，不静默当运行中', () {
+      final base = {
+        'id': 'e',
+        'start_at': '2026-08-10T04:00:00Z',
+        'updated_at': '2026-08-10T04:00:00Z',
+      };
+      // 空串 / 无时区偏移 / 非法字符串 → 抛错（已结束条目不应被误判为运行中）
+      expect(() => TimeEntry.fromMap({...base, 'end_at': ''}),
+          throwsFormatException);
+      expect(
+        () => TimeEntry.fromMap({...base, 'end_at': '2026-08-10T05:00:00'}),
+        throwsFormatException,
+        reason: '无时区偏移的 end_at 非法',
+      );
+      expect(
+        () => TimeEntry.fromMap({...base, 'end_at': 'not-a-date'}),
+        throwsFormatException,
+      );
     });
 
     test('时间窗边界：运行中裁剪 / now 早于 startAt / 反向窗口 / 窗口全外', () {
@@ -558,10 +579,17 @@ void main() {
         updatedAt: DateTime.utc(2026, 8, 10, 4),
       );
       final restored = ActivityCategoryLink.fromMap(link.toMap());
+      expect(restored.id, 'l1');
+      expect(restored.userId, 'u1');
       expect(restored.activityId, 'a1');
       expect(restored.categoryId, 'c1');
       expect(restored.isPrimary, isTrue);
       expect(restored.sortOrder, 0);
+      expect(
+        restored.updatedAt.isAtSameMomentAs(DateTime.utc(2026, 8, 10, 4)),
+        isTrue,
+        reason: 'LWW 冲突判定关键字段必须保真',
+      );
     });
   });
 
@@ -655,18 +683,19 @@ void main() {
     });
 
     test('timezone 空串/空白回退当前时区（防损坏数据持久化空值）', () {
+      final expected = DateTime.now().timeZoneName;
       final fromEmpty = ProfileSettings.fromMap({
         'updated_at': '2026-08-10T04:00:00Z',
         'timezone': '',
       });
-      expect(fromEmpty.timezone, isNotEmpty);
+      expect(fromEmpty.timezone, expected);
       final fromWhitespace = ProfileSettings.fromMap({
         'updated_at': '2026-08-10T04:00:00Z',
         'timezone': '   ',
       });
-      expect(fromWhitespace.timezone, isNotEmpty);
+      expect(fromWhitespace.timezone, expected);
       final copied = fromEmpty.copyWith(timezone: '');
-      expect(copied.timezone, isNotEmpty);
+      expect(copied.timezone, expected);
     });
 
     test('clearUserId 可将 userId 置空', () {

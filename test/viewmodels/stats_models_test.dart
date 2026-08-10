@@ -57,7 +57,6 @@ void main() {
 
     test('集合不可变视图：外部集合修改不影响实例', () {
       final linked = <String>{'c1'};
-      final ancestors = <String>['root'];
       final slice = StatsEntrySlice(
         activityId: 'a1',
         activityLabel: '工作',
@@ -66,22 +65,32 @@ void main() {
         primaryCategoryLabel: null,
         primaryCategoryColor: null,
         linkedCategoryIds: linked,
-        categoryAncestorIds: ancestors,
         duration: Duration.zero,
       );
       linked.add('c2');
-      ancestors.add('c1');
       expect(slice.linkedCategoryIds, {'c1'});
-      expect(slice.categoryAncestorIds, ['root']);
       expect(() => slice.linkedCategoryIds.add('x'),
           throwsUnsupportedError);
-      expect(() => slice.categoryAncestorIds.add('x'),
+      // 有主分类时的 ancestors 不可变
+      final ancestors = <String>['root', 'c1'];
+      final withCategory = StatsEntrySlice(
+        activityId: 'a1',
+        activityLabel: '工作',
+        activityColor: 0xff2563eb,
+        primaryCategoryId: 'c1',
+        primaryCategoryLabel: '项目A',
+        primaryCategoryColor: 0xff0f766e,
+        categoryAncestorIds: ancestors,
+        duration: Duration.zero,
+      );
+      ancestors.add('x');
+      expect(withCategory.categoryAncestorIds, ['root', 'c1']);
+      expect(() => withCategory.categoryAncestorIds.add('y'),
           throwsUnsupportedError);
     });
   });
 
-  group('StatsGroupRow', () {
-
+  group('StatsEntrySlice 进阶', () {
     test('primaryCategory 三件套一致性：id/label/color 同时存在或同时为 null', () {
       // id 非空但 label 为 null → 断言失败（debug）
       expect(
@@ -96,11 +105,19 @@ void main() {
         ),
         throwsA(isA<AssertionError>()),
       );
-      // 三件齐全 → 正常
+      // 三件齐全 + 祖先链 → 正常
       expect(
         () => _slice(Duration.zero, primaryCategoryId: 'c1',
-            primaryCategoryLabel: '工作', primaryCategoryColor: 0xff000000),
+            primaryCategoryLabel: '工作', primaryCategoryColor: 0xff000000,
+            categoryAncestorIds: ['root', 'c1']),
         returnsNormally,
+      );
+      // 有主分类但祖先链为空 → 断言失败（debug）
+      expect(
+        () => _slice(Duration.zero, primaryCategoryId: 'c1',
+            primaryCategoryLabel: '工作', primaryCategoryColor: 0xff000000,
+            categoryAncestorIds: const []),
+        throwsA(isA<AssertionError>()),
       );
     });
 
@@ -116,7 +133,7 @@ void main() {
         categoryAncestorIds: ['root', 'c1'],
         duration: const Duration(minutes: 30),
       );
-      expect(a, StatsEntrySlice(
+      final a2 = StatsEntrySlice(
         activityId: 'a1',
         activityLabel: '工作',
         activityColor: 0xff2563eb,
@@ -126,18 +143,10 @@ void main() {
         linkedCategoryIds: {'c1'},
         categoryAncestorIds: ['root', 'c1'],
         duration: const Duration(minutes: 30),
-      ));
-      expect(a.hashCode, StatsEntrySlice(
-        activityId: 'a1',
-        activityLabel: '工作',
-        activityColor: 0xff2563eb,
-        primaryCategoryId: 'c1',
-        primaryCategoryLabel: '项目A',
-        primaryCategoryColor: 0xff0f766e,
-        linkedCategoryIds: {'c1'},
-        categoryAncestorIds: ['root', 'c1'],
-        duration: const Duration(minutes: 30),
-      ).hashCode);
+      );
+      expect(a, a2);
+      expect(a.hashCode, a2.hashCode);
+      // 时长不同
       expect(a == StatsEntrySlice(
         activityId: 'a1',
         activityLabel: '工作',
@@ -147,7 +156,31 @@ void main() {
         primaryCategoryColor: 0xff0f766e,
         linkedCategoryIds: {'c1'},
         categoryAncestorIds: ['root', 'c1'],
-        duration: const Duration(minutes: 31), // 时长不同
+        duration: const Duration(minutes: 31),
+      ), isFalse);
+      // 集合字段不同（linkedCategoryIds 内容）
+      expect(a == StatsEntrySlice(
+        activityId: 'a1',
+        activityLabel: '工作',
+        activityColor: 0xff2563eb,
+        primaryCategoryId: 'c1',
+        primaryCategoryLabel: '项目A',
+        primaryCategoryColor: 0xff0f766e,
+        linkedCategoryIds: {'c2'},
+        categoryAncestorIds: ['root', 'c1'],
+        duration: const Duration(minutes: 30),
+      ), isFalse);
+      // 集合字段顺序不同（categoryAncestorIds 顺序敏感）
+      expect(a == StatsEntrySlice(
+        activityId: 'a1',
+        activityLabel: '工作',
+        activityColor: 0xff2563eb,
+        primaryCategoryId: 'c1',
+        primaryCategoryLabel: '项目A',
+        primaryCategoryColor: 0xff0f766e,
+        linkedCategoryIds: {'c1'},
+        categoryAncestorIds: ['c1', 'root'],
+        duration: const Duration(minutes: 30),
       ), isFalse);
     });
   });
@@ -187,6 +220,51 @@ void main() {
       expect(row.ancestorIds, ['root', 'parent']);
       expect(() => row.ancestorIds.add('x'), throwsUnsupportedError);
     });
+
+    test('等值语义：按 id 判等（统计字段变化不反映在 ==）', () {
+      final row = StatsGroupRow(
+        id: 'g1',
+        label: '工作',
+        totalDuration: const Duration(minutes: 30),
+        count: 2,
+        color: 0xff2563eb,
+        depth: 1,
+        ancestorIds: const ['root'],
+      );
+      // 同 id、统计字段不同 → 仍判等（持久实体语义）
+      expect(
+        row == StatsGroupRow(
+          id: 'g1',
+          label: '工作',
+          totalDuration: const Duration(hours: 5),
+          count: 99,
+          color: 0xff2563eb,
+          depth: 2,
+          ancestorIds: const ['root', 'x'],
+        ),
+        isTrue,
+      );
+      expect(row.hashCode,
+          StatsGroupRow(
+            id: 'g1',
+            label: '工作',
+            totalDuration: const Duration(hours: 5),
+            count: 99,
+            color: 0xff2563eb,
+            depth: 2,
+            ancestorIds: const ['root', 'x'],
+          ).hashCode);
+      // 不同 id → 不等
+      expect(row == StatsGroupRow(
+        id: 'g2',
+        label: '工作',
+        totalDuration: const Duration(minutes: 30),
+        count: 2,
+        color: 0xff2563eb,
+        depth: 1,
+        ancestorIds: const ['root'],
+      ), isFalse);
+    });
   });
 
   group('StatsDimension', () {
@@ -201,6 +279,7 @@ StatsEntrySlice _slice(
   String? primaryCategoryId,
   String? primaryCategoryLabel,
   int? primaryCategoryColor,
+  List<String>? categoryAncestorIds,
 }) {
   return StatsEntrySlice(
     activityId: 'a1',
@@ -209,6 +288,8 @@ StatsEntrySlice _slice(
     primaryCategoryId: primaryCategoryId,
     primaryCategoryLabel: primaryCategoryLabel,
     primaryCategoryColor: primaryCategoryColor,
+    categoryAncestorIds: categoryAncestorIds ??
+        (primaryCategoryId == null ? const [] : const ['root', 'c1']),
     duration: duration,
   );
 }

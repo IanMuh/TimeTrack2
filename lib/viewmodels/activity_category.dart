@@ -54,14 +54,25 @@ class ActivityCategory {
     String? parentId,
     bool clearParentId = false,
   }) {
+    final newId = id ?? this.id;
+    final newParentId = clearParentId ? null : parentId ?? this.parentId;
+    // 自引用运行时校验（不依赖 assert，release 下同样生效）：
+    // copyWith 是旁路直接构造的常见入口，绕过它会静默产出自引用环。
+    if (newParentId == newId) {
+      throw ArgumentError.value(
+        newParentId,
+        'parentId',
+        '分类不能是自身的父分类（自引用环）',
+      );
+    }
     return ActivityCategory(
-      id: id ?? this.id,
+      id: newId,
       userId: clearUserId ? null : userId ?? this.userId,
       name: name ?? this.name,
       color: color ?? this.color,
       updatedAt: updatedAt ?? this.updatedAt,
       deletedAt: clearDeletedAt ? null : deletedAt ?? this.deletedAt,
-      parentId: clearParentId ? null : parentId ?? this.parentId,
+      parentId: newParentId,
     );
   }
 
@@ -82,7 +93,11 @@ class ActivityCategory {
     if (id is! String || id.isEmpty) {
       throw const FormatException('ActivityCategory.fromMap: id 缺失或非法');
     }
-    final parentId = readNullableString(map['parent_id']);
+    final rawParentId = readNullableString(map['parent_id']);
+    // 空串归一化为 null（顶级）——防止指向不存在父分类的无效父子关系。
+    final parentId = (rawParentId == null || rawParentId.isEmpty)
+        ? null
+        : rawParentId;
     if (parentId == id) {
       throw const FormatException(
         'ActivityCategory.fromMap: 分类不能是自身的父分类（自引用环）',
@@ -143,12 +158,12 @@ class ActivityCategoryLink {
   @override
   int get hashCode => id.hashCode;
 
+  /// copyWith 不允许修改关联键（activityId/categoryId/id）：
+  /// link id 由 activityId+categoryId 稳定派生，键变更 = 新的关联关系，
+  /// 必须通过仓储的稳定 id 工厂重建（避免 id 与关联关系不一致的脏数据）。
   ActivityCategoryLink copyWith({
-    String? id,
     String? userId,
     bool clearUserId = false,
-    String? activityId,
-    String? categoryId,
     bool? isPrimary,
     int? sortOrder,
     DateTime? updatedAt,
@@ -156,10 +171,10 @@ class ActivityCategoryLink {
     bool clearDeletedAt = false,
   }) {
     return ActivityCategoryLink(
-      id: id ?? this.id,
+      id: id,
       userId: clearUserId ? null : userId ?? this.userId,
-      activityId: activityId ?? this.activityId,
-      categoryId: categoryId ?? this.categoryId,
+      activityId: activityId,
+      categoryId: categoryId,
       isPrimary: isPrimary ?? this.isPrimary,
       sortOrder: sortOrder ?? this.sortOrder,
       updatedAt: updatedAt ?? this.updatedAt,

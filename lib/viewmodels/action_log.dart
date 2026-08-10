@@ -19,8 +19,8 @@ enum ActionType {
   categoryUpdate('category_update'),
   categoryDelete('category_delete'),
   /// 未知操作类型（读取到未来版本/其它设备写入的未知值）——避免反序列化时崩溃。
-  /// 注意：重新序列化时会写入 `'unknown'`，原始未知值会丢失（数据损坏场景下
-  /// 接受该损失；正常数据不会命中此分支）。
+  /// 注意：这是**兜底未知值**的保留桶，不保留原始未知值；重新序列化时会写入
+  /// `'unknown'`，原始未知值会丢失（数据损坏场景下接受该损失；正常数据不命中此分支）。
   unknown('unknown');
 
   const ActionType(this.storageValue);

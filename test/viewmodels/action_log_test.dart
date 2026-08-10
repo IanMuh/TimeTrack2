@@ -85,12 +85,43 @@ void main() {
         'activity_id': 789,
         'entry_id': 1011,
         'message': 1213,
+        'device_id': 1415, // 数字 device_id → 回退 'unknown'
       });
       expect(restored.userId, isNull);
       expect(restored.actionType, ActionType.unknown);
       expect(restored.activityId, isNull);
       expect(restored.entryId, isNull);
       expect(restored.message, '');
+      expect(restored.deviceId, 'unknown');
+    });
+
+    test('时间字段传 null / 数值 → FormatException（统一异常契约）', () {
+      // null（键存在但值 null）
+      expect(
+        () => ActionLog.fromMap({
+          'id': 'log1',
+          'updated_at': null,
+          'occurred_at': '2026-08-10T04:00:00Z',
+        }),
+        throwsFormatException,
+      );
+      expect(
+        () => ActionLog.fromMap({
+          'id': 'log1',
+          'updated_at': '2026-08-10T04:00:00Z',
+          'occurred_at': null,
+        }),
+        throwsFormatException,
+      );
+      // 数值（非字符串）
+      expect(
+        () => ActionLog.fromMap({
+          'id': 'log1',
+          'updated_at': 123,
+          'occurred_at': '2026-08-10T04:00:00Z',
+        }),
+        throwsFormatException,
+      );
     });
 
     test('round-trip 保真：全字段断言', () {
@@ -210,6 +241,9 @@ void main() {
       expect(cleared.entryId, isNull);
       expect(cleared.id, 'log1');
       expect(cleared.actionType, ActionType.edit);
+      // clear 标志优先于普通赋值（组合语义）
+      final combo = log.copyWith(userId: 'u2', clearUserId: true);
+      expect(combo.userId, isNull, reason: 'clear 标志无条件优先');
     });
   });
 }

@@ -81,14 +81,14 @@ void main() {
     });
 
     test('构造校验：非法 name / 选项键直接拒绝', () {
-      // name 含空白 → 断言拒绝（多词指令名不允许，避免 toString 歧义）
+      // name 含空白 → ArgumentError（硬校验，release 下同样生效）
       expect(
         () => CommandInvocation(name: 'category create'),
-        throwsA(isA<AssertionError>()),
+        throwsArgumentError,
       );
       expect(
         () => CommandInvocation(name: '  '),
-        throwsA(isA<AssertionError>()),
+        throwsArgumentError,
       );
       // 非法选项键 → ArgumentError（含空白/= /以 - 开头 / 空键）
       expect(

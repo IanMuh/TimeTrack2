@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import '../utils/model_utils.dart';
 
 /// 提醒方式（持久化存储值为小写英文，见 [ReminderMethod.storageValue]）。
@@ -41,7 +39,9 @@ class ProfileSettings {
           reminderTimeOfDayMinutes >= 0 &&
               reminderTimeOfDayMinutes <= maxTimeOfDayMinutes,
         ),
-        assert(mergeNeighborThresholdMinutes >= 0);
+        assert(mergeNeighborThresholdMinutes >= 0 &&
+            mergeNeighborThresholdMinutes <=
+                maxMergeNeighborThresholdMinutes);
 
   static const defaultReminderMinutes = 45;
   static const defaultReminderIntervalMinutes = 10;
@@ -53,6 +53,9 @@ class ProfileSettings {
 
   /// 提醒时刻（分钟）上界：23:59。
   static const maxTimeOfDayMinutes = 23 * 60 + 59;
+
+  /// 相邻未分配条目合并阈值（分钟）上界：24h——超出将近似合并所有相邻条目。
+  static const maxMergeNeighborThresholdMinutes = 24 * 60;
 
   final String? userId;
   final int reminderMinutes;
@@ -133,9 +136,10 @@ class ProfileSettings {
       reminderMethod: reminderMethod ?? this.reminderMethod,
       reminderTimeOfDayMinutes:
           _clampTimeOfDay(reminderTimeOfDayMinutes ?? this.reminderTimeOfDayMinutes),
-      mergeNeighborThresholdMinutes: math.max(
-        0,
+      mergeNeighborThresholdMinutes: _clampMinMax(
         mergeNeighborThresholdMinutes ?? this.mergeNeighborThresholdMinutes,
+        min: 0,
+        max: maxMergeNeighborThresholdMinutes,
       ),
       // timezone 语义上应非空：空/空白串回退当前时区（防损坏数据持久化空值）。
       timezone: _nonEmptyOrFallback(timezone ?? this.timezone,
@@ -175,10 +179,11 @@ class ProfileSettings {
       reminderTimeOfDayMinutes: _clampTimeOfDay(readInt(
           map['reminder_time_of_day_minutes'],
           fallback: defaultReminderTimeOfDayMinutes)),
-      mergeNeighborThresholdMinutes: math.max(
-          0,
+      mergeNeighborThresholdMinutes: _clampMinMax(
           readInt(map['merge_neighbor_threshold_minutes'],
-              fallback: defaultMergeNeighborThresholdMinutes)),
+              fallback: defaultMergeNeighborThresholdMinutes),
+          min: 0,
+          max: maxMergeNeighborThresholdMinutes),
       timezone: _nonEmptyOrFallback(readString(map['timezone']),
           fallback: DateTime.now().timeZoneName),
       updatedAt: readDateTime(map['updated_at']),

@@ -11,6 +11,10 @@ library;
 
 /// 读取布尔字段：兼容 bool、有限数字（0/1）、`'true'`/`'false'`（忽略大小写/空白）与 null。
 /// 非有限数字（NaN/±Infinity）与无法识别的值一律回退 false。
+///
+/// 注意：字符串 `'1'`/`'0'` **不识别**为布尔（仅识别 `'true'`/`'false'`）——若上游
+/// 序列化用 `"0"/"1"` 表达布尔，字段会回退 false 并在 round-trip 后丢失标记；
+/// 这是刻意设计（存储格式统一为 0/1 数字与 true/false），如未来对接此类数据源需在此扩展。
 bool readBool(Object? value) {
   if (value is bool) return value;
   if (value is num && value.isFinite) return value != 0;
@@ -79,10 +83,15 @@ DateTime? readNullableDateTime(Object? value) {
   return null;
 }
 
-/// 判断 ISO8601 字符串是否携带时区偏移（`Z`/`z` 或 `±HH:MM`）。
+/// 判断 ISO8601 字符串是否携带时区偏移。
 ///
-/// 时间字段要求必须携带偏移：无偏移字符串（如 `2026-08-10T04:00:00`）会被
-/// [DateTime.parse] 解释为读取设备本地时间，跨设备得到不同绝对时刻，破坏 LWW 比较。
-final timezoneOffsetPattern = RegExp(r'[zZ]$|[+-]\d{2}:\d{2}$');
-
-bool hasTimezoneOffset(String text) => timezoneOffsetPattern.hasMatch(text);
+/// 判定方式：`DateTime.parse` 对携带偏移（`Z`/`±HH:MM`/`±HHMM`/`±HH`）的时间串
+/// 解析结果为 UTC（`isUtc == true`），无偏移时间串按本地时间解析（`isUtc == false`）。
+/// 用解析结果而非正则匹配，可避免 `2026-08-10` 中 `-10` 被误判为偏移等边界问题。
+/// 时间字段要求必须携带偏移：无偏移字符串会被 `DateTime.parse` 解释为读取设备
+/// 本地时间，跨设备得到不同绝对时刻，破坏 LWW 比较。
+bool hasTimezoneOffset(String text) {
+  final parsed = DateTime.tryParse(text);
+  if (parsed == null) return false;
+  return parsed.isUtc;
+}

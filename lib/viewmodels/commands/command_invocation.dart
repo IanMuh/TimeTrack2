@@ -10,23 +10,22 @@ library;
 /// - `args` / `options` 以不可变视图保存，防止构造后被外部修改（防篡改/确定性）。
 /// - 解析器**禁止重复选项**（同名 `--key` 出现多次视为解析错误），故 `options` 用
 ///   单值 Map 即可表达；文档契约由此收敛。
-/// - `toString()` 输出近 CLI 文本：含空白/引号的参数与选项值会用双引号包裹（内部
-///   双引号转义），可被 `command_parser` 往返解析；`options` 按键字典序输出，确定性。
+/// - `toString()` 输出近 CLI 文本：含空白/引号/反斜杠/空串/前导横线的参数与选项值
+///   会用双引号包裹（转义顺序：反斜杠 → 双引号），可被 `command_parser` 往返解析；
+///   `options` 按键字典序输出，确定性。
+/// - `name` 必须为单 token（不允许多词/前后空白），多词指令名用点分/连字符形式
+///   （如 `category_create`）。
 class CommandInvocation {
   CommandInvocation({
-    required this.name,
+    required String name,
     List<String> args = const [],
     Map<String, String> options = const {},
     this.raw,
-  })  : assert(name.trim().isNotEmpty, 'name 不能为空白'),
-        assert(!name.trim().contains(RegExp(r'\s')),
-            'name 必须为单 token（多词指令名请用点分/连字符形式）'),
+  })  : name = _validateName(name),
         args = List.unmodifiable(args),
         options = Map.unmodifiable(options) {
     for (final key in options.keys) {
-      if (key.isEmpty ||
-          key.contains(RegExp(r'\s|=|"|\\')) ||
-          key.startsWith('-')) {
+      if (!_validOptionKeyPattern.hasMatch(key) || key.startsWith('-')) {
         throw ArgumentError.value(
           key,
           'options',
@@ -36,7 +35,7 @@ class CommandInvocation {
     }
   }
 
-  /// 归一化后的指令名（如 `switch`、`category create`）。
+  /// 归一化后的指令名（如 `switch`、`category_create`）。
   final String name;
 
   /// 位置参数（如 `switch 学习` → `['学习']`）。
@@ -48,9 +47,29 @@ class CommandInvocation {
   /// 原始输入文本（供日志/追溯，可为空）。
   final String? raw;
 
+  /// name 硬校验（release 下同样生效）：trim 后非空、无内部空白、无前后空白。
+  static String _validateName(String name) {
+    if (name != name.trim() ||
+        name.trim().isEmpty ||
+        name.trim().contains(RegExp(r'\s'))) {
+      throw ArgumentError.value(
+        name,
+        'name',
+        '指令名必须为单 token（无前后/内部空白，多词请用点分/连字符形式）',
+      );
+    }
+    return name.trim();
+  }
+
+  /// 合法选项键：非空、仅 [0-9A-Za-z_.-]（不含空白/等号/引号/反斜杠）。
+  static final _validOptionKeyPattern = RegExp(r'^[0-9A-Za-z_.-]+$');
+
+  /// 需要加引号包裹的字符（空白/双引号/反斜杠）。
+  static final _needsQuotePattern = RegExp(r'\s|"|\\');
+
   @override
   String toString() {
-    final buffer = StringBuffer(_quoteIfNeeded(name));
+    final buffer = StringBuffer(name);
     for (final arg in args) {
       buffer.write(' ${_quoteIfNeeded(arg)}');
     }
@@ -61,12 +80,12 @@ class CommandInvocation {
     return buffer.toString();
   }
 
-  /// 含空白/引号/空串/前导横线的值为保证可往返解析，用双引号包裹；
+  /// 含空白/引号/反斜杠/空串/前导横线的值为保证可往返解析，用双引号包裹；
   /// 转义顺序：先反斜杠（`\` → `\\`）再双引号（`"` → `\"`），保证无损还原。
   static String _quoteIfNeeded(String value) {
     final needsQuote = value.isEmpty ||
         value.startsWith('-') ||
-        value.contains(RegExp(r'\s|"'));
+        value.contains(_needsQuotePattern);
     if (!needsQuote) return value;
     return '"${value.replaceAll('\\', r'\\').replaceAll('"', r'\"')}"';
   }
@@ -132,9 +151,11 @@ sealed class CommandResult {
 
 /// 执行成功；[data] 为可选返回数据（类型化），[message] 为可选描述（供日志/提示）。
 ///
-/// 注意：`data` 为 List/Map 等集合类型时，[operator ==] 采用 Dart 默认引用相等
-/// （值相等仅对不可变标量/值类型有意义）；`toString` 会输出 `data` 内容，
-/// 若承载敏感信息（token/路径等）请勿直接写入日志。
+/// 注意：
+/// - `data` 为 List/Map 等集合类型时，[operator ==] 采用 Dart 默认引用相等
+///   （值相等仅对不可变标量/值类型有意义）。
+/// - `toString` **不输出 data 内容**（只输出类型/状态与 message）——data 可能承载
+///   token/路径等敏感信息，直接进日志会泄露；需要展示 data 时请显式读取字段。
 class CommandSuccess<T> extends CommandResult {
   const CommandSuccess({this.data, this.message});
 
@@ -142,8 +163,7 @@ class CommandSuccess<T> extends CommandResult {
   final String? message;
 
   @override
-  String toString() =>
-      'CommandSuccess(data: $data, message: $message)';
+  String toString() => 'CommandSuccess<T>(message: $message)';
 
   @override
   bool operator ==(Object other) =>

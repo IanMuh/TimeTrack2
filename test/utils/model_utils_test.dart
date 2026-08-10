@@ -34,6 +34,7 @@ void main() {
       expect(readString(123), '', reason: '非 String 回退空串');
       expect(readString('abc', fallback: 'x'), 'abc');
       expect(readString(123, fallback: 'x'), 'x');
+      expect(readString(null, fallback: 'x'), 'x', reason: 'null + 显式 fallback');
     });
 
     test('可空版本：非 String 一律 null', () {
@@ -77,6 +78,16 @@ void main() {
       // 带 ±HH:MM 偏移同样接受
       final offset = readDateTime('2026-08-10T04:00:00+08:00');
       expect(offset.isAtSameMomentAs(DateTime.utc(2026, 8, 9, 20)), isTrue);
+      // 紧凑偏移（+0800 / +08）与空格分隔、带毫秒的 ISO8601 均接受
+      final compact = readDateTime('2026-08-10T04:00:00+0800');
+      expect(compact.isAtSameMomentAs(DateTime.utc(2026, 8, 9, 20)), isTrue);
+      final short = readDateTime('2026-08-10T04:00:00+08');
+      expect(short.isAtSameMomentAs(DateTime.utc(2026, 8, 9, 20)), isTrue);
+      final space = readDateTime('2026-08-10 04:00:00Z');
+      expect(space.isAtSameMomentAs(DateTime.utc(2026, 8, 10, 4)), isTrue);
+      final millis = readDateTime('2026-08-10T04:00:00.123Z');
+      expect(millis.isAtSameMomentAs(DateTime.utc(2026, 8, 10, 4, 0, 0, 123)),
+          isTrue);
     });
 
     test('无时区偏移字符串：非法（避免跨设备解释为不同绝对时刻）', () {
@@ -85,6 +96,7 @@ void main() {
         () => readDateTime('2026-08-10T04:00:00'),
         throwsFormatException,
       );
+      // 仅日期（`-10` 是日部分，不是时区偏移）同样判非法
       expect(
         () => readDateTime('2026-08-10'),
         throwsFormatException,

@@ -7,7 +7,7 @@ import '../utils/model_utils.dart';
 ///   活动删除或改名后条目仍能还原展示（计划保留不变式 4）。
 /// - `deletedAt` 替代老项目的 is_deleted 布尔位。
 class TimeEntry {
-  const TimeEntry({
+  TimeEntry({
     required this.id,
     this.userId,
     required this.activityId,
@@ -19,7 +19,10 @@ class TimeEntry {
     required this.deviceId,
     required this.updatedAt,
     this.deletedAt,
-  });
+  }) : assert(
+          endAt == null || !endAt.isBefore(startAt),
+          'end_at 不能早于 start_at',
+        );
 
   final String id;
   final String? userId;
@@ -150,17 +153,21 @@ class TimeEntry {
     if (id is! String || id.isEmpty) {
       throw const FormatException('TimeEntry.fromMap: id 缺失或非法');
     }
-    // start_at 语义必填且必须携带时区偏移（Z/±HH:MM）：缺失、无偏移或不可解析
+    // start_at 语义必填且必须携带时区偏移（Z/±HH:MM 等）：缺失、无偏移或不可解析
     // 即抛错，绝不伪造"当前时刻"的幽灵条目。
     final startAtValue = map['start_at'];
-    final startAt = startAtValue is String &&
-            hasTimezoneOffset(startAtValue.trim())
-        ? DateTime.tryParse(startAtValue)
+    final startAtText = startAtValue is String ? startAtValue.trim() : null;
+    final startAt = startAtText != null && hasTimezoneOffset(startAtText)
+        ? DateTime.tryParse(startAtText)
         : null;
     if (startAt == null) {
       throw const FormatException('TimeEntry.fromMap: start_at 缺失或非法');
     }
-    final endAt = readNullableDateTime(map['end_at']);
+    // end_at 区分"缺失(null，运行中)"与"存在但非法(抛错)"——损坏的非空值
+    // 不能静默当作运行中（否则已结束条目被误判 isRunning，时长无限增长）。
+    final endAt = map['end_at'] == null
+        ? null
+        : readDateTime(map['end_at']);
     // 时间顺序不变量：end_at 早于 start_at 是脏数据，会令 overlaps/统计失真——
     // 严格拒绝而非静默容忍。
     if (endAt != null && endAt.isBefore(startAt)) {
