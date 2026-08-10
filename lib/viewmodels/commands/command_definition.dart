@@ -18,10 +18,11 @@ class CommandDefinition {
     this.description = '',
   })  : assert(minPositionalArgs >= 0),
         assert(maxPositionalArgs >= minPositionalArgs),
-        assert(_isSingleToken(name), 'name 必须为单 token（无空白/引号/反斜杠，不以 - 开头）'),
+        assert(_isSingleToken(name),
+            'name 必须为单 token（无空白/双引号/反斜杠，不以 - 开头）'),
         assert(
           aliases.every(_isSingleToken),
-          'aliases 必须均为单 token（无空白/引号/反斜杠，不以 - 开头）',
+          'aliases 必须均为单 token（无空白/双引号/反斜杠，不以 - 开头）',
         ) {
     // 单 token 运行时硬校验（release 下 assert 被剥离，此处兜底）：
     // 解析器按空白分词，非单 token 触发名永远不可达——配置错误早失败。
@@ -35,10 +36,13 @@ class CommandDefinition {
     }
   }
 
-  /// 单 token 校验（const 构造可用）：非空、无空白/引号/反斜杠、不以 `-` 开头。
+  /// 非法触发名字符集（空白/双引号/反斜杠）——与解析器引号语义一致。
+  static final _invalidTokenChars = RegExp(r'\s|"|\\');
+
+  /// 单 token 校验：非空、无空白/双引号/反斜杠、不以 `-` 开头。
   static bool _isSingleToken(String value) {
     return value.isNotEmpty &&
-        !value.contains(RegExp(r'\s|"|\\')) &&
+        !value.contains(_invalidTokenChars) &&
         !value.startsWith('-');
   }
 

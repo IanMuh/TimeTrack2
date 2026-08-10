@@ -75,6 +75,9 @@ class CommandParser {
   /// 已注册指令定义（供诊断/分发器枚举）。
   List<CommandDefinition> get definitions => _definitions;
 
+  /// 非法选项键字符集（空白/双引号/反斜杠）——与 CommandDefinition._isSingleToken 一致。
+  static final _invalidKeyChar = RegExp(r'\s|"|\\');
+
   /// 解析指令文本。
   ///
   /// 成功返回归一化后的 [CommandInvocation]；失败返回 [AppFailure] 并携带
@@ -107,9 +110,11 @@ class CommandParser {
         }
         final key = raw.substring(2, equals);
         final valueRaw = raw.substring(equals + 1);
-        if (key.isEmpty || key.startsWith('-') || key.contains(RegExp(r'\s|"|\\'))) {
+        if (key.isEmpty ||
+            key.startsWith('-') ||
+            key.contains(_invalidKeyChar)) {
           return AppFailure(
-            '选项格式非法：$raw（键不能为空/以 - 开头/含空白引号反斜杠）',
+            '选项格式非法：$raw（键不能为空/以 - 开头/含空白双引号反斜杠）',
           );
         }
         final value = _unquoteToken(valueRaw);

@@ -107,4 +107,34 @@ void main() {
       );
     });
   });
+
+  group('构造器 prerelease 校验（release 下 assert 被剥离的兜底）', () {
+    test('非法 prerelease 直接构造 → ArgumentError', () {
+      expect(
+        () => AppVersion(major: 1, minor: 2, patch: 3, prerelease: '01'),
+        throwsArgumentError,
+      );
+      expect(
+        () => AppVersion(major: 1, minor: 2, patch: 3, prerelease: 'a..b'),
+        throwsArgumentError,
+      );
+    });
+
+    test('合法 prerelease 直接构造正常', () {
+      expect(
+        AppVersion(major: 1, minor: 2, patch: 3, prerelease: '0').toString(),
+        '1.2.3-0',
+      );
+      expect(
+        AppVersion(major: 1, minor: 2, patch: 3, prerelease: 'alpha.1')
+            .toString(),
+        '1.2.3-alpha.1',
+      );
+      // 空串视为无 prerelease
+      expect(
+        AppVersion(major: 1, minor: 2, patch: 3, prerelease: '').isPrerelease,
+        isFalse,
+      );
+    });
+  });
 }

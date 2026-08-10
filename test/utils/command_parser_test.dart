@@ -204,11 +204,20 @@ void main() {
       );
     });
 
-    test('选项格式非法（--x / --=v / --key=）', () {
-      for (final bad in ['add 开会 --x', 'add 开会 --=v', 'add 开会 --start=']) {
+    test('选项格式非法（--x / --=v / --key= / 键含非法字符）', () {
+      for (final bad in [
+        'add 开会 --x', 'add 开会 --=v', 'add 开会 --start=',
+        'add 开会 ---k=v', // 键以 - 开头
+        r'add 开会 --a\b=v', // 键含反斜杠
+        'add 开会 --a b=v', // 键含空白
+      ]) {
         final result = _parser().parse(bad);
         expect(result.isSuccess, isFalse, reason: '$bad 应被拒绝');
+        expect(failureMessage(result), contains('选项格式非法'));
       }
+      // 键含单引号：解析器不认单引号 → 按"不支持的选项"拒绝（仍为明确失败）
+      final singleQuote = _parser().parse("add 开会 --a'b=v");
+      expect(singleQuote.isSuccess, isFalse);
     });
   });
 
@@ -271,6 +280,21 @@ void main() {
         () => CommandParser(definitions: [
           CommandDefinition(name: 'a', aliases: ['x']),
           CommandDefinition(name: 'b', aliases: ['x']),
+        ]),
+        throwsArgumentError,
+      );
+      // 命令名直接重复
+      expect(
+        () => CommandParser(definitions: [
+          CommandDefinition(name: 'a'),
+          CommandDefinition(name: 'a'),
+        ]),
+        throwsArgumentError,
+      );
+      // 同一命令内部别名自重复
+      expect(
+        () => CommandParser(definitions: [
+          CommandDefinition(name: 'a', aliases: ['x', 'x']),
         ]),
         throwsArgumentError,
       );

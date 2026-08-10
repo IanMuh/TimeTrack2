@@ -74,6 +74,7 @@ final class AppSuccess<T> extends AppResult<T> {
 }
 
 /// 失败结果；[message] 为可读的失败原因（供提示/日志），非空。
+/// （const 构造限制，仅拦截完全空串；纯空白消息由调用方保证语义。）
 final class AppFailure<T> extends AppResult<T> {
   const AppFailure(this.message) : assert(message != '');
 

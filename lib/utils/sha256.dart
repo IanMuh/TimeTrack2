@@ -26,15 +26,15 @@ Future<String> sha256File(
   final collector = _DigestCollector();
   final converter = crypto.sha256.startChunkedConversion(collector);
   var bytesRead = 0;
-  onProgress?.call(0, total);
   try {
+    onProgress?.call(0, total);
     await for (final chunk in file.openRead()) {
       converter.add(chunk);
       bytesRead += chunk.length;
       onProgress?.call(bytesRead, total);
     }
   } finally {
-    // 无论成功/异常都关闭 converter，保证哈希流状态完整。
+    // 无论成功/异常都关闭 converter（回调异常同样走 finally），保证哈希流状态完整。
     converter.close();
   }
   return collector.digest!.toString();

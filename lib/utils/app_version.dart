@@ -35,10 +35,12 @@ class AppVersion implements Comparable<AppVersion> {
   final String? prerelease;
   final String? buildMetadata;
 
-  /// pre-release 标识符格式（数字段禁前导零），供构造器断言。
-  static final _prereleaseFormat = RegExp(
-    r'^(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9A-Za-z-]*))*$',
-  );
+  /// pre-release 标识符格式源串（数字段禁前导零），
+  /// 供构造器校验与 [_pattern] 共享——两处规则唯一事实来源，防漂移。
+  static final _prereleaseSource =
+      r'(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9A-Za-z-]*))*';
+
+  static final _prereleaseFormat = RegExp('^$_prereleaseSource\$');
 
   bool get isPrerelease => prerelease != null && prerelease!.isNotEmpty;
 
@@ -76,10 +78,12 @@ class AppVersion implements Comparable<AppVersion> {
   }
 
   /// 严格 SemVer：主版本号无前导零，pre-release 段数字标识符同样禁前导零。
+  /// `-` 前缀与 pre-release 整体作为可选组（group 4 为 pre-release，group 5 为 build）。
+  /// 注意：raw string 中 `$` 插值不生效，此处用普通字符串拼接 `_prereleaseSource`。
   static final _pattern = RegExp(
-    r'^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)'
-    r'(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9A-Za-z-]*))*))?'
-    r'(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$',
+    '^v?(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)'
+    '(?:-($_prereleaseSource))?'
+    '(?:\\+([0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?\$',
   );
 
   @override

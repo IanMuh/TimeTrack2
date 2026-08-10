@@ -107,6 +107,10 @@ void main() {
       expect(const AppFailure<int>('x').toString(), 'AppFailure(message: x)');
     });
 
+    test('AppFailure 非空约束：空串消息断言拒绝', () {
+      expect(() => AppFailure<int>(''), throwsA(isA<AssertionError>()));
+    });
+
     test('泛型类型保留', () {
       const str = AppSuccess<String>('abc');
       expect(str.value, 'abc');
