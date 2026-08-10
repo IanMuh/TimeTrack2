@@ -254,7 +254,8 @@ mixin RepositoryMappings {
     final utc = value.toUtc();
     final iso = utc.toIso8601String(); // 恒形如 ...T00:00:00.123Z / .123456Z / .000Z
     // 小数部分补到 6 位微秒：3 位（毫秒/整秒）补 3 个零，6 位原样。
-    final match = RegExp(r'\.(\d{3})(\d{3})?Z\$').firstMatch(iso);
+    // 注：raw string 中 `$` 原样传给正则 = 结束锚点；写 `\$` 反而匹配字面 $（恒不命中）。
+    final match = RegExp(r'\.(\d{3})(\d{3})?Z$').firstMatch(iso);
     if (match == null) return iso; // 理论不可达（Dart 恒输出毫秒段）
     final micros = match.group(1)! + (match.group(2) ?? '000');
     return iso.replaceRange(match.start, match.end, '.${micros}Z');

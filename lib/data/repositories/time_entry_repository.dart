@@ -169,7 +169,8 @@ class TimeEntryRepository with RepositoryMappings {
       }
       if (running.activityId == unassigned.id) {
         await mergeAdjacentUnassignedEntries(unassigned.id, updatedAt: now);
-        return AppSuccess(running);
+        // 合并可能把更早的未分配条目并入运行段（运行行被软删）——重读最新运行条目。
+        return AppSuccess(await runningEntry() ?? running);
       }
       if (running.startAt.isAfter(now)) {
         // 未来条目：软删后开始未分配。
@@ -217,7 +218,8 @@ class TimeEntryRepository with RepositoryMappings {
       }
       final now = _now();
       final deviceId = await _ensureDeviceId();
-      final snapshot = await _activityRepo.entryWithActivitySnapshot(
+      // _saveEntry 内部统一补快照（此处不重复调用避免冗余 DB 往返）。
+      final saved = await _saveEntry(
         TimeEntry(
           id: _uuid.v4(),
           activityId: activityId,
@@ -227,8 +229,8 @@ class TimeEntryRepository with RepositoryMappings {
           deviceId: deviceId,
           updatedAt: now,
         ),
+        cutOverlaps: true,
       );
-      final saved = await _saveEntry(snapshot, cutOverlaps: true);
       await _insertActionLog(
         actionType: ActionType.manual,
         activityId: activityId,
@@ -398,7 +400,8 @@ class TimeEntryRepository with RepositoryMappings {
         final segmentEnd = DateTime(cursor.year, cursor.month, cursor.day + 1); // 下一本地零点（DST 安全）
         if (cursor.isBefore(segmentEnd)) {
           final segment = running.copyWith(
-            id: _uuid.v4(),
+            // 历史切段用确定性派生 id（重复滚转可覆盖同段）。
+            id: _derivedSegmentId(running.id, cursor),
             startAt: cursor,
             endAt: segmentEnd,
             updatedAt: now,
@@ -502,7 +505,18 @@ class TimeEntryRepository with RepositoryMappings {
         : _splitClosedEntryByLocalDay(entry, entry.updatedAt);
   }
 
-  /// 已结束条目按本地日切段（保留原 id 给首段，其余新 id）。
+  /// 确定性派生段 id：父条目 id + 段起点（UTC ISO8601）的 uuid v5。
+  ///
+  /// 保证同一逻辑条目在重复保存/LWW 覆盖时，同一日段命中同一 id（覆盖而非
+  /// 叠加），避免随机 uuid 造成的"旧段残留 + 新段并存"重叠重复数据。
+  String _derivedSegmentId(String parentId, DateTime segmentStart) {
+    return _uuid.v5(
+      Namespace.url.value,
+      'timetrack:entry-segment:$parentId:${utcString(segmentStart)}',
+    );
+  }
+
+  /// 已结束条目按本地日切段（保留原 id 给首段，其余段确定性派生）。
   List<TimeEntry> _splitClosedEntryByLocalDay(
     TimeEntry entry,
     DateTime updatedAt,
@@ -518,7 +532,9 @@ class TimeEntryRepository with RepositoryMappings {
       if (cursor.isBefore(segmentEnd)) {
         segments.add(
           entry.copyWith(
-            id: first ? entry.id : _uuid.v4(),
+            // 首段保留原 id；后续段用确定性派生（父 id + 段起点）——重复 LWW
+            // 覆盖可命中同段替换，避免随机 id 造成旧段残留/重叠重复段。
+            id: first ? entry.id : _derivedSegmentId(entry.id, cursor),
             startAt: cursor,
             endAt: segmentEnd,
             updatedAt: updatedAt,

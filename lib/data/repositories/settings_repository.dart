@@ -39,15 +39,18 @@ class SettingsRepository with RepositoryMappings {
     ProfileSettings remote,
   ) async {
     try {
-      final row = await _settingsRow();
-      final local = row == null ? null : settingsFromRow(row);
-      if (local == null || local.updatedAt.isBefore(remote.updatedAt)) {
-        await database.into(database.profileSettings).insertOnConflictUpdate(
-              settingsToCompanion(remote),
-            );
-        return AppSuccess(remote);
-      }
-      return AppSuccess(local);
+      // LWW 读-判-写同一事务：防比较后写入前本地新写入被旧远端覆盖。
+      return await database.transaction(() async {
+        final row = await _settingsRow();
+        final local = row == null ? null : settingsFromRow(row);
+        if (local == null || local.updatedAt.isBefore(remote.updatedAt)) {
+          await database.into(database.profileSettings).insertOnConflictUpdate(
+                settingsToCompanion(remote),
+              );
+          return AppSuccess(remote);
+        }
+        return AppSuccess(local);
+      });
     } catch (e) {
       return AppFailure('同步设置失败：$e');
     }

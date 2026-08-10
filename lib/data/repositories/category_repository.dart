@@ -101,11 +101,15 @@ class CategoryRepository with RepositoryMappings {
           return AppFailure('父分类不存在：$trimmedParent');
         }
       }
+      final trimmedName = name.trim();
+      if (trimmedName.isEmpty) {
+        return const AppFailure('分类名不能为空');
+      }
       final now = DateTime.now();
       final category = ActivityCategory(
         id: _uuid.v4(),
         userId: userId,
-        name: name.trim(),
+        name: trimmedName,
         color: color,
         updatedAt: now,
         parentId: trimmedParent,
@@ -143,8 +147,12 @@ class CategoryRepository with RepositoryMappings {
           return AppFailure('父分类不存在：$newParent');
         }
       }
+      final effectiveName = (name ?? category.name).trim();
+      if (effectiveName.isEmpty) {
+        return const AppFailure('分类名不能为空');
+      }
       final updated = category.copyWith(
-        name: name ?? category.name,
+        name: effectiveName,
         color: color ?? category.color,
         parentId: newParent,
         clearParentId: clearParentId && newParent == null,
@@ -187,21 +195,19 @@ class CategoryRepository with RepositoryMappings {
           deletedCategories.add(deleted);
         }
 
-        // 3) 软删涉及分类（含自身）的全部 links。
-        for (final id in allIds) {
-          final rows = await _linkRowsByCategoryId(id, executor: database);
-          for (final row in rows) {
-            if (row.deletedAt != null) continue;
-            final model = linkFromRow(row);
-            final deleted = model.copyWith(
-              deletedAt: updatedAt,
-              updatedAt: updatedAt,
-            );
-            await database.into(database.activityCategoryLinks).insertOnConflictUpdate(
-                  linkToCompanion(deleted),
-                );
-            deletedLinks.add(deleted);
-          }
+        // 3) 软删涉及分类（含自身）的全部 links（批量 IN 查询避免 N+1）。
+        final linkRows = await _linkRowsByCategoryIds(allIds, executor: database);
+        for (final row in linkRows) {
+          if (row.deletedAt != null) continue;
+          final model = linkFromRow(row);
+          final deleted = model.copyWith(
+            deletedAt: updatedAt,
+            updatedAt: updatedAt,
+          );
+          await database.into(database.activityCategoryLinks).insertOnConflictUpdate(
+                linkToCompanion(deleted),
+              );
+          deletedLinks.add(deleted);
         }
       });
 
@@ -319,7 +325,9 @@ class CategoryRepository with RepositoryMappings {
       final local = await _categoryById(remote.id);
       if (local == null || local.updatedAt.isBefore(remote.updatedAt)) {
         final parentId = remote.parentId;
-        if (parentId != null) {
+        // 远端已删除时跳过父校验：删除永远赢——父缺失/已删不应阻塞删除落地
+        //（否则远端删除残留本地，违背 LWW 语义）。
+        if (parentId != null && !remote.isDeleted) {
           final descendants = await _descendantIds(remote.id);
           if (descendants.contains(parentId) || parentId == remote.id) {
             return const AppFailure('同步分类失败：parentId 指向自身或子孙（环）');
@@ -408,12 +416,14 @@ class CategoryRepository with RepositoryMappings {
     return row == null ? null : categoryFromRow(row);
   }
 
-  Future<List<ActivityCategoryLinkRow>> _linkRowsByCategoryId(
-    String categoryId, {
+  /// 批量按分类 id 查 links（递归软删用，避免 N+1）。
+  Future<List<ActivityCategoryLinkRow>> _linkRowsByCategoryIds(
+    Set<String> categoryIds, {
     required AppDatabase executor,
   }) async {
-    final query = executor.select(database.activityCategoryLinks)
-      ..where((t) => t.categoryId.equals(categoryId));
+    if (categoryIds.isEmpty) return const [];
+    final query = executor.select(executor.activityCategoryLinks)
+      ..where((t) => t.categoryId.isIn(categoryIds));
     return query.get();
   }
 

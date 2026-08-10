@@ -400,6 +400,7 @@ void main() {
       final workActivity = await seedWork();
       final start = DateTime(2026, 8, 9, 23, 0); // 昨天 23:00 开始运行
       await h.entries.switchToActivity(workActivity.id, at: start);
+      final originalId = (await h.entries.runningEntry())!.id;
       // 今天触发任何命令 → 滚转
       final now = DateTime(2026, 8, 10, 8, 0);
       await h.entries.rolloverRunningEntriesIfNeeded(at: now);
@@ -410,6 +411,8 @@ void main() {
       expect(day1.single.endAt!.isAtSameMomentAs(DateTime(2026, 8, 10, 0, 0)), isTrue);
       expect(day2.length, 1);
       expect(day2.single.isRunning, isTrue, reason: '保留运行段');
+      // 运行段必须保留原 id（LWW 按 id 匹配，改 id 会与他端运行段并存产生双运行）
+      expect(day2.single.id, originalId, reason: '滚转后运行段保留原 id');
     });
 
     test('相邻未分配合并：连续未分配条目合成一条（note 换行去重）', () async {
@@ -444,6 +447,55 @@ void main() {
       );
       // note 换行去重合并
       expect(unassignedEntries.single.note, '一段\n二段');
+      // 相同 note 只保留一条（去重而非简单拼接）
+      await h.entries.createManualEntry(
+        activityId: unassigned.id,
+        startAt: DateTime(2026, 8, 10, 11, 0),
+        endAt: DateTime(2026, 8, 10, 11, 30),
+        note: '重复',
+      );
+      await h.entries.createManualEntry(
+        activityId: unassigned.id,
+        startAt: DateTime(2026, 8, 10, 11, 30),
+        endAt: DateTime(2026, 8, 10, 12, 0),
+        note: '重复',
+      );
+      // 相同 note 的两条相邻条目合并时整体去重（_mergedNotes 语义：仅当两条
+      // 完整 note 相同才去重，非按行拆分）。
+      await h.entries.createManualEntry(
+        activityId: unassigned.id,
+        startAt: DateTime(2026, 8, 10, 12, 0),
+        endAt: DateTime(2026, 8, 10, 12, 30),
+        note: '相同备注',
+      );
+      await h.entries.createManualEntry(
+        activityId: unassigned.id,
+        startAt: DateTime(2026, 8, 10, 12, 30),
+        endAt: DateTime(2026, 8, 10, 13, 0),
+        note: '相同备注',
+      );
+      await h.entries.mergeAdjacentUnassignedEntries(unassigned.id);
+      // 独立小场景验证整体 note 去重：两条完整 note 相同的相邻条目合并后
+      // 只保留一条（_mergedNotes 按完整 note 字符串去重，非按行拆分）。
+      await h.entries.createManualEntry(
+        activityId: unassigned.id,
+        startAt: DateTime(2026, 8, 10, 14, 0),
+        endAt: DateTime(2026, 8, 10, 14, 30),
+        note: '完全相同',
+      );
+      await h.entries.createManualEntry(
+        activityId: unassigned.id,
+        startAt: DateTime(2026, 8, 10, 14, 30),
+        endAt: DateTime(2026, 8, 10, 15, 0),
+        note: '完全相同',
+      );
+      await h.entries.mergeAdjacentUnassignedEntries(unassigned.id);
+      final dedupDay = await h.entries.entriesForDay(DateTime(2026, 8, 10));
+      final sameNote = dedupDay
+          .where((e) => e.activityId == unassigned.id && e.startAt.hour == 14)
+          .single;
+      expect(sameNote.note, '完全相同',
+          reason: '两条完整 note 相同的相邻条目合并后只保留一条');
       // 中间隔其他条目的未分配不合并（工作条目 9:30-10:00 分隔）
       await h.entries.createManualEntry(
         activityId: workActivity.id,
@@ -459,10 +511,24 @@ void main() {
       );
       await h.entries.mergeAdjacentUnassignedEntries(unassigned.id);
       final after = await h.entries.entriesForDay(DateTime(2026, 8, 10));
+      // 被工作条目（9:30-10:00）分隔的 9:00-9:30 与 10:00-11:00 两段不合并——
+      // 各自保持独立（加上 14:00 的 dedup 段共 3 条未分配）。
+      final separated = after
+          .where((e) => e.activityId == unassigned.id)
+          .toList();
+      expect(separated.length, 3);
       expect(
-        after.where((e) => e.activityId == unassigned.id).length,
-        2,
-        reason: '工作条目分隔的两条未分配不合并',
+        separated.any((e) =>
+            e.startAt.isAtSameMomentAs(DateTime(2026, 8, 10, 9, 0)) &&
+            e.endAt!.isAtSameMomentAs(DateTime(2026, 8, 10, 9, 30))),
+        isTrue,
+        reason: '9:00-9:30 段保持独立（工作条目分隔，未与 10:00 段合并）',
+      );
+      expect(
+        separated.any((e) =>
+            e.startAt.isAtSameMomentAs(DateTime(2026, 8, 10, 10, 0))),
+        isTrue,
+        reason: '10:00-11:00 段保持独立',
       );
     });
 

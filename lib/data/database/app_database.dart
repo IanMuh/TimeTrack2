@@ -233,7 +233,12 @@ class AppDatabase extends _$AppDatabase {
     );
     await customStatement(
       'CREATE INDEX IF NOT EXISTS idx_activity_category_links_category_active '
-      'ON activity_category_links (category_id, deleted_at) WHERE deleted_at IS NULL',
+      'ON activity_category_links (category_id) WHERE deleted_at IS NULL',
+    );
+    // 分类 parent_id 普通索引（递归 CTE 需穿透已删节点，不能用部分索引）。
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_activity_categories_parent '
+      'ON activity_categories (parent_id)',
     );
     await customStatement(
       'CREATE INDEX IF NOT EXISTS idx_action_logs_active_occurred '
