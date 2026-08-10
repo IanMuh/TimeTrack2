@@ -51,6 +51,9 @@ void main() {
       expect(formatDurationCompact(const Duration(minutes: -45)), '-45m');
       expect(formatDurationCompact(const Duration(minutes: -1, seconds: -30)),
           '-1m');
+      // 不足整分钟的负时长：截断为 0 → 输出 0m（不产生 -0m）
+      expect(formatDurationCompact(const Duration(seconds: -59)), '0m');
+      expect(formatDurationCompact(const Duration(seconds: -30)), '0m');
     });
   });
 
@@ -80,9 +83,15 @@ void main() {
       expect(parseTimeOfDay('上午12点'), 0, reason: '上午12点 = 0 点');
       expect(parseTimeOfDay('晚上12点'), 0,
           reason: '晚上12点 = 午夜 0 点（中文直觉）');
-      expect(parseTimeOfDay('12点'), 0, reason: '无修饰 12点 = 0 点');
+      expect(parseTimeOfDay('12点'), 12 * 60,
+          reason: '无修饰 12点 = 中午 12:00（与 HH:MM 的 12:30 语义一致）');
       expect(parseTimeOfDay('0点'), 0, reason: '无修饰 0点 合法（24h 制 0-23）');
-      expect(parseTimeOfDay('12点30分'), 30, reason: '无修饰 12点30分 = 0:30');
+      expect(parseTimeOfDay('12点30分'), 12 * 60 + 30,
+          reason: '无修饰 12点30分 = 12:30');
+      expect(parseTimeOfDay('晚上12点30分'), 30,
+          reason: '晚上12点30分 = 0:30（午夜后）');
+      expect(parseTimeOfDay('下午12点30分'), 12 * 60 + 30);
+      expect(parseTimeOfDay('上午12点30分'), 30);
     });
 
     test('12 小时制歧义边界（HH:MM 无后缀）', () {

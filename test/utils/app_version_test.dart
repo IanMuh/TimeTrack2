@@ -26,11 +26,14 @@ void main() {
       for (final bad in [
         '', 'abc', '1.2', '1.2.3.4', '1.2.3-beta..1', '01.2.3', '1.02.3',
         '1.2.03', '1.2.3-01', '1.2.3-', '1.2.3+', '1.2.3-pre_1',
-        '1.2.3-pre..1',
+        '1.2.3-pre..1', 'V1.2.3', // 大写 V 前缀拒绝
+        '1.2.3+build.', '1.2.3+build..1', '1.2.3+a+b',
       ]) {
         expect(() => AppVersion.parse(bad), throwsFormatException,
             reason: '$bad 应被拒绝');
       }
+      // build 元数据允许连字符（合法边界）
+      expect(AppVersion.parse('1.2.3+build-5').toString(), '1.2.3+build-5');
     });
 
     test('容忍首尾空白（与老项目一致，先 trim 再校验）', () {

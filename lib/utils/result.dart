@@ -51,7 +51,10 @@ sealed class AppResult<T> {
 }
 
 /// 成功结果。
-class AppSuccess<T> extends AppResult<T> {
+///
+/// `final`：锁定类型层级（sealed 只阻止外部直接继承 [AppResult]，子类型本身
+/// 默认仍可被外部扩展；final 确保结果类型只有两种形态，值语义稳定）。
+final class AppSuccess<T> extends AppResult<T> {
   const AppSuccess(this.value);
 
   final T value;
@@ -70,9 +73,9 @@ class AppSuccess<T> extends AppResult<T> {
   String toString() => 'AppSuccess(value: $value)';
 }
 
-/// 失败结果；[message] 为可读的失败原因（供提示/日志）。
-class AppFailure<T> extends AppResult<T> {
-  const AppFailure(this.message);
+/// 失败结果；[message] 为可读的失败原因（供提示/日志），非空。
+final class AppFailure<T> extends AppResult<T> {
+  const AppFailure(this.message) : assert(message != '');
 
   final String message;
 

@@ -7,21 +7,38 @@ library;
 
 /// 语义版本号。
 class AppVersion implements Comparable<AppVersion> {
-  const AppVersion({
+  AppVersion({
     required this.major,
     required this.minor,
     required this.patch,
     this.prerelease,
     this.buildMetadata,
-  }) : assert(major >= 0),
-       assert(minor >= 0),
-       assert(patch >= 0);
+  })  : assert(major >= 0),
+        assert(minor >= 0),
+        assert(patch >= 0) {
+    // prerelease 格式运行时校验（release 下 assert 被剥离，此处兜底）：
+    // 非法构造会让纯数字标识符的"长度+字典序"比较假设（无前导零）失效。
+    if (prerelease != null &&
+        prerelease!.isNotEmpty &&
+        !_prereleaseFormat.hasMatch(prerelease!)) {
+      throw ArgumentError.value(
+        prerelease,
+        'prerelease',
+        'prerelease 必须为合法 SemVer pre-release 标识符（无前导零）',
+      );
+    }
+  }
 
   final int major;
   final int minor;
   final int patch;
   final String? prerelease;
   final String? buildMetadata;
+
+  /// pre-release 标识符格式（数字段禁前导零），供构造器断言。
+  static final _prereleaseFormat = RegExp(
+    r'^(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9A-Za-z-]*))*$',
+  );
 
   bool get isPrerelease => prerelease != null && prerelease!.isNotEmpty;
 
@@ -38,12 +55,24 @@ class AppVersion implements Comparable<AppVersion> {
       throw FormatException('Invalid semantic version', value);
     }
     return AppVersion(
-      major: int.parse(match.group(1)!),
-      minor: int.parse(match.group(2)!),
-      patch: int.parse(match.group(3)!),
+      major: _parseCoreVersion(match.group(1)!, value),
+      minor: _parseCoreVersion(match.group(2)!, value),
+      patch: _parseCoreVersion(match.group(3)!, value),
       prerelease: match.group(4),
       buildMetadata: match.group(5),
     );
+  }
+
+  /// 解析主/次/修订数字段：超出 Dart int 表示范围时给出明确错误
+  /// （区分"格式非法"与"超出表示范围"；纯数字串已通过无前导零校验）。
+  static int _parseCoreVersion(String digits, String raw) {
+    final value = int.tryParse(digits);
+    if (value == null) {
+      throw FormatException(
+        'SemVer 数字段超出可表示范围：$digits（原始输入：$raw）',
+      );
+    }
+    return value;
   }
 
   /// 严格 SemVer：主版本号无前导零，pre-release 段数字标识符同样禁前导零。

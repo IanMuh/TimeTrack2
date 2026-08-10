@@ -6,19 +6,19 @@ import 'package:timetrack2/viewmodels/commands/command_invocation.dart';
 
 /// 模块 2 测试用指令定义（模块 3 提供正式定义；此处覆盖解析器全部路径）。
 final _definitions = <CommandDefinition>[
-  const CommandDefinition(
+  CommandDefinition(
     name: 'switch',
     aliases: ['切换', '开始'],
     minPositionalArgs: 1,
     maxPositionalArgs: 1,
     description: '切换到指定活动',
   ),
-  const CommandDefinition(
+  CommandDefinition(
     name: 'stop',
     aliases: ['停止'],
     description: '停止当前活动',
   ),
-  const CommandDefinition(
+  CommandDefinition(
     name: 'add',
     aliases: ['补记'],
     minPositionalArgs: 1,
@@ -27,7 +27,7 @@ final _definitions = <CommandDefinition>[
     timeOptions: {'start', 'end'},
     description: '补记时间段',
   ),
-  const CommandDefinition(
+  CommandDefinition(
     name: 'category_create',
     aliases: ['新建分类'],
     minPositionalArgs: 1,
@@ -180,9 +180,8 @@ void main() {
     });
 
     test('必填选项缺失', () {
-      // category_create 暂无 requiredOptions；用 add 验证必填时间缺失场景
-      // （add 的 start/end 非必填，此处用未知必填构造校验路径）
-      const withRequired = CommandDefinition(
+      // 用自定义 sync 定义验证必填选项缺失路径（category_create 暂无 requiredOptions）
+      final withRequired = CommandDefinition(
         name: 'sync',
         requiredOptions: {'target'},
         allowedOptions: {'target'},
@@ -221,13 +220,13 @@ void main() {
         '3pm': '15:00',
         '9am': '09:00',
         '上午9点30分': '09:30',
-        // 12 小时制歧义边界
+        // 12 小时制歧义边界（无修饰 12点 = 中午）
         '12pm': '12:00',
         '12am': '00:00',
         '下午12点': '12:00',
         '上午12点': '00:00',
         '晚上12点': '00:00',
-        '12点': '00:00',
+        '12点': '12:00',
       };
       for (final entry in cases.entries) {
         final result = _parser().parse('add 开会 --start=${entry.key} --end=16:00');
@@ -259,19 +258,47 @@ void main() {
 
   group('定义约束', () {
     test('触发名重复 → 构造期报错（配置错误早失败）', () {
+      // 别名撞命令名
       expect(
         () => CommandParser(definitions: [
-          const CommandDefinition(name: 'switch'),
-          const CommandDefinition(name: 'x', aliases: ['switch']),
+          CommandDefinition(name: 'switch'),
+          CommandDefinition(name: 'x', aliases: ['switch']),
         ]),
         throwsArgumentError,
+      );
+      // 两个命令别名互相重复
+      expect(
+        () => CommandParser(definitions: [
+          CommandDefinition(name: 'a', aliases: ['x']),
+          CommandDefinition(name: 'b', aliases: ['x']),
+        ]),
+        throwsArgumentError,
+      );
+    });
+
+    test('name/aliases 非单 token → 构造期报错', () {
+      expect(
+        () => CommandDefinition(name: 'category create'),
+        throwsA(anyOf(isA<AssertionError>(), isA<ArgumentError>())),
+      );
+      expect(
+        () => CommandDefinition(name: 'a', aliases: [' 有空格 ']),
+        throwsA(anyOf(isA<AssertionError>(), isA<ArgumentError>())),
+      );
+      expect(
+        () => CommandDefinition(name: '-x'),
+        throwsA(anyOf(isA<AssertionError>(), isA<ArgumentError>())),
+      );
+      expect(
+        () => CommandDefinition(name: 'a"b'),
+        throwsA(anyOf(isA<AssertionError>(), isA<ArgumentError>())),
       );
     });
 
     test('requiredOptions 未在 allowedOptions 声明 → 构造期报错', () {
       expect(
         () => CommandParser(definitions: [
-          const CommandDefinition(
+          CommandDefinition(
             name: 'sync',
             requiredOptions: {'target'},
           ),
@@ -283,7 +310,7 @@ void main() {
     test('timeOptions 未在 allowedOptions 声明 → 构造期报错', () {
       expect(
         () => CommandParser(definitions: [
-          const CommandDefinition(
+          CommandDefinition(
             name: 'add',
             timeOptions: {'start'},
           ),

@@ -24,13 +24,15 @@ import '../viewmodels/commands/command_invocation.dart';
 /// - 未闭合引号直接返回语法错误。
 ///
 /// 注意：活动名重名歧义（如 `switch 学习` 命中多个同名活动）需要活动数据，
-/// 属于**语义层**（分发器）职责——解析器只做语法结构校验，歧义检测由分发器
-/// 注入活动名列表完成（见 [CommandParser.resolveActivity] 钩子，可选）。
+/// 属于**语义层**（阶段 3 命令分发器）职责——解析器只做语法结构校验，返回的
+/// [CommandInvocation] 携带原始活动名文本，由分发器解析为稳定 id 并检测歧义。
 class CommandParser {
   CommandParser({List<CommandDefinition> definitions = const []})
-      : _definitions = List.unmodifiable(definitions) {
+      : _definitions = List.unmodifiable(definitions),
+        _triggerMap = <String, CommandDefinition>{} {
     // 配置错误早失败：触发名去重 + 定义自身一致性（requiredOptions/timeOptions ⊆
-    // allowedOptions、位置参数范围合法——后者在 release 下构造器 assert 被剥离）。
+    // allowedOptions、位置参数范围合法、name/aliases 单 token——后者在 release 下
+    // 构造器 assert 被剥离，此处兜底）。
     final seen = <String>{};
     for (final definition in _definitions) {
       for (final trigger in definition.triggerNames) {
@@ -58,10 +60,17 @@ class CommandParser {
           );
         }
       }
+      // 触发名 → 定义查找表：parse 时 O(1) 命中。
+      for (final trigger in definition.triggerNames) {
+        _triggerMap[trigger] = definition;
+      }
     }
   }
 
   final List<CommandDefinition> _definitions;
+
+  /// 触发名（name + aliases）→ 定义 的查找表。
+  final Map<String, CommandDefinition> _triggerMap;
 
   /// 已注册指令定义（供诊断/分发器枚举）。
   List<CommandDefinition> get definitions => _definitions;
@@ -98,10 +107,12 @@ class CommandParser {
         }
         final key = raw.substring(2, equals);
         final valueRaw = raw.substring(equals + 1);
-        if (key.isEmpty) {
-          return AppFailure('选项格式非法：$raw（键不能为空）');
+        if (key.isEmpty || key.startsWith('-') || key.contains(RegExp(r'\s|"|\\'))) {
+          return AppFailure(
+            '选项格式非法：$raw（键不能为空/以 - 开头/含空白引号反斜杠）',
+          );
         }
-        final value = _unquoteValue(valueRaw);
+        final value = _unquoteToken(valueRaw);
         if (value.isEmpty && !_isQuoted(valueRaw)) {
           // 裸 `--key=` 空值无法与 `--key=""` 区分（引号信息只在 valueRaw 形态），
           // 拒绝；显式空值须加引号。
@@ -164,22 +175,18 @@ class CommandParser {
     );
   }
 
-  /// 指令名校验钩子（可选）：把位置参数中的活动名/分类名映射到稳定 id。
-  ///
-  /// 实现可注入重名歧义检测（命中多个候选返回失败，不静默取第一个）。
-  /// 默认返回 null（不校验），由分发器自行决定。
-  String? Function(String name)? resolveActivity;
+  /// 指令名校验钩子：**已移除**——活动名/分类名到稳定 id 的映射与重名歧义检测
+  /// 属于语义层（阶段 3 命令分发器），解析器返回原始文本，不做语义解析。
 
   /// 按触发名（name + aliases）查找定义；null 表示未知指令。
-  CommandDefinition? _resolveDefinition(String trigger) {
-    for (final definition in _definitions) {
-      if (definition.triggerNames.contains(trigger)) return definition;
-    }
-    return null;
-  }
+  CommandDefinition? _resolveDefinition(String trigger) => _triggerMap[trigger];
 
   String _availableNames() {
-    return _definitions.map((d) => d.name).join(', ');
+    return _definitions
+        .map((d) => d.aliases.isEmpty
+            ? d.name
+            : '${d.name}（${d.aliases.join('/')}）')
+        .join(', ');
   }
 
   /// 分钟数 → `HH:MM`（24h，补零）。
@@ -195,14 +202,11 @@ bool _isQuoted(String raw) {
   return raw.length >= 2 && raw.startsWith('"') && raw.endsWith('"');
 }
 
-/// 解引号位置参数/指令名：整 token 被双引号包裹时剥引号并反转义；否则原样。
+/// 解引号（位置参数/指令名/选项值段共用同一规则）：
+/// 整段被双引号包裹时剥引号并反转义；否则原样（引号外无反义语义）。
+/// 注：选项值段引号与整 token 引号采用同一解引号规则，等价。
 String _unquoteToken(String raw) {
   return _isQuoted(raw) ? _unescape(raw.substring(1, raw.length - 1)) : raw;
-}
-
-/// 解引号选项值段：值段被双引号包裹时剥引号并反转义；否则原样（引号外无反义）。
-String _unquoteValue(String raw) {
-  return _unquoteToken(raw);
 }
 
 /// 反转义引号内序列（与 [CommandInvocation] 的转义规则互逆）：

@@ -7,7 +7,7 @@ library;
 
 /// 指令定义：声明指令的形态约束，供解析器校验与归一化。
 class CommandDefinition {
-  const CommandDefinition({
+  CommandDefinition({
     required this.name,
     this.aliases = const [],
     this.minPositionalArgs = 0,
@@ -16,8 +16,31 @@ class CommandDefinition {
     this.requiredOptions = const {},
     this.timeOptions = const {},
     this.description = '',
-  }) : assert(minPositionalArgs >= 0),
-       assert(maxPositionalArgs >= minPositionalArgs);
+  })  : assert(minPositionalArgs >= 0),
+        assert(maxPositionalArgs >= minPositionalArgs),
+        assert(_isSingleToken(name), 'name 必须为单 token（无空白/引号/反斜杠，不以 - 开头）'),
+        assert(
+          aliases.every(_isSingleToken),
+          'aliases 必须均为单 token（无空白/引号/反斜杠，不以 - 开头）',
+        ) {
+    // 单 token 运行时硬校验（release 下 assert 被剥离，此处兜底）：
+    // 解析器按空白分词，非单 token 触发名永远不可达——配置错误早失败。
+    if (!_isSingleToken(name)) {
+      throw ArgumentError.value(name, 'name', '指令名必须为单 token');
+    }
+    for (final alias in aliases) {
+      if (!_isSingleToken(alias)) {
+        throw ArgumentError.value(alias, 'aliases', '别名必须为单 token');
+      }
+    }
+  }
+
+  /// 单 token 校验（const 构造可用）：非空、无空白/引号/反斜杠、不以 `-` 开头。
+  static bool _isSingleToken(String value) {
+    return value.isNotEmpty &&
+        !value.contains(RegExp(r'\s|"|\\')) &&
+        !value.startsWith('-');
+  }
 
   /// 归一化后的指令名（单 token，如 `switch`、`category_create`）。
   final String name;

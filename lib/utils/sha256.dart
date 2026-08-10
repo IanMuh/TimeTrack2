@@ -14,7 +14,9 @@ String sha256Bytes(List<int> bytes) {
 /// 计算文件流的 SHA-256（hex 小写）；分块读取避免整文件载入内存。
 ///
 /// [onProgress] 可选回调（累计已读字节数 + 文件总字节数，供下载进度计算）；
-/// 文件打开/读取失败时抛 [FileSystemException]（converter 在 finally 中关闭）。
+/// 进入读取前先回调一次 `(0, total)`（空文件时调用方也能初始化进度 UI），
+/// 之后每读一块回调一次；文件打开/读取失败抛 [FileSystemException]
+/// （converter 在 finally 中关闭）。
 Future<String> sha256File(
   String path, {
   void Function(int bytesRead, int totalBytes)? onProgress,
@@ -24,6 +26,7 @@ Future<String> sha256File(
   final collector = _DigestCollector();
   final converter = crypto.sha256.startChunkedConversion(collector);
   var bytesRead = 0;
+  onProgress?.call(0, total);
   try {
     await for (final chunk in file.openRead()) {
       converter.add(chunk);

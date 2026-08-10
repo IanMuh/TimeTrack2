@@ -63,23 +63,41 @@ void main() {
       expect(await hashTempFile(data), sha256Bytes(data));
     });
 
-    test('onProgress：累计字节数单调递增且最终值等于文件总长', () async {
+    test('onProgress：累计字节数单调递增且最终值等于文件总长（多块）', () async {
       final dir = await Directory.systemTemp.createTemp('sha256_progress');
       try {
-        final file = File('${dir.path}/p.txt');
-        await file.writeAsString('progress data');
+        // 200KB > openRead 默认 64KB 块，确保至少触发多次回调
+        final file = File('${dir.path}/p.bin');
+        await file.writeAsBytes(
+            List<int>.generate(200 * 1024, (i) => i % 251));
         final total = await file.length();
         final seen = <int>[];
         await sha256File(file.path, onProgress: (bytes, totalBytes) {
           seen.add(bytes);
           expect(totalBytes, total);
         });
-        expect(seen, isNotEmpty);
-        // 单调递增
+        expect(seen.length, greaterThan(1), reason: '多块应触发多次回调');
+        // 首回调为 0（初始化），之后单调递增
+        expect(seen.first, 0);
         for (var i = 1; i < seen.length; i++) {
-          expect(seen[i] >= seen[i - 1], isTrue);
+          expect(seen[i] > seen[i - 1], isTrue);
         }
         expect(seen.last, total, reason: '最终回调应等于文件总长');
+      } finally {
+        await dir.delete(recursive: true);
+      }
+    });
+
+    test('onProgress：空文件先回调 (0, 0) 初始化进度', () async {
+      final dir = await Directory.systemTemp.createTemp('sha256_empty_progress');
+      try {
+        final file = File('${dir.path}/empty.bin');
+        await file.writeAsBytes(const []);
+        final seen = <(int, int)>[];
+        await sha256File(file.path, onProgress: (bytes, totalBytes) {
+          seen.add((bytes, totalBytes));
+        });
+        expect(seen, [(0, 0)], reason: '空文件仅回调一次 (0, 0)');
       } finally {
         await dir.delete(recursive: true);
       }
