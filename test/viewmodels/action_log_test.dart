@@ -3,7 +3,7 @@ import 'package:timetrack2/viewmodels/action_log.dart';
 
 void main() {
   group('ActionLog', () {
-    test('缺键容错：仅 id 存在即不抛异常（updated_at/occurred_at 缺失 → FormatException）', () {
+    test('严格校验：缺失 updated_at/occurred_at 抛 FormatException', () {
       expect(() => ActionLog.fromMap({'id': 'log1'}), throwsFormatException);
       final restored = ActionLog.fromMap({
         'id': 'log1',
@@ -121,6 +121,11 @@ void main() {
         // 读取端回环
         expect(ActionType.fromStorageValue(storageValue), type);
       }
+      // 旧值兼容：历史数据中的 camelCase 'activityDelete' 必须仍能识别为 activityDelete
+      expect(
+        ActionType.fromStorageValue('activityDelete'),
+        ActionType.activityDelete,
+      );
     });
 
     test('copyWith clear 标志可将关联字段置空', () {

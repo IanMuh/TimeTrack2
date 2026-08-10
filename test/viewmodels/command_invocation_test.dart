@@ -16,7 +16,8 @@ void main() {
       );
     });
 
-    test('toString：含空白/引号的值用双引号包裹并转义（可往返解析）', () {
+    test('toString：含空白/引号/反斜杠的值用双引号包裹并转义（供往返解析）', () {
+      // 常规：空白 + 引号
       final invocation = CommandInvocation(
         name: 'switch',
         args: ['学 习'],
@@ -25,6 +26,26 @@ void main() {
       expect(
         invocation.toString(),
         'switch "学 习" --note="周 会 \\"正式\\""',
+      );
+      // 反斜杠 + 引号混合：先转义反斜杠再转义引号（标准做法，可无损还原）
+      final backslash = CommandInvocation(
+        name: 'switch',
+        args: [r'a\"b'],
+        options: {'note': r'C:\dir\"x"'},
+      );
+      expect(
+        backslash.toString(),
+        r'switch "a\\\"b" --note="C:\\dir\\\"x\""',
+      );
+      // 空串与前导横线（会被分词丢弃/误判为选项）强制加引号
+      final dash = CommandInvocation(
+        name: 'add',
+        args: ['', '-', '--x'],
+        options: {'note': ''},
+      );
+      expect(
+        dash.toString(),
+        'add "" "-" "--x" --note=""',
       );
     });
 
@@ -114,6 +135,11 @@ void main() {
           const CommandSuccess<int>(data: 1));
       expect(const CommandSuccess<int>(data: 1) ==
           const CommandSuccess<int>(data: 2), isFalse);
+      expect(const CommandSuccess<int>(data: 1).hashCode,
+          const CommandSuccess<int>(data: 1).hashCode);
+      // 不同泛型参数的实例视为不同（runtimeType 区分）
+      expect(const CommandSuccess<int>(data: 1) ==
+          const CommandSuccess<num>(data: 1), isFalse);
       // 泛型 data 保留类型（编译期约束，运行时取回即原始类型）
       const success = CommandSuccess<int>(data: 42);
       expect(success.data, 42);

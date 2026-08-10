@@ -15,12 +15,7 @@ void main() {
       updatedAt: DateTime.utc(2026, 8, 10, 4),
     );
 
-    test('缺键容错：非必填字段缺失回退默认值；updated_at 缺失抛 FormatException', () {
-      // updated_at 语义必填（LWW 冲突判定关键字段）——缺失即抛错，不伪造当前时刻
-      expect(() => Activity.fromMap({'id': 'x'}), throwsFormatException);
-    });
-
-    test('缺键容错：非必填字段缺失回退默认值（提供必填 updated_at）', () {
+    test('非必填字段缺失回退默认值（提供必填 updated_at）', () {
       final restored = Activity.fromMap({
         'id': 'x',
         'updated_at': '2026-08-10T04:00:00Z',
@@ -237,6 +232,22 @@ void main() {
       );
       expect(
         () => TimeEntry.fromMap({'id': 'e', 'start_at': 12345}),
+        throwsFormatException,
+      );
+    });
+
+    test('updated_at 缺失或非法 → FormatException（LWW 冲突判定关键字段）', () {
+      final base = {
+        'id': 'e',
+        'start_at': '2026-08-10T04:00:00Z',
+      };
+      expect(() => TimeEntry.fromMap(base), throwsFormatException);
+      expect(
+        () => TimeEntry.fromMap({...base, 'updated_at': 'not-a-date'}),
+        throwsFormatException,
+      );
+      expect(
+        () => TimeEntry.fromMap({...base, 'updated_at': 12345}),
         throwsFormatException,
       );
     });
@@ -485,15 +496,51 @@ void main() {
 
     test('值相等语义：逐字段比较（供变更检测）', () {
       final settings = ProfileSettings(
+        userId: 'u1',
         reminderMinutes: 30,
+        reminderIntervalMinutes: 15,
+        reminderMethod: ReminderMethod.banner,
+        reminderTimeOfDayMinutes: 600,
+        mergeNeighborThresholdMinutes: 3,
         timezone: 'CST',
         updatedAt: DateTime.utc(2026, 8, 10, 4),
       );
-      expect(settings, settings.copyWith(reminderMinutes: 30),
-          reason: '字段全同视为相等');
-      expect(settings == settings.copyWith(reminderMinutes: 60), isFalse,
-          reason: '任一字段不同视为不相等');
+      // 字段全同视为相等
+      expect(settings, settings.copyWith(reminderMinutes: 30));
       expect(settings.hashCode, settings.copyWith(reminderMinutes: 30).hashCode);
+      // 任一参与 ==/hashCode 的字段不同都应视为不相等
+      expect(settings == settings.copyWith(reminderMinutes: 60), isFalse);
+      expect(settings == settings.copyWith(reminderIntervalMinutes: 30), isFalse);
+      expect(settings == settings.copyWith(reminderMethod: ReminderMethod.silent),
+          isFalse);
+      expect(settings == settings.copyWith(reminderTimeOfDayMinutes: 700), isFalse);
+      expect(settings == settings.copyWith(mergeNeighborThresholdMinutes: 5),
+          isFalse);
+      expect(settings == settings.copyWith(timezone: 'UTC'), isFalse);
+      expect(
+        settings == settings.copyWith(updatedAt: DateTime.utc(2026, 8, 11, 4)),
+        isFalse,
+      );
+      // 可空字段 userId：null vs 'u2'
+      expect(settings == settings.copyWith(userId: 'u2'), isFalse);
+      expect(settings == settings.copyWith(clearUserId: true), isFalse);
+    });
+
+    test('copyWith 钳制：release 下同样保证数值不变量', () {
+      final settings = ProfileSettings(
+        timezone: 'CST',
+        updatedAt: DateTime.utc(2026, 8, 10, 4),
+      );
+      final clamped = settings.copyWith(
+        reminderMinutes: 0, // 钳制到 1
+        reminderIntervalMinutes: 99999, // 钳制到 maxReminderMinutes
+        reminderTimeOfDayMinutes: -10, // 钳制到 0
+        mergeNeighborThresholdMinutes: -3, // 钳制到 0
+      );
+      expect(clamped.reminderMinutes, 1);
+      expect(clamped.reminderIntervalMinutes, ProfileSettings.maxReminderMinutes);
+      expect(clamped.reminderTimeOfDayMinutes, 0);
+      expect(clamped.mergeNeighborThresholdMinutes, 0);
     });
 
     test('clearUserId 可将 userId 置空', () {

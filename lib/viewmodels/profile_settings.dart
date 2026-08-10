@@ -34,8 +34,9 @@ class ProfileSettings {
     this.mergeNeighborThresholdMinutes = defaultMergeNeighborThresholdMinutes,
     required this.timezone,
     required this.updatedAt,
-  })  : assert(reminderMinutes >= 1),
-        assert(reminderIntervalMinutes >= 1),
+  })  : assert(reminderMinutes >= 1 && reminderMinutes <= maxReminderMinutes),
+        assert(reminderIntervalMinutes >= 1 &&
+            reminderIntervalMinutes <= maxReminderMinutes),
         assert(
           reminderTimeOfDayMinutes >= 0 &&
               reminderTimeOfDayMinutes <= 23 * 60 + 59,
@@ -46,6 +47,9 @@ class ProfileSettings {
   static const defaultReminderIntervalMinutes = 10;
   static const defaultReminderTimeOfDayMinutes = 540; // 9 * 60
   static const defaultMergeNeighborThresholdMinutes = 1;
+
+  /// 提醒类分钟数的合理上界（24 小时）：防止极端大值导致异常调度结果。
+  static const maxReminderMinutes = 24 * 60;
 
   final String? userId;
   final int reminderMinutes;
@@ -109,14 +113,25 @@ class ProfileSettings {
   }) {
     return ProfileSettings(
       userId: clearUserId ? null : userId ?? this.userId,
-      reminderMinutes: reminderMinutes ?? this.reminderMinutes,
-      reminderIntervalMinutes:
-          reminderIntervalMinutes ?? this.reminderIntervalMinutes,
+      // copyWith 与 fromMap 使用同一钳制：release 下同样保证不变量
+      // （构造器 assert 在 release 被移除，故此处必须兜底）。
+      reminderMinutes: _clampMinMax(
+        reminderMinutes ?? this.reminderMinutes,
+        min: 1,
+        max: maxReminderMinutes,
+      ),
+      reminderIntervalMinutes: _clampMinMax(
+        reminderIntervalMinutes ?? this.reminderIntervalMinutes,
+        min: 1,
+        max: maxReminderMinutes,
+      ),
       reminderMethod: reminderMethod ?? this.reminderMethod,
       reminderTimeOfDayMinutes:
-          reminderTimeOfDayMinutes ?? this.reminderTimeOfDayMinutes,
-      mergeNeighborThresholdMinutes:
-          mergeNeighborThresholdMinutes ?? this.mergeNeighborThresholdMinutes,
+          _clampTimeOfDay(reminderTimeOfDayMinutes ?? this.reminderTimeOfDayMinutes),
+      mergeNeighborThresholdMinutes: math.max(
+        0,
+        mergeNeighborThresholdMinutes ?? this.mergeNeighborThresholdMinutes,
+      ),
       timezone: timezone ?? this.timezone,
       updatedAt: updatedAt ?? this.updatedAt,
     );
@@ -138,11 +153,17 @@ class ProfileSettings {
   static ProfileSettings fromMap(Map<String, Object?> map) {
     return ProfileSettings(
       userId: readNullableString(map['user_id']),
-      reminderMinutes: math.max(1,
-          readInt(map['reminder_minutes'], fallback: defaultReminderMinutes)),
-      reminderIntervalMinutes: math.max(1,
-          readInt(map['reminder_interval_minutes'],
-              fallback: defaultReminderIntervalMinutes)),
+      reminderMinutes: _clampMinMax(
+        readInt(map['reminder_minutes'], fallback: defaultReminderMinutes),
+        min: 1,
+        max: maxReminderMinutes,
+      ),
+      reminderIntervalMinutes: _clampMinMax(
+        readInt(map['reminder_interval_minutes'],
+            fallback: defaultReminderIntervalMinutes),
+        min: 1,
+        max: maxReminderMinutes,
+      ),
       reminderMethod: ReminderMethod.fromStorageValue(map['reminder_method']),
       reminderTimeOfDayMinutes: _clampTimeOfDay(readInt(
           map['reminder_time_of_day_minutes'],
@@ -155,6 +176,13 @@ class ProfileSettings {
           fallback: DateTime.now().timeZoneName),
       updatedAt: readDateTime(map['updated_at']),
     );
+  }
+
+  /// 将 [value] 钳制到 [min, max]。
+  static int _clampMinMax(int value, {required int min, required int max}) {
+    if (value < min) return min;
+    if (value > max) return max;
+    return value;
   }
 
   /// 将"分钟数"钳制到 [0, 23*60+59]，防御损坏数据导致的越界提醒时间。

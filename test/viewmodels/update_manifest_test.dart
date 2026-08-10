@@ -77,7 +77,10 @@ void main() {
             .having((e) => e.message, 'message', contains('version'))),
       );
       // 非法 SemVer 格式（快速失败，而非等到语义比较才暴露）
-      for (final bad in ['abc', '1.2', '1.2.3.4', '1.2.3-beta..1', 'v']) {
+      for (final bad in [
+        'abc', '1.2', '1.2.3.4', '1.2.3-beta..1', 'v', '01.2.3', '1.02.3',
+        '1.2.03', '1.2.3-01', '1.2.3-', '1.2.3+', '1.2.3-pre..1',
+      ]) {
         expect(
           () => UpdateManifest.fromMap({'version': bad}),
           throwsA(isA<FormatException>()
@@ -85,14 +88,23 @@ void main() {
           reason: '非法版本 $bad 应被拒绝',
         );
       }
-      // 合法 SemVer（含 v 前缀/pre-release/build 元数据）通过
-      for (final good in ['1.2.3', 'v1.2.3', '1.2.3-pre.1', '1.2.3+build.5']) {
+      // 合法 SemVer（含 pre-release+build 组合；v 前缀按严格 SemVer 拒绝）
+      for (final good in [
+        '1.2.3', '1.2.3-pre.1', '1.2.3+build.5',
+        '1.2.3-pre.1+build.5', '10.0.0-alpha',
+      ]) {
         expect(
           UpdateManifest.fromMap({'version': good}).version,
           good,
           reason: '合法版本 $good 应通过',
         );
       }
+      // v 前缀（如 v1.2.3）不是严格 SemVer，拒绝——避免与 1.2.3 产生两套比较语义
+      expect(
+        () => UpdateManifest.fromMap({'version': 'v1.2.3'}),
+        throwsA(isA<FormatException>()
+            .having((e) => e.message, 'message', contains('version'))),
+      );
     });
 
     test('非字符串可选字段：容错回退默认，不抛异常', () {
@@ -200,6 +212,37 @@ void main() {
         throwsA(isA<FormatException>()
             .having((e) => e.message, 'message', contains('url'))),
       );
+      // 无主机名 / 畸形链接拒绝
+      expect(
+        () => UpdateManifest.fromMap({
+          'version': '1.0.0',
+          'windows': {'url': 'https://', 'sha256': sha},
+        }),
+        throwsA(isA<FormatException>()
+            .having((e) => e.message, 'message', contains('url'))),
+      );
+      expect(
+        () => UpdateManifest.fromMap({
+          'version': '1.0.0',
+          'windows': {'url': 'https:///path', 'sha256': sha},
+        }),
+        throwsA(isA<FormatException>()
+            .having((e) => e.message, 'message', contains('url'))),
+      );
+      expect(
+        () => UpdateManifest.fromMap({
+          'version': '1.0.0',
+          'windows': {'url': 'https://exa mple.com/a.zip', 'sha256': sha},
+        }),
+        throwsA(isA<FormatException>()
+            .having((e) => e.message, 'message', contains('url'))),
+      );
+      // scheme 大小写不敏感：合法 HTTP:// 通过
+      final upper = UpdateManifest.fromMap({
+        'version': '1.0.0',
+        'windows': {'url': 'HTTP://EXAMPLE.com/a.zip', 'sha256': sha},
+      });
+      expect(upper.windows!.url, 'HTTP://EXAMPLE.com/a.zip');
     });
 
     test('sha256 格式非法（长度/非 hex）→ FormatException', () {

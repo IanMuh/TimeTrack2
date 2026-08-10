@@ -81,9 +81,10 @@ class StatsEntrySlice {
     Set<String> linkedCategoryIds = const {},
     List<String> categoryAncestorIds = const [],
     required Duration duration,
-  })  : linkedCategoryIds = Set.unmodifiable(linkedCategoryIds),
+  })  : assert(duration >= Duration.zero, 'duration 必须非负（debug 快速失败）'),
+        linkedCategoryIds = Set.unmodifiable(linkedCategoryIds),
         categoryAncestorIds = List.unmodifiable(categoryAncestorIds),
-        // 生产环境防御：负时长一律归一为 0（不依赖 assert——release 下同样生效），
+        // 生产环境防御：负时长一律归一为 0（assert 在 release 被移除，此处兜底），
         // 避免损坏数据被误归入错误时长桶。
         duration = duration < Duration.zero ? Duration.zero : duration;
 

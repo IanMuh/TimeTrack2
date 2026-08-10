@@ -21,6 +21,9 @@ void main() {
       expect(readBool('1'), isFalse, reason: '字符串 1 不识别为布尔');
       expect(readBool('是'), isFalse);
       expect(readBool([true]), isFalse);
+      expect(readBool(double.nan), isFalse, reason: '非有限数回退 false');
+      expect(readBool(double.infinity), isFalse);
+      expect(readBool(double.negativeInfinity), isFalse);
     });
   });
 

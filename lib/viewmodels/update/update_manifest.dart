@@ -30,13 +30,16 @@ class UpdateManifest {
   final UpdatePlatformArtifact? windows;
   final UpdatePlatformArtifact? android;
 
-  /// SemVer 格式（允许可选 `v` 前缀；pre-release/build 段按 `.` 分段，
-  /// 每段非空且仅含 `[0-9A-Za-z-]`——拒绝连续点/空标识符/尾点）。
+  /// 严格 SemVer 格式：主版本号禁止前导零（`(0|[1-9]\d*)`），pre-release 段数字
+  /// 标识符同样禁止前导零，build 段为 `[0-9A-Za-z-]` 点分段。**不允许 `v` 前缀**。
   static final _versionPattern = RegExp(
-    r'^v?\d+\.\d+\.\d+'
-    r'(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?'
+    r'^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)'
+    r'(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9A-Za-z-]*))*))?'
     r'(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$',
   );
+
+  /// SHA-256：64 位小写 hex。
+  static final _sha256Pattern = RegExp(r'^[0-9a-f]{64}$');
 
   Map<String, Object?> toMap() {
     return {
@@ -86,14 +89,25 @@ class UpdateManifest {
     );
   }
 
-  /// url 校验：trim 后必须为非空 http/https 链接（防 file://、相对路径等）。
+  /// url 校验：trim 后必须为可解析的 http/https 链接（含主机名），
+  /// scheme 大小写不敏感（Uri.tryParse 归一化）。拒绝 file://、相对路径、
+  /// 无主机名、含空白字符等畸形链接——快速失败，避免下载阶段才暴露
+  /// （注：Uri.tryParse 会宽容编码内嵌空格为 %20，故需先显式拒绝空白）。
   static String _normalizeUrl(Object? value) {
     if (value is! String) {
       throw const FormatException('UpdateManifest: 平台产物缺 url');
     }
     final trimmed = value.trim();
-    if (trimmed.isEmpty || !trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
-      throw FormatException('UpdateManifest: url 非法（应为 http/https 链接）：$trimmed');
+    final uri = Uri.tryParse(trimmed);
+    final scheme = uri?.scheme.toLowerCase();
+    if (trimmed.isEmpty ||
+        trimmed.contains(RegExp(r'\s')) ||
+        uri == null ||
+        (scheme != 'http' && scheme != 'https') ||
+        uri.host.isEmpty) {
+      throw FormatException(
+        'UpdateManifest: url 非法（应为 http/https 链接）：$trimmed',
+      );
     }
     return trimmed;
   }
@@ -104,7 +118,7 @@ class UpdateManifest {
       throw const FormatException('UpdateManifest: 平台产物缺 sha256');
     }
     final normalized = value.trim().toLowerCase();
-    if (!RegExp(r'^[0-9a-f]{64}$').hasMatch(normalized)) {
+    if (!_sha256Pattern.hasMatch(normalized)) {
       throw FormatException('UpdateManifest: sha256 非法（应为 64 位 hex）');
     }
     return normalized;

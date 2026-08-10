@@ -9,11 +9,11 @@
 /// - 时间读取：需要默认值时显式传 `fallback`；不传且缺键/非法 → 抛 [FormatException]。
 library;
 
-/// 读取布尔字段：兼容 bool、0/1 数字、`'true'`/`'false'`（忽略大小写/空白）与 null。
-/// 无法识别时返回 false。
+/// 读取布尔字段：兼容 bool、有限数字（0/1）、`'true'`/`'false'`（忽略大小写/空白）与 null。
+/// 非有限数字（NaN/±Infinity）与无法识别的值一律回退 false。
 bool readBool(Object? value) {
   if (value is bool) return value;
-  if (value is num) return value != 0;
+  if (value is num && value.isFinite) return value != 0;
   if (value is String) {
     final text = value.trim().toLowerCase();
     if (text == 'true') return true;

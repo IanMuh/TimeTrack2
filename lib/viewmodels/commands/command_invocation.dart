@@ -46,11 +46,14 @@ class CommandInvocation {
     return buffer.toString();
   }
 
-  /// 含空白或引号的值为保证可往返解析，用双引号包裹并转义内部双引号。
+  /// 含空白/引号/空串/前导横线的值为保证可往返解析，用双引号包裹；
+  /// 转义顺序：先反斜杠（`\` → `\\`）再双引号（`"` → `\"`），保证无损还原。
   static String _quoteIfNeeded(String value) {
-    final needsQuote = value.contains(RegExp(r'\s|"'));
+    final needsQuote = value.isEmpty ||
+        value.startsWith('-') ||
+        value.contains(RegExp(r'\s|"'));
     if (!needsQuote) return value;
-    return '"${value.replaceAll('"', r'\"')}"';
+    return '"${value.replaceAll('\\', r'\\').replaceAll('"', r'\"')}"';
   }
 
   /// 值相等语义：比较 name/args/options（raw 仅作追溯，不参与相等性）。
@@ -113,6 +116,10 @@ sealed class CommandResult {
 }
 
 /// 执行成功；[data] 为可选返回数据（类型化），[message] 为可选描述（供日志/提示）。
+///
+/// 注意：`data` 为 List/Map 等集合类型时，[operator ==] 采用 Dart 默认引用相等
+/// （值相等仅对不可变标量/值类型有意义）；`toString` 会输出 `data` 内容，
+/// 若承载敏感信息（token/路径等）请勿直接写入日志。
 class CommandSuccess<T> extends CommandResult {
   const CommandSuccess({this.data, this.message});
 

@@ -30,6 +30,9 @@ enum ActionType {
   /// 兼容读取：`unknown` 是唯一自带原始值的"保留桶"，见 [unknown] 注释。
   static ActionType fromStorageValue(Object? value) {
     final text = value is String ? value : null;
+    // 兼容老项目历史数据：camelCase 旧值映射到统一后的 snake_case 枚举，
+    // 避免旧数据被误判为 unknown 而丢失 activityDelete 语义。
+    if (text == 'activityDelete') return ActionType.activityDelete;
     return ActionType.values.firstWhere(
       (type) => type.storageValue == text,
       orElse: () => ActionType.unknown,

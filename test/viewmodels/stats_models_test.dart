@@ -37,10 +37,13 @@ void main() {
       expect(_slice(Duration.zero).durationBucketLabel, '<30m');
     });
 
-    test('负时长在 release 语义下归一化为 0（不依赖 assert）', () {
-      final slice = _slice(const Duration(minutes: -5));
-      expect(slice.duration, Duration.zero);
-      expect(slice.durationBucketLabel, '<30m');
+    test('负时长：debug 下触发断言快速失败（release 下归一化为 0 兜底）', () {
+      // 测试运行于 assert 开启的 debug 模式：负时长应触发 AssertionError，
+      // 及时暴露数据管道 bug；release 下 assert 移除、构造器归一化兜底。
+      expect(
+        () => _slice(const Duration(minutes: -5)),
+        throwsA(isA<AssertionError>()),
+      );
     });
   });
 
