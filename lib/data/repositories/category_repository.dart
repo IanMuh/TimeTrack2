@@ -147,12 +147,14 @@ class CategoryRepository with RepositoryMappings {
           return AppFailure('父分类不存在：$newParent');
         }
       }
-      final effectiveName = (name ?? category.name).trim();
-      if (effectiveName.isEmpty) {
+      // 仅显式传入 name 时才 trim+校验；null 表示不改名（保留原值，
+      // 避免局部更新 color/parent 时静默改写原名的空白）。
+      final trimmedName = name?.trim();
+      if (trimmedName != null && trimmedName.isEmpty) {
         return const AppFailure('分类名不能为空');
       }
       final updated = category.copyWith(
-        name: effectiveName,
+        name: trimmedName ?? category.name,
         color: color ?? category.color,
         parentId: newParent,
         clearParentId: clearParentId && newParent == null,

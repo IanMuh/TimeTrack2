@@ -1,6 +1,6 @@
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:timetrack2/data/database/app_database.dart';
+import 'package:timetrack2/data/database/app_database.dart' hide ProfileSettings;
 import 'package:timetrack2/data/repositories/activity_repository.dart';
 import 'package:timetrack2/data/repositories/action_log_repository.dart';
 import 'package:timetrack2/data/repositories/category_repository.dart';
@@ -8,6 +8,7 @@ import 'package:timetrack2/data/repositories/settings_repository.dart';
 import 'package:timetrack2/data/repositories/time_entry_repository.dart';
 import 'package:timetrack2/viewmodels/action_log.dart';
 import 'package:timetrack2/viewmodels/activity.dart';
+import 'package:timetrack2/viewmodels/profile_settings.dart';
 
 /// 内存库测试环境：隔离的数据库 + 各仓储实例。
 class TestHarness {
@@ -142,6 +143,54 @@ void main() {
       // 无重复、无遗漏（同时间戳下靠 id 稳定排序）
       final ids = {...logs.map((l) => l.id), ...secondPage.map((l) => l.id)};
       expect(ids.length, 4);
+    });
+  });
+
+  group('Settings LWW', () {
+    late TestHarness h;
+
+    setUp(() => h = TestHarness());
+    tearDown(() => h.close());
+
+    test('applyIfRemoteNewer：远端新/本地新/平局/无本地四分支', () async {
+      final base = ProfileSettings.defaults();
+      // 无本地记录 → 直接落库远端
+      final applied1 =
+          (await h.settings.applyIfRemoteNewer(base.copyWith(
+        reminderMinutes: 30,
+        updatedAt: DateTime.utc(2020, 1, 1),
+      )))
+              .requireValue();
+      expect(applied1.reminderMinutes, 30);
+
+      // 本地较新（save 用真实时钟推进 updatedAt）→ 保留本地
+      final saved = (await h.settings.save(applied1.copyWith(
+        reminderMinutes: 40,
+      )))
+          .requireValue();
+      final localUpdatedAt = saved.updatedAt;
+      final stale = base.copyWith(
+        reminderMinutes: 35,
+        updatedAt: localUpdatedAt.subtract(const Duration(hours: 1)),
+      );
+      final kept = (await h.settings.applyIfRemoteNewer(stale)).requireValue();
+      expect(kept.reminderMinutes, 40, reason: '本地较新保留本地');
+
+      // 远端较新 → 应用远端
+      final newer = base.copyWith(
+        reminderMinutes: 50,
+        updatedAt: localUpdatedAt.add(const Duration(hours: 1)),
+      );
+      final applied2 = (await h.settings.applyIfRemoteNewer(newer)).requireValue();
+      expect(applied2.reminderMinutes, 50);
+
+      // 平局（时间戳相等）→ 保留本地
+      final tie = base.copyWith(
+        reminderMinutes: 55,
+        updatedAt: localUpdatedAt.add(const Duration(hours: 1)),
+      );
+      final tieResult = (await h.settings.applyIfRemoteNewer(tie)).requireValue();
+      expect(tieResult.reminderMinutes, 50, reason: '平局保留本地');
     });
   });
 
@@ -413,6 +462,8 @@ void main() {
       expect(day2.single.isRunning, isTrue, reason: '保留运行段');
       // 运行段必须保留原 id（LWW 按 id 匹配，改 id 会与他端运行段并存产生双运行）
       expect(day2.single.id, originalId, reason: '滚转后运行段保留原 id');
+      // 历史闭段必须用新 id——若与运行段共享 id 会破坏 LWW 按 id 匹配的同步语义
+      expect(day1.single.id, isNot(originalId), reason: '历史闭段使用独立 id');
     });
 
     test('相邻未分配合并：连续未分配条目合成一条（note 换行去重）', () async {
@@ -524,12 +575,22 @@ void main() {
         isTrue,
         reason: '9:00-9:30 段保持独立（工作条目分隔，未与 10:00 段合并）',
       );
-      expect(
-        separated.any((e) =>
-            e.startAt.isAtSameMomentAs(DateTime(2026, 8, 10, 10, 0))),
-        isTrue,
-        reason: '10:00-11:00 段保持独立',
+      // 10:00 段与后续 11:00『重复』、12:00『相同备注』链式合并为 10:00-13:00，
+      // note 为整体换行去重拼接（相同内容只保留一次）。
+      final chained = separated.firstWhere(
+        (e) => e.startAt.isAtSameMomentAs(DateTime(2026, 8, 10, 10, 0)),
       );
+      expect(
+        chained.endAt!.isAtSameMomentAs(DateTime(2026, 8, 10, 13, 0)),
+        isTrue,
+        reason: '10:00-13:00 链式合并',
+      );
+      // 链式合并后 note 为各段 note 的换行拼接（去重语义由独立小场景覆盖），
+      // 此处仅锁定关键内容片段，不耦合内部实现顺序。
+      expect(chained.note, contains('一段'));
+      expect(chained.note, contains('二段'));
+      expect(chained.note, contains('重复'));
+      expect(chained.note, contains('相同备注'));
     });
 
     test('软删不复活 + LWW：远端旧删除不被覆盖', () async {

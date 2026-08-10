@@ -93,22 +93,24 @@ class ActivityRepository with RepositoryMappings {
       if (activity.isUnassigned || await activityIdIsUnassigned(activity.id)) {
         return AppSuccess(await ensureUnassignedActivity());
       }
-      // 重读当前行：写前判定基于库内最新状态（防陈旧对象覆盖远端更新/复活已删）。
-      final current = await _activityById(activity.id);
-      if (current == null || current.isDeleted) {
-        return AppFailure('活动不存在或已删除：${activity.id}');
-      }
-      final trimmedName = name.trim();
-      if (trimmedName.isEmpty) {
-        return const AppFailure('活动名不能为空');
-      }
-      final updated = current.copyWith(
-        name: trimmedName,
-        color: color,
-        updatedAt: _monotonicNow(current.updatedAt),
-      );
-      await _upsert(updated);
-      return AppSuccess(updated);
+      // 重读-判-写同一事务：防重读后并发 LWW 写入被本地旧时间戳覆盖。
+      return await database.transaction(() async {
+        final current = await _activityById(activity.id);
+        if (current == null || current.isDeleted) {
+          return AppFailure('活动不存在或已删除：${activity.id}');
+        }
+        final trimmedName = name.trim();
+        if (trimmedName.isEmpty) {
+          return const AppFailure('活动名不能为空');
+        }
+        final updated = current.copyWith(
+          name: trimmedName,
+          color: color,
+          updatedAt: _monotonicNow(current.updatedAt),
+        );
+        await _upsert(updated);
+        return AppSuccess(updated);
+      });
     } catch (e) {
       return AppFailure('更新活动失败：$e');
     }
@@ -120,14 +122,16 @@ class ActivityRepository with RepositoryMappings {
       if (activity.isUnassigned || await activityIdIsUnassigned(activity.id)) {
         return const AppSuccess(null);
       }
-      // 重读当前行：仅当库内仍存活才落墓碑（陈旧对象不复活已删/不覆盖远端删除）。
-      final current = await _activityById(activity.id);
-      if (current == null || current.isDeleted) {
-        return const AppSuccess(null); // 不存在/已删除：幂等
-      }
-      final now = _monotonicNow(current.updatedAt);
-      await _upsert(current.copyWith(deletedAt: now, updatedAt: now));
-      return const AppSuccess(null);
+      // 重读-判-写同一事务：仅当库内仍存活才落墓碑（陈旧对象不复活已删/不覆盖远端删除）。
+      return await database.transaction(() async {
+        final current = await _activityById(activity.id);
+        if (current == null || current.isDeleted) {
+          return const AppSuccess(null); // 不存在/已删除：幂等
+        }
+        final now = _monotonicNow(current.updatedAt);
+        await _upsert(current.copyWith(deletedAt: now, updatedAt: now));
+        return const AppSuccess(null);
+      });
     } catch (e) {
       return AppFailure('删除活动失败：$e');
     }
@@ -139,23 +143,25 @@ class ActivityRepository with RepositoryMappings {
       if (!activity.isOneOff) {
         return const AppFailure('仅 one-off 活动可恢复');
       }
-      // 重读当前行：基于库内最新状态判定（陈旧对象不误判）。
-      final current = await _activityById(activity.id);
-      if (current == null) {
-        return AppFailure('活动不存在：${activity.id}');
-      }
-      if (!current.isDeleted) {
-        return AppSuccess(current); // 未删除：幂等
-      }
-      final restored = current.copyWith(
-        deletedAt: null,
-        clearDeletedAt: true,
-        isFavorite: false,
-        isOneOff: true,
-        updatedAt: _monotonicNow(current.updatedAt),
-      );
-      await _upsert(restored);
-      return AppSuccess(restored);
+      // 重读-判-写同一事务：基于库内最新状态判定（陈旧对象不误判）。
+      return await database.transaction(() async {
+        final current = await _activityById(activity.id);
+        if (current == null) {
+          return AppFailure('活动不存在：${activity.id}');
+        }
+        if (!current.isDeleted) {
+          return AppSuccess(current); // 未删除：幂等
+        }
+        final restored = current.copyWith(
+          deletedAt: null,
+          clearDeletedAt: true,
+          isFavorite: false,
+          isOneOff: true,
+          updatedAt: _monotonicNow(current.updatedAt),
+        );
+        await _upsert(restored);
+        return AppSuccess(restored);
+      });
     } catch (e) {
       return AppFailure('恢复一次性活动失败：$e');
     }
@@ -208,9 +214,11 @@ class ActivityRepository with RepositoryMappings {
         final active = rows.where((r) => r.deletedAt == null).toList();
         if (active.isNotEmpty) {
           var keep = activityFromRow(active.first);
-          final now = _monotonicNow(keep.updatedAt);
           for (final row in active.skip(1)) {
             final duplicate = activityFromRow(row);
+            // 每行独立单调时间戳：重复行 updatedAt 可能晚于 keep，
+            // 共用 now 会造成该行墓碑时间倒退（远端副本判定获胜而复活）。
+            final now = _monotonicNow(duplicate.updatedAt);
             await _upsert(
               duplicate.copyWith(deletedAt: now, updatedAt: now),
             );
@@ -231,10 +239,11 @@ class ActivityRepository with RepositoryMappings {
       if (legacyRows.isNotEmpty) {
         // 全部"未安排"未删行升级为未分配（多余者随后被单例清理软删）。
         for (final row in legacyRows) {
+          // 单调性基于该行自身 updatedAt（时钟不同步的远端未来值也保持不回退）。
           final upgraded = activityFromRow(row).copyWith(
             isFavorite: false,
             isUnassigned: true,
-            updatedAt: _monotonicNow(DateTime.now()),
+            updatedAt: _monotonicNow(activityFromRow(row).updatedAt),
           );
           await _upsert(upgraded);
         }

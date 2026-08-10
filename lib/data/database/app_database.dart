@@ -186,7 +186,7 @@ class AppDatabase extends _$AppDatabase {
           await _tryPragma('PRAGMA temp_store = MEMORY');
           // 无条件补齐部分索引：beforeOpen 在 onCreate 之后执行（表已建），
           // `IF NOT EXISTS` 幂等，新建/已有库均生效，防索引与 schema 漂移。
-          await _createPartialIndexes();
+          await _ensureIndexes();
         },
         onCreate: (m) async {
           await m.createAll();
@@ -202,8 +202,9 @@ class AppDatabase extends _$AppDatabase {
     }
   }
 
-  /// 部分索引只索引未删行（deleted_at is null）——老项目性能索引思路迁移。
-  Future<void> _createPartialIndexes() async {
+  /// 确保索引就绪：部分索引只索引未删行（老项目性能索引思路）+ parent_id
+  /// 全量索引（递归 CTE 需穿透已删节点，不能用部分索引）。
+  Future<void> _ensureIndexes() async {
     // 部分索引以业务列开头（部分索引谓词已限定 deleted_at IS NULL，
     // 首列不再放 deleted_at——恒为常量属冗余开销）。
     await customStatement(
