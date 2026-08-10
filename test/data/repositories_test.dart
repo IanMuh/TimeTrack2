@@ -184,10 +184,10 @@ void main() {
       final applied2 = (await h.settings.applyIfRemoteNewer(newer)).requireValue();
       expect(applied2.reminderMinutes, 50);
 
-      // 平局（时间戳相等）→ 保留本地
+      // 平局（时间戳与已落库的 applied2 相等）→ 保留本地
       final tie = base.copyWith(
         reminderMinutes: 55,
-        updatedAt: localUpdatedAt.add(const Duration(hours: 1)),
+        updatedAt: applied2.updatedAt,
       );
       final tieResult = (await h.settings.applyIfRemoteNewer(tie)).requireValue();
       expect(tieResult.reminderMinutes, 50, reason: '平局保留本地');
@@ -235,6 +235,58 @@ void main() {
       expect(oneOffRow.isDeleted, isTrue);
       final normalAfter = await h.activities.activities();
       expect(normalAfter.requireValue().map((a) => a.id), contains(normal.id));
+    });
+
+    test('单调时间戳：远端未来 updatedAt 不被本地 now 倒退覆盖', () async {
+      final activity = await seedActivity(h, name: 'A');
+      // 远端未来时间戳（时钟不同步）
+      final futureVersion = activity.copyWith(
+        name: '远端未来',
+        updatedAt: activity.updatedAt.add(const Duration(days: 1)),
+      );
+      await h.activities.replaceIfRemoteNewer(futureVersion);
+      // 本地更新：_monotonicNow 保证不早于远端未来时间戳
+      final updated = (await h.activities.updateActivity(
+        activity: futureVersion,
+        name: '本地改',
+        color: 0xff123456,
+      ))
+          .requireValue();
+      expect(updated.name, '本地改');
+      expect(updated.updatedAt.isAfter(futureVersion.updatedAt), isTrue,
+          reason: '本地写时间戳必须晚于远端未来值（防 LWW 判定本地陈旧）');
+      // 旧远端再同步不覆盖
+      await h.activities.replaceIfRemoteNewer(
+        activity.copyWith(
+          name: '旧远端',
+          updatedAt: futureVersion.updatedAt.subtract(const Duration(hours: 1)),
+        ),
+      );
+      final after = (await h.activities.activities()).requireValue()
+          .firstWhere((a) => a.id == activity.id);
+      expect(after.name, '本地改', reason: '旧远端不覆盖本地');
+    });
+
+    test('restore 清除 deletedAt 且时间单调', () async {
+      final oneOff = await seedActivity(h, name: '一次性', isOneOff: true);
+      await h.activities.softDeleteOneOffActivityIfNeeded(
+        oneOff.id,
+        updatedAt: DateTime.now(),
+      );
+      final deleted = (await h.activities.activities(includeDeleted: true))
+          .requireValue()
+          .firstWhere((a) => a.id == oneOff.id);
+      expect(deleted.isDeleted, isTrue);
+
+      final restored =
+          (await h.activities.restoreOneOffActivity(deleted)).requireValue();
+      expect(restored.isDeleted, isFalse);
+      expect(restored.deletedAt, isNull);
+      // 恢复后时间单调
+      expect(restored.updatedAt.isAfter(deleted.updatedAt), isTrue);
+      // 恢复后不再视为已删
+      final alive = await h.activities.activities();
+      expect(alive.requireValue().map((a) => a.id), contains(oneOff.id));
     });
 
     test('LWW：远端更新于本地才替换', () async {
@@ -312,6 +364,34 @@ void main() {
       expect(categories.requireValue(), isEmpty);
       final links = await h.categories.linksForActivity(activity.id);
       expect(links.requireValue(), isEmpty);
+    });
+
+    test('updateCategory name 语义：null 保留原名 / 空串拒绝 / trim 生效', () async {
+      final category = (await h.categories.createCategory(
+        name: '工作',
+        color: 0,
+      ))
+          .requireValue();
+      // 显式带空白名：trim 后生效
+      final renamed = (await h.categories.updateCategory(
+        category: category,
+        name: '  新名  ',
+      ))
+          .requireValue();
+      expect(renamed.name, '新名', reason: '显式 name trim 后生效');
+      // name=null 仅改色：当前名（'新名'）原样保留（不静默改写）
+      final colorOnly =
+          (await h.categories.updateCategory(category: renamed, color: 0xff123456))
+              .requireValue();
+      expect(colorOnly.name, '新名', reason: 'name=null 不改写原名');
+      expect(colorOnly.color, 0xff123456);
+      // 显式空串拒绝
+      final empty = await h.categories.updateCategory(
+        category: category,
+        name: '   ',
+      );
+      expect(empty.isSuccess, isFalse);
+      expect(empty.when(onSuccess: (_) => '', onFailure: (m) => m), contains('空'));
     });
 
     test('setActivityCategories：primary + secondary + 移除旧关联', () async {
@@ -579,18 +659,18 @@ void main() {
       // note 为整体换行去重拼接（相同内容只保留一次）。
       final chained = separated.firstWhere(
         (e) => e.startAt.isAtSameMomentAs(DateTime(2026, 8, 10, 10, 0)),
+        orElse: () => fail('10:00 起始段缺失'),
       );
       expect(
         chained.endAt!.isAtSameMomentAs(DateTime(2026, 8, 10, 13, 0)),
         isTrue,
         reason: '10:00-13:00 链式合并',
       );
-      // 链式合并后 note 为各段 note 的换行拼接（去重语义由独立小场景覆盖），
-      // 此处仅锁定关键内容片段，不耦合内部实现顺序。
-      expect(chained.note, contains('一段'));
-      expect(chained.note, contains('二段'));
-      expect(chained.note, contains('重复'));
-      expect(chained.note, contains('相同备注'));
+      // _mergedNotes 语义：仅两条"完整 note 完全相同"才去重（独立小场景覆盖），
+      // 链式合并时不同 note 的段各自拼接——11:00『重复』与 12:00『相同备注』
+      // 各自保留，精确断言锁定该行为（防误改为"按行去重"或"全部拼接"）。
+      expect(chained.note, '一段\n二段\n重复\n重复\n相同备注\n相同备注',
+          reason: '链式合并 note 按段拼接（仅完整相同才去重）');
     });
 
     test('软删不复活 + LWW：远端旧删除不被覆盖', () async {

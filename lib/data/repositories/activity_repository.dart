@@ -240,10 +240,11 @@ class ActivityRepository with RepositoryMappings {
         // 全部"未安排"未删行升级为未分配（多余者随后被单例清理软删）。
         for (final row in legacyRows) {
           // 单调性基于该行自身 updatedAt（时钟不同步的远端未来值也保持不回退）。
-          final upgraded = activityFromRow(row).copyWith(
+          final legacyActivity = activityFromRow(row);
+          final upgraded = legacyActivity.copyWith(
             isFavorite: false,
             isUnassigned: true,
-            updatedAt: _monotonicNow(activityFromRow(row).updatedAt),
+            updatedAt: _monotonicNow(legacyActivity.updatedAt),
           );
           await _upsert(upgraded);
         }
