@@ -39,7 +39,7 @@ class ProfileSettings {
             reminderIntervalMinutes <= maxReminderMinutes),
         assert(
           reminderTimeOfDayMinutes >= 0 &&
-              reminderTimeOfDayMinutes <= 23 * 60 + 59,
+              reminderTimeOfDayMinutes <= maxTimeOfDayMinutes,
         ),
         assert(mergeNeighborThresholdMinutes >= 0);
 
@@ -50,6 +50,9 @@ class ProfileSettings {
 
   /// 提醒类分钟数的合理上界（24 小时）：防止极端大值导致异常调度结果。
   static const maxReminderMinutes = 24 * 60;
+
+  /// 提醒时刻（分钟）上界：23:59。
+  static const maxTimeOfDayMinutes = 23 * 60 + 59;
 
   final String? userId;
   final int reminderMinutes;
@@ -66,9 +69,11 @@ class ProfileSettings {
   final DateTime updatedAt;
 
   static ProfileSettings defaults() {
+    // 单次取 now：timezone 与 updatedAt 来自同一时刻（避免跨午夜边界快照不一致）。
+    final now = DateTime.now();
     return ProfileSettings(
-      timezone: DateTime.now().timeZoneName,
-      updatedAt: DateTime.now(),
+      timezone: now.timeZoneName,
+      updatedAt: now,
     );
   }
 
@@ -132,7 +137,9 @@ class ProfileSettings {
         0,
         mergeNeighborThresholdMinutes ?? this.mergeNeighborThresholdMinutes,
       ),
-      timezone: timezone ?? this.timezone,
+      // timezone 语义上应非空：空/空白串回退当前时区（防损坏数据持久化空值）。
+      timezone: _nonEmptyOrFallback(timezone ?? this.timezone,
+          fallback: DateTime.now().timeZoneName),
       updatedAt: updatedAt ?? this.updatedAt,
     );
   }
@@ -172,10 +179,15 @@ class ProfileSettings {
           0,
           readInt(map['merge_neighbor_threshold_minutes'],
               fallback: defaultMergeNeighborThresholdMinutes)),
-      timezone: readString(map['timezone'],
+      timezone: _nonEmptyOrFallback(readString(map['timezone']),
           fallback: DateTime.now().timeZoneName),
       updatedAt: readDateTime(map['updated_at']),
     );
+  }
+
+  /// 返回 [value]（trim 后非空）否则 [fallback]；防空白时区值绕过兜底。
+  static String _nonEmptyOrFallback(String value, {required String fallback}) {
+    return value.trim().isEmpty ? fallback : value;
   }
 
   /// 将 [value] 钳制到 [min, max]。
@@ -185,10 +197,10 @@ class ProfileSettings {
     return value;
   }
 
-  /// 将"分钟数"钳制到 [0, 23*60+59]，防御损坏数据导致的越界提醒时间。
+  /// 将"分钟数"钳制到 [0, maxTimeOfDayMinutes]，防御损坏数据导致的越界提醒时间。
   static int _clampTimeOfDay(int value) {
     if (value < 0) return 0;
-    if (value > 23 * 60 + 59) return 23 * 60 + 59;
+    if (value > maxTimeOfDayMinutes) return maxTimeOfDayMinutes;
     return value;
   }
 }

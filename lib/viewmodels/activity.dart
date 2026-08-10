@@ -4,6 +4,8 @@ import '../utils/model_utils.dart';
 ///
 /// `toMap` / `fromMap` 与传输格式（同步包 / 文件互通）共用，
 /// 序列化缺键容错（`fromMap` 对缺失字段回退默认值）。
+/// 例外（语义必填，缺失/非法抛 [FormatException]）：`id`、`updated_at`——
+/// `updated_at` 是 LWW 冲突判定关键字段，绝不伪造时间戳。
 class Activity {
   const Activity({
     required this.id,

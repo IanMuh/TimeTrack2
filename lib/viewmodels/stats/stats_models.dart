@@ -1,6 +1,12 @@
 /// 统计聚合类型（纯类型，零 Flutter 依赖）。
 library;
 
+/// 负时长归一化：release 下 [StatsEntrySlice] 的 assert 被移除，此处兜底——
+/// 任何负时长统一归为 0，避免损坏数据被误归入错误时长桶。可独立测试。
+Duration normalizeNonNegativeDuration(Duration duration) {
+  return duration < Duration.zero ? Duration.zero : duration;
+}
+
 /// 统计聚合维度。
 ///
 /// 老项目 4 维 + 一期新增 `categoryTree`（树聚合：按分类祖先链归并，
@@ -23,6 +29,8 @@ enum StatsDimension {
 }
 
 /// 统计分组行（聚合结果的一行）。
+///
+/// 值相等：按 [id] 判定（同一分组行视作相同，用于集合去重/变更判定）。
 class StatsGroupRow {
   StatsGroupRow({
     required this.id,
@@ -48,6 +56,14 @@ class StatsGroupRow {
   /// 祖先链 id（根 → 父），供树形折叠/展开。不可变视图。
   final List<String> ancestorIds;
 
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is StatsGroupRow && runtimeType == other.runtimeType && id == other.id;
+
+  @override
+  int get hashCode => id.hashCode;
+
   StatsGroupRow copyWith({
     String? id,
     String? label,
@@ -70,6 +86,8 @@ class StatsGroupRow {
 }
 
 /// 统计计算输入：单条时间条目切出的片段。
+///
+/// 值相等：按全部字段比较（切片是统计聚合的输入单元，语义上应可判定"同一条"）。
 class StatsEntrySlice {
   StatsEntrySlice({
     required this.activityId,
@@ -81,12 +99,20 @@ class StatsEntrySlice {
     Set<String> linkedCategoryIds = const {},
     List<String> categoryAncestorIds = const [],
     required Duration duration,
-  })  : assert(duration >= Duration.zero, 'duration 必须非负（debug 快速失败）'),
+  })  : assert(
+          (primaryCategoryId == null &&
+                  primaryCategoryLabel == null &&
+                  primaryCategoryColor == null) ||
+              (primaryCategoryId != null &&
+                  primaryCategoryLabel != null &&
+                  primaryCategoryColor != null),
+          'primaryCategory 的 id/label/color 必须同时存在或同时为 null',
+        ),
+        assert(duration >= Duration.zero, 'duration 必须非负（debug 快速失败）'),
         linkedCategoryIds = Set.unmodifiable(linkedCategoryIds),
         categoryAncestorIds = List.unmodifiable(categoryAncestorIds),
-        // 生产环境防御：负时长一律归一为 0（assert 在 release 被移除，此处兜底），
-        // 避免损坏数据被误归入错误时长桶。
-        duration = duration < Duration.zero ? Duration.zero : duration;
+        // 生产环境防御：负时长一律归一为 0（assert 在 release 被移除，此处兜底）。
+        duration = normalizeNonNegativeDuration(duration);
 
   final String activityId;
   final String activityLabel;
@@ -99,6 +125,47 @@ class StatsEntrySlice {
   /// 主分类的祖先链 id（根 → 父），供树聚合归并。
   final List<String> categoryAncestorIds;
   final Duration duration;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is StatsEntrySlice &&
+          runtimeType == other.runtimeType &&
+          activityId == other.activityId &&
+          activityLabel == other.activityLabel &&
+          activityColor == other.activityColor &&
+          primaryCategoryId == other.primaryCategoryId &&
+          primaryCategoryLabel == other.primaryCategoryLabel &&
+          primaryCategoryColor == other.primaryCategoryColor &&
+          _setEquals(linkedCategoryIds, other.linkedCategoryIds) &&
+          _listEquals(categoryAncestorIds, other.categoryAncestorIds) &&
+          duration == other.duration;
+
+  @override
+  int get hashCode => Object.hash(
+        activityId,
+        activityLabel,
+        activityColor,
+        primaryCategoryId,
+        primaryCategoryLabel,
+        primaryCategoryColor,
+        duration,
+        Object.hashAll(linkedCategoryIds.toList()..sort()),
+        Object.hashAll(categoryAncestorIds),
+      );
+
+  static bool _setEquals(Set<String> first, Set<String> second) {
+    if (first.length != second.length) return false;
+    return first.containsAll(second);
+  }
+
+  static bool _listEquals(List<String> first, List<String> second) {
+    if (first.length != second.length) return false;
+    for (var i = 0; i < first.length; i++) {
+      if (first[i] != second[i]) return false;
+    }
+    return true;
+  }
 
   String get durationBucketLabel {
     if (duration < const Duration(minutes: 30)) return '<30m';

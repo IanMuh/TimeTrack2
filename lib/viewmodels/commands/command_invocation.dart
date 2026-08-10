@@ -18,8 +18,23 @@ class CommandInvocation {
     List<String> args = const [],
     Map<String, String> options = const {},
     this.raw,
-  })  : args = List.unmodifiable(args),
-        options = Map.unmodifiable(options);
+  })  : assert(name.trim().isNotEmpty, 'name 不能为空白'),
+        assert(!name.trim().contains(RegExp(r'\s')),
+            'name 必须为单 token（多词指令名请用点分/连字符形式）'),
+        args = List.unmodifiable(args),
+        options = Map.unmodifiable(options) {
+    for (final key in options.keys) {
+      if (key.isEmpty ||
+          key.contains(RegExp(r'\s|=|"|\\')) ||
+          key.startsWith('-')) {
+        throw ArgumentError.value(
+          key,
+          'options',
+          '选项键非法（含空白/等号/引号/反斜杠或以 - 开头），将产生不可解析的 CLI 文本：$key',
+        );
+      }
+    }
+  }
 
   /// 归一化后的指令名（如 `switch`、`category create`）。
   final String name;
@@ -35,7 +50,7 @@ class CommandInvocation {
 
   @override
   String toString() {
-    final buffer = StringBuffer(name);
+    final buffer = StringBuffer(_quoteIfNeeded(name));
     for (final arg in args) {
       buffer.write(' ${_quoteIfNeeded(arg)}');
     }

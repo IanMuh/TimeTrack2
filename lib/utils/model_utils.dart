@@ -47,25 +47,42 @@ int? readNullableInt(Object? value) {
   return null;
 }
 
-/// 读取日期时间字段：仅接受 String（ISO8601，含 UTC），转为本地时区。
+/// 读取日期时间字段：仅接受 String（ISO8601 且**必须携带时区偏移** `Z`/`±HH:MM`），
+/// 转为本地时区。
 ///
-/// 缺键、非 String 或不可解析时：显式传了 [fallback] 则回退之；否则抛
-/// [FormatException]——**默认绝不回退当前时间**，防止伪造时间戳污染同步/冲突判定。
+/// 缺键、非 String、无时区偏移或不可解析时：显式传了 [fallback] 则回退之；否则抛
+/// [FormatException]——默认绝不回退当前时间，防止伪造时间戳污染同步/冲突判定。
+/// 要求携带时区偏移的原因：无时区字符串（如 `2026-08-10T04:00:00`）会被解释为
+/// 读取设备本地时间，同一存储值在不同时区设备上得到不同绝对时刻，破坏 LWW 比较。
 DateTime readDateTime(Object? value, {DateTime? fallback}) {
   if (value is String) {
-    final parsed = DateTime.tryParse(value);
-    if (parsed != null) return parsed.toLocal();
+    final text = value.trim();
+    if (hasTimezoneOffset(text)) {
+      final parsed = DateTime.tryParse(text);
+      if (parsed != null) return parsed.toLocal();
+    }
   }
   if (fallback != null) return fallback;
   throw const FormatException('readDateTime: 时间字段缺失或非法');
 }
 
-/// 读取可空日期时间字段：null / 非 String / 不可解析的值一律返回 null，
+/// 读取可空日期时间字段：null / 非 String / 无时区偏移 / 不可解析的值一律返回 null，
 /// 绝不伪造时间戳——避免把损坏数据误判为"已删除/运行中"。
 DateTime? readNullableDateTime(Object? value) {
   if (value is String) {
-    final parsed = DateTime.tryParse(value);
-    return parsed?.toLocal();
+    final text = value.trim();
+    if (hasTimezoneOffset(text)) {
+      final parsed = DateTime.tryParse(text);
+      return parsed?.toLocal();
+    }
   }
   return null;
 }
+
+/// 判断 ISO8601 字符串是否携带时区偏移（`Z`/`z` 或 `±HH:MM`）。
+///
+/// 时间字段要求必须携带偏移：无偏移字符串（如 `2026-08-10T04:00:00`）会被
+/// [DateTime.parse] 解释为读取设备本地时间，跨设备得到不同绝对时刻，破坏 LWW 比较。
+final timezoneOffsetPattern = RegExp(r'[zZ]$|[+-]\d{2}:\d{2}$');
+
+bool hasTimezoneOffset(String text) => timezoneOffsetPattern.hasMatch(text);

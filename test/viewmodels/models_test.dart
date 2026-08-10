@@ -67,6 +67,21 @@ void main() {
           isNull);
     });
 
+    test('is_unassigned / is_one_off 正例解析与 round-trip 保真', () {
+      final restored = Activity.fromMap({
+        'id': 'u1',
+        'updated_at': '2026-08-10T04:00:00Z',
+        'is_unassigned': 1,
+        'is_one_off': 'true', // 字符串布尔同样识别
+      });
+      expect(restored.isUnassigned, isTrue);
+      expect(restored.isOneOff, isTrue);
+      // round-trip 保真（toMap → fromMap 保持标记）
+      final back = Activity.fromMap(restored.toMap());
+      expect(back.isUnassigned, isTrue);
+      expect(back.isOneOff, isTrue);
+    });
+
     test('round-trip：toMap → fromMap 保真', () {
       final deleted = base.copyWith(
         deletedAt: DateTime.utc(2026, 8, 11, 4),
@@ -142,6 +157,8 @@ void main() {
         deletedAt: DateTime.utc(2026, 8, 11, 4),
       );
       final restored = TimeEntry.fromMap(withDeleted.toMap());
+      expect(restored.id, 'e1');
+      expect(restored.userId, 'u1');
       expect(restored.activityId, 'a1');
       expect(restored.activityNameSnapshot, '工作');
       expect(restored.activityColorSnapshot, 0xff2563eb);
@@ -152,6 +169,11 @@ void main() {
       );
       expect(restored.note, '周会');
       expect(restored.deviceId, 'dev-1');
+      expect(
+        restored.updatedAt.isAtSameMomentAs(t1),
+        isTrue,
+        reason: 'LWW 冲突判定关键字段必须保真',
+      );
       expect(restored.deletedAt!.isAtSameMomentAs(withDeleted.deletedAt!), isTrue);
       expect(restored.isRunning, isFalse);
     });
@@ -221,7 +243,7 @@ void main() {
       );
     });
 
-    test('start_at 缺失或非法 → FormatException（不伪造时间戳）', () {
+    test('start_at 缺失/无时区偏移/非法 → FormatException（不伪造时间戳）', () {
       expect(
         () => TimeEntry.fromMap({'id': 'e', 'activity_id': 'a1'}),
         throwsFormatException,
@@ -234,6 +256,31 @@ void main() {
         () => TimeEntry.fromMap({'id': 'e', 'start_at': 12345}),
         throwsFormatException,
       );
+      // 无时区偏移的时间串视为非法（跨设备解释不一致）
+      expect(
+        () => TimeEntry.fromMap({'id': 'e', 'start_at': '2026-08-10T04:00:00'}),
+        throwsFormatException,
+      );
+    });
+
+    test('end_at 早于 start_at → FormatException（脏数据严格拒绝）', () {
+      expect(
+        () => TimeEntry.fromMap({
+          'id': 'e',
+          'start_at': '2026-08-10T04:00:00Z',
+          'end_at': '2026-08-10T02:00:00Z',
+          'updated_at': '2026-08-10T04:00:00Z',
+        }),
+        throwsFormatException,
+      );
+      // end_at == start_at 允许（零长段不视为脏数据）
+      final same = TimeEntry.fromMap({
+        'id': 'e',
+        'start_at': '2026-08-10T04:00:00Z',
+        'end_at': '2026-08-10T04:00:00Z',
+        'updated_at': '2026-08-10T04:00:00Z',
+      });
+      expect(same.endAt, isNotNull);
     });
 
     test('updated_at 缺失或非法 → FormatException（LWW 冲突判定关键字段）', () {
@@ -332,6 +379,47 @@ void main() {
         ),
         const Duration(hours: 2),
       );
+
+      // 运行中条目：now 晚于 windowEnd → 裁剪到 windowEnd
+      final lateNow = t1.add(const Duration(hours: 3));
+      expect(
+        running.durationInWindow(
+          windowStart: t1.add(const Duration(minutes: 30)),
+          windowEnd: t1.add(const Duration(hours: 2)),
+          now: lateNow,
+        ),
+        const Duration(minutes: 90),
+      );
+      // 运行中条目：now 早于 windowStart → 0
+      expect(
+        running.durationInWindow(
+          windowStart: t1.add(const Duration(minutes: 30)),
+          windowEnd: t1.add(const Duration(hours: 2)),
+          now: t1.add(const Duration(minutes: 10)),
+        ),
+        Duration.zero,
+      );
+    });
+
+    test('等值语义：同 id 相等、异 id 不等、hashCode 一致', () {
+      expect(entry, TimeEntry.fromMap(entry.toMap()));
+      expect(entry.hashCode, TimeEntry.fromMap(entry.toMap()).hashCode);
+      final renamed = entry.copyWith(activityNameSnapshot: '改名');
+      expect(entry == renamed, isTrue, reason: '同 id 视为同一实体（字段差异不影响）');
+      final otherId = entry.copyWith(id: 'other');
+      expect(entry == otherId, isFalse);
+    });
+
+    test('durationUntil：now 早于 startAt 时运行中条目返回 Duration.zero', () {
+      // 已结束条目：now 无关，返回完整时长
+      expect(entry.durationUntil(t1.subtract(const Duration(hours: 1))),
+          const Duration(hours: 2));
+      // 运行中条目：now 早于 startAt → 0
+      final running = entry.copyWith(clearEndAt: true);
+      expect(
+        running.durationUntil(t1.subtract(const Duration(hours: 1))),
+        Duration.zero,
+      );
     });
 
     test('clearUserId 可将 userId 置空', () {
@@ -363,6 +451,29 @@ void main() {
       expect(
         () => ActivityCategory.fromMap({'id': 'c1', 'updated_at': 12345}),
         throwsFormatException,
+      );
+    });
+
+    test('自引用防御：parentId == id 抛错（debug 断言 + fromMap 校验）', () {
+      // fromMap 显式校验
+      expect(
+        () => ActivityCategory.fromMap({
+          'id': 'c1',
+          'parent_id': 'c1',
+          'updated_at': '2026-08-10T04:00:00Z',
+        }),
+        throwsFormatException,
+      );
+      // 直接构造触发构造断言
+      expect(
+        () => ActivityCategory(
+          id: 'c1',
+          name: 'x',
+          color: 0,
+          updatedAt: DateTime.utc(2026, 8, 10, 4),
+          parentId: 'c1',
+        ),
+        throwsA(isA<AssertionError>()),
       );
     });
 
@@ -543,6 +654,21 @@ void main() {
       expect(clamped.mergeNeighborThresholdMinutes, 0);
     });
 
+    test('timezone 空串/空白回退当前时区（防损坏数据持久化空值）', () {
+      final fromEmpty = ProfileSettings.fromMap({
+        'updated_at': '2026-08-10T04:00:00Z',
+        'timezone': '',
+      });
+      expect(fromEmpty.timezone, isNotEmpty);
+      final fromWhitespace = ProfileSettings.fromMap({
+        'updated_at': '2026-08-10T04:00:00Z',
+        'timezone': '   ',
+      });
+      expect(fromWhitespace.timezone, isNotEmpty);
+      final copied = fromEmpty.copyWith(timezone: '');
+      expect(copied.timezone, isNotEmpty);
+    });
+
     test('clearUserId 可将 userId 置空', () {
       final settings = ProfileSettings(
         userId: 'u1',
@@ -571,12 +697,18 @@ void main() {
       final map = settings.toMap();
       expect(map['reminder_method'], 'banner');
       final restored = ProfileSettings.fromMap(map);
+      expect(restored.userId, 'u1');
       expect(restored.reminderMinutes, 30);
       expect(restored.reminderIntervalMinutes, 15);
       expect(restored.reminderMethod, ReminderMethod.banner);
       expect(restored.reminderTimeOfDayMinutes, 600);
       expect(restored.mergeNeighborThresholdMinutes, 3);
       expect(restored.timezone, 'CST');
+      expect(
+        restored.updatedAt.isAtSameMomentAs(DateTime.utc(2026, 8, 10, 4)),
+        isTrue,
+        reason: 'LWW 冲突判定关键字段必须保真',
+      );
       // 未知/缺失/空串存储值回退 dialog
       expect(ReminderMethod.fromStorageValue('unknown'), ReminderMethod.dialog);
       expect(ReminderMethod.fromStorageValue(null), ReminderMethod.dialog);

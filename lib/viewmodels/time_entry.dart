@@ -28,7 +28,11 @@ class TimeEntry {
   final int? activityColorSnapshot;
   final DateTime startAt;
 
-  /// null 表示运行中。
+  /// `endAt == null` 表示运行中（未结束）。
+  ///
+  /// 注意：软删条目（[deletedAt] 非空）不一定落 [endAt]，调用方在使用
+  /// [isRunning] / 时长统计前**必须先过滤 isDeleted**，否则已删除条目会被当作
+  /// 运行中会话持续计入时长。
   final DateTime? endAt;
   final String note;
   final String deviceId;
@@ -86,6 +90,11 @@ class TimeEntry {
       'TimeEntry(id: $id, activityId: $activityId, startAt: $startAt, '
       'endAt: $endAt, isDeleted: $isDeleted)';
 
+  /// 复制并生成新实例。
+  ///
+  /// 注意：`copyWith` **不会自动推进 `updatedAt`**——LWW 合并以 updatedAt 决胜负，
+  /// 修改业务字段后必须显式传入新的 updatedAt，否则修改会携带旧时间戳
+  /// 在同步合并中被远端版本覆盖而丢失。
   TimeEntry copyWith({
     String? id,
     String? userId,
@@ -141,13 +150,21 @@ class TimeEntry {
     if (id is! String || id.isEmpty) {
       throw const FormatException('TimeEntry.fromMap: id 缺失或非法');
     }
-    // start_at 语义必填：缺失/不可解析即抛错，绝不伪造"当前时刻"的幽灵条目。
+    // start_at 语义必填且必须携带时区偏移（Z/±HH:MM）：缺失、无偏移或不可解析
+    // 即抛错，绝不伪造"当前时刻"的幽灵条目。
     final startAtValue = map['start_at'];
-    final startAt = startAtValue is String
+    final startAt = startAtValue is String &&
+            hasTimezoneOffset(startAtValue.trim())
         ? DateTime.tryParse(startAtValue)
         : null;
     if (startAt == null) {
       throw const FormatException('TimeEntry.fromMap: start_at 缺失或非法');
+    }
+    final endAt = readNullableDateTime(map['end_at']);
+    // 时间顺序不变量：end_at 早于 start_at 是脏数据，会令 overlaps/统计失真——
+    // 严格拒绝而非静默容忍。
+    if (endAt != null && endAt.isBefore(startAt)) {
+      throw const FormatException('TimeEntry.fromMap: end_at 早于 start_at');
     }
     return TimeEntry(
       id: id,
@@ -158,7 +175,7 @@ class TimeEntry {
       activityNameSnapshot: readString(map['activity_name']),
       activityColorSnapshot: readNullableInt(map['activity_color']),
       startAt: startAt.toLocal(),
-      endAt: readNullableDateTime(map['end_at']),
+      endAt: endAt,
       note: readString(map['note']),
       deviceId: readString(map['device_id'], fallback: 'unknown'),
       updatedAt: readDateTime(map['updated_at']),

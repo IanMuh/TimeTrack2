@@ -70,10 +70,32 @@ void main() {
   });
 
   group('readDateTime / readNullableDateTime', () {
-    test('合法 ISO8601 字符串解析为本地时区', () {
+    test('合法 ISO8601 字符串（带时区偏移）解析为本地时区', () {
       final parsed = readDateTime('2026-08-10T04:00:00Z');
       expect(parsed.isUtc, isFalse, reason: '应转为本地时区');
       expect(parsed.isAtSameMomentAs(DateTime.utc(2026, 8, 10, 4)), isTrue);
+      // 带 ±HH:MM 偏移同样接受
+      final offset = readDateTime('2026-08-10T04:00:00+08:00');
+      expect(offset.isAtSameMomentAs(DateTime.utc(2026, 8, 9, 20)), isTrue);
+    });
+
+    test('无时区偏移字符串：非法（避免跨设备解释为不同绝对时刻）', () {
+      // 无 fallback → 抛 FormatException
+      expect(
+        () => readDateTime('2026-08-10T04:00:00'),
+        throwsFormatException,
+      );
+      expect(
+        () => readDateTime('2026-08-10'),
+        throwsFormatException,
+      );
+      // 有 fallback → 回退 fallback（不采用无偏移值）
+      final fallback = DateTime.utc(2020);
+      expect(readDateTime('2026-08-10T04:00:00', fallback: fallback),
+          fallback);
+      // 可空版本：无偏移 → null（不伪造、不采用）
+      expect(readNullableDateTime('2026-08-10T04:00:00'), isNull);
+      expect(readNullableDateTime('2026-08-10'), isNull);
     });
 
     test('缺键/非法：显式 fallback 则回退，否则抛 FormatException', () {
@@ -81,15 +103,8 @@ void main() {
       expect(readDateTime(null, fallback: fallback), fallback);
       expect(readDateTime('', fallback: fallback), fallback);
       expect(readDateTime('not-a-date', fallback: fallback), fallback);
-      expect(
-        () => readDateTime(null),
-        throwsA(isA<FormatException>()
-            .having((e) => e.message, 'message', contains('时间字段'))),
-      );
-      expect(
-        () => readDateTime('not-a-date'),
-        throwsFormatException,
-      );
+      expect(() => readDateTime(null), throwsFormatException);
+      expect(() => readDateTime('not-a-date'), throwsFormatException);
       expect(() => readDateTime(12345), throwsFormatException);
     });
 
@@ -98,6 +113,8 @@ void main() {
       expect(readNullableDateTime(''), isNull);
       expect(readNullableDateTime('not-a-date'), isNull);
       expect(readNullableDateTime(12345), isNull);
+      expect(readNullableDateTime('2026-08-10T04:00:00'), isNull,
+          reason: '无时区偏移视为非法');
       final parsed = readNullableDateTime('2026-08-10T04:00:00Z');
       expect(parsed!.isAtSameMomentAs(DateTime.utc(2026, 8, 10, 4)), isTrue);
     });

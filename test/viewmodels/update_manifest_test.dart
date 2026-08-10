@@ -1,6 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timetrack2/viewmodels/update/update_manifest.dart';
 
+/// 64 位小写 hex sha256 fixture（多个用例共用，避免重复内联）。
+const _sha256 = 'abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789';
+
 void main() {
   group('UpdateManifest', () {
     test('完整清单解析', () {
@@ -10,7 +13,7 @@ void main() {
         'release_notes': '修复若干问题',
         'windows': {
           'url': 'https://example.com/TimeTrack-windows-1.2.3.zip',
-          'sha256': 'abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789',
+          'sha256': _sha256,
           'size': 12345,
         },
         'android': {
@@ -24,7 +27,7 @@ void main() {
       expect(manifest.releaseNotes, '修复若干问题');
       expect(manifest.windows!.url, contains('1.2.3.zip'));
       expect(manifest.windows!.sha256,
-          'abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789',
+          _sha256,
           reason: 'sha256 归一化为小写');
       expect(manifest.windows!.size, 12345);
       expect(manifest.android!.sha256,
@@ -41,7 +44,7 @@ void main() {
         },
         'android': {
           'url': 'https://example.com/a.apk',
-          'sha256': 'abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789',
+          'sha256': _sha256,
         },
       });
       expect(manifest.windows!.sha256, manifest.android!.sha256);
@@ -49,14 +52,22 @@ void main() {
       expect(manifest.windows!.sha256, manifest.windows!.sha256.toLowerCase());
     });
 
-    test('缺平台字段：对应平台为 null', () {
-      final manifest = UpdateManifest.fromMap({
+    test('缺平台字段 / 显式 null：对应平台为 null', () {
+      final missing = UpdateManifest.fromMap({
         'version': '1.0.0',
       });
-      expect(manifest.windows, isNull);
-      expect(manifest.android, isNull);
-      expect(manifest.required, isFalse);
-      expect(manifest.releaseNotes, '');
+      expect(missing.windows, isNull);
+      expect(missing.android, isNull);
+      expect(missing.required, isFalse);
+      expect(missing.releaseNotes, '');
+      // 显式 null 与缺键行为一致（容错语义）
+      final explicitNull = UpdateManifest.fromMap({
+        'version': '1.0.0',
+        'windows': null,
+        'android': null,
+      });
+      expect(explicitNull.windows, isNull);
+      expect(explicitNull.android, isNull);
     });
 
     test('缺版本 / 非法 SemVer → FormatException（消息含 version）', () {
@@ -80,6 +91,7 @@ void main() {
       for (final bad in [
         'abc', '1.2', '1.2.3.4', '1.2.3-beta..1', 'v', '01.2.3', '1.02.3',
         '1.2.03', '1.2.3-01', '1.2.3-', '1.2.3+', '1.2.3-pre..1',
+        '1.2.3-pre_1', // 下划线标识符非法
       ]) {
         expect(
           () => UpdateManifest.fromMap({'version': bad}),
@@ -88,10 +100,12 @@ void main() {
           reason: '非法版本 $bad 应被拒绝',
         );
       }
-      // 合法 SemVer（含 pre-release+build 组合；v 前缀按严格 SemVer 拒绝）
+      // 合法 SemVer（含 pre-release+build 组合；数值标识符 0 合法但禁前导零；
+      // v 前缀按严格 SemVer 拒绝）
       for (final good in [
         '1.2.3', '1.2.3-pre.1', '1.2.3+build.5',
-        '1.2.3-pre.1+build.5', '10.0.0-alpha',
+        '1.2.3-pre.1+build.5', '10.0.0-alpha', '1.2.3-0', '1.2.3-0.1',
+        '1.2.3+BUILD',
       ]) {
         expect(
           UpdateManifest.fromMap({'version': good}).version,
@@ -114,7 +128,7 @@ void main() {
         'release_notes': 123, // 非字符串 → 空串
         'windows': {
           'url': 'https://example.com/a.zip',
-          'sha256': 'abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789',
+          'sha256': _sha256,
           'size': '123', // 非数字 → null
         },
       });
@@ -128,7 +142,7 @@ void main() {
         'version': '1.0.0',
         'windows': {
           'url': 'https://example.com/a.zip',
-          'sha256': 'abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789',
+          'sha256': _sha256,
           'size': -100,
         },
       });
@@ -136,12 +150,11 @@ void main() {
     });
 
     test('平台产物缺 url/sha256 / 空对象 / 非对象 / 空白 url → FormatException', () {
-      const sha = 'abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789';
       // 缺 url
       expect(
         () => UpdateManifest.fromMap({
           'version': '1.0.0',
-          'windows': {'sha256': sha},
+          'windows': {'sha256': _sha256},
         }),
         throwsA(isA<FormatException>()
             .having((e) => e.message, 'message', contains('url'))),
@@ -190,7 +203,7 @@ void main() {
       expect(
         () => UpdateManifest.fromMap({
           'version': '1.0.0',
-          'windows': {'url': '', 'sha256': sha},
+          'windows': {'url': '', 'sha256': _sha256},
         }),
         throwsA(isA<FormatException>()
             .having((e) => e.message, 'message', contains('url'))),
@@ -198,7 +211,7 @@ void main() {
       expect(
         () => UpdateManifest.fromMap({
           'version': '1.0.0',
-          'windows': {'url': '   ', 'sha256': sha},
+          'windows': {'url': '   ', 'sha256': _sha256},
         }),
         throwsA(isA<FormatException>()
             .having((e) => e.message, 'message', contains('url'))),
@@ -207,7 +220,7 @@ void main() {
       expect(
         () => UpdateManifest.fromMap({
           'version': '1.0.0',
-          'windows': {'url': 'file:///tmp/a.zip', 'sha256': sha},
+          'windows': {'url': 'file:///tmp/a.zip', 'sha256': _sha256},
         }),
         throwsA(isA<FormatException>()
             .having((e) => e.message, 'message', contains('url'))),
@@ -216,7 +229,7 @@ void main() {
       expect(
         () => UpdateManifest.fromMap({
           'version': '1.0.0',
-          'windows': {'url': 'https://', 'sha256': sha},
+          'windows': {'url': 'https://', 'sha256': _sha256},
         }),
         throwsA(isA<FormatException>()
             .having((e) => e.message, 'message', contains('url'))),
@@ -224,7 +237,7 @@ void main() {
       expect(
         () => UpdateManifest.fromMap({
           'version': '1.0.0',
-          'windows': {'url': 'https:///path', 'sha256': sha},
+          'windows': {'url': 'https:///path', 'sha256': _sha256},
         }),
         throwsA(isA<FormatException>()
             .having((e) => e.message, 'message', contains('url'))),
@@ -232,7 +245,16 @@ void main() {
       expect(
         () => UpdateManifest.fromMap({
           'version': '1.0.0',
-          'windows': {'url': 'https://exa mple.com/a.zip', 'sha256': sha},
+          'windows': {'url': 'https://exa mple.com/a.zip', 'sha256': _sha256},
+        }),
+        throwsA(isA<FormatException>()
+            .having((e) => e.message, 'message', contains('url'))),
+      );
+      // 含凭据（userinfo）的链接拒绝——防止下载日志泄露凭据
+      expect(
+        () => UpdateManifest.fromMap({
+          'version': '1.0.0',
+          'windows': {'url': 'https://user:pass@example.com/a.zip', 'sha256': _sha256},
         }),
         throwsA(isA<FormatException>()
             .having((e) => e.message, 'message', contains('url'))),
@@ -240,7 +262,7 @@ void main() {
       // scheme 大小写不敏感：合法 HTTP:// 通过
       final upper = UpdateManifest.fromMap({
         'version': '1.0.0',
-        'windows': {'url': 'HTTP://EXAMPLE.com/a.zip', 'sha256': sha},
+        'windows': {'url': 'HTTP://EXAMPLE.com/a.zip', 'sha256': _sha256},
       });
       expect(upper.windows!.url, 'HTTP://EXAMPLE.com/a.zip');
     });
@@ -282,10 +304,26 @@ void main() {
       expect(restored.required, isTrue);
       expect(restored.releaseNotes, '修复若干问题');
       expect(restored.windows!.url, 'https://example.com/a.zip');
-      expect(restored.windows!.sha256, 'abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789');
+      expect(restored.windows!.sha256, _sha256);
       expect(restored.windows!.size, 10);
       expect(restored.android!.sha256, '1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef');
       expect(restored.android!.size, 20);
+      // toMap 输出直断：sha256 已归一化为小写 64 hex（防序列化污染持久化数据）
+      final windowsMap = manifest.toMap()['windows'] as Map<String, Object?>;
+      expect(windowsMap['sha256'], _sha256);
+      final androidMap = manifest.toMap()['android'] as Map<String, Object?>;
+      expect(androidMap['sha256'],
+          '1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef');
+      // 可选字段 null size 的写出方式：round-trip 后保持 null
+      final noSize = UpdateManifest.fromMap({
+        'version': '1.0.0',
+        'windows': {'url': 'https://example.com/a.zip', 'sha256': _sha256},
+      });
+      expect(noSize.windows!.size, isNull);
+      expect(
+        UpdateManifest.fromMap(noSize.toMap()).windows!.size,
+        isNull,
+      );
     });
   });
 }

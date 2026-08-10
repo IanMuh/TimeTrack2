@@ -80,6 +80,40 @@ void main() {
           throwsUnsupportedError);
     });
 
+    test('构造校验：非法 name / 选项键直接拒绝', () {
+      // name 含空白 → 断言拒绝（多词指令名不允许，避免 toString 歧义）
+      expect(
+        () => CommandInvocation(name: 'category create'),
+        throwsA(isA<AssertionError>()),
+      );
+      expect(
+        () => CommandInvocation(name: '  '),
+        throwsA(isA<AssertionError>()),
+      );
+      // 非法选项键 → ArgumentError（含空白/= /以 - 开头 / 空键）
+      expect(
+        () => CommandInvocation(name: 'add', options: {'bad key': 'v'}),
+        throwsArgumentError,
+      );
+      expect(
+        () => CommandInvocation(name: 'add', options: {'a=b': 'v'}),
+        throwsArgumentError,
+      );
+      expect(
+        () => CommandInvocation(name: 'add', options: {'-x': 'v'}),
+        throwsArgumentError,
+      );
+      expect(
+        () => CommandInvocation(name: 'add', options: {'': 'v'}),
+        throwsArgumentError,
+      );
+      // 合法构造不抛
+      expect(
+        () => CommandInvocation(name: 'category_create', options: {'note': 'v'}),
+        returnsNormally,
+      );
+    });
+
     test('值相等语义：name/args/options 全同视为相等（raw 不参与）', () {
       final a = CommandInvocation(
         name: 'add',
@@ -99,6 +133,15 @@ void main() {
               options: {'start': '15:00'}), isFalse,
           reason: '选项集不同');
       expect(a == CommandInvocation(name: 'stop'), isFalse);
+      // 仅 args 不同
+      expect(a == CommandInvocation(name: 'add', args: ['讨论'],
+              options: {'start': '15:00', 'end': '16:00'}), isFalse);
+      // args 顺序不同（顺序敏感）
+      expect(CommandInvocation(name: 'x', args: ['a', 'b']) ==
+          CommandInvocation(name: 'x', args: ['b', 'a']), isFalse);
+      // options 同 key 不同 value
+      expect(CommandInvocation(name: 'x', options: {'start': '15:00'}) ==
+          CommandInvocation(name: 'x', options: {'start': '16:00'}), isFalse);
     });
   });
 

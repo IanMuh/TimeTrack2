@@ -5,6 +5,40 @@ void main() {
   group('ActionLog', () {
     test('严格校验：缺失 updated_at/occurred_at 抛 FormatException', () {
       expect(() => ActionLog.fromMap({'id': 'log1'}), throwsFormatException);
+      // 分别缺失单个必填时间字段，定位是哪个字段的校验在生效
+      expect(
+        () => ActionLog.fromMap({
+          'id': 'log1',
+          'occurred_at': '2026-08-10T04:00:00Z',
+        }),
+        throwsFormatException,
+        reason: '仅缺 updated_at 也应抛错',
+      );
+      expect(
+        () => ActionLog.fromMap({
+          'id': 'log1',
+          'updated_at': '2026-08-10T04:00:00Z',
+        }),
+        throwsFormatException,
+        reason: '仅缺 occurred_at 也应抛错',
+      );
+      // 非法时间字符串
+      expect(
+        () => ActionLog.fromMap({
+          'id': 'log1',
+          'updated_at': 'not-a-date',
+          'occurred_at': '2026-08-10T04:00:00Z',
+        }),
+        throwsFormatException,
+      );
+      expect(
+        () => ActionLog.fromMap({
+          'id': 'log1',
+          'updated_at': '2026-08-10T04:00:00Z',
+          'occurred_at': 'not-a-date',
+        }),
+        throwsFormatException,
+      );
       final restored = ActionLog.fromMap({
         'id': 'log1',
         'updated_at': '2026-08-10T04:00:00Z',
@@ -126,6 +160,33 @@ void main() {
         ActionType.fromStorageValue('activityDelete'),
         ActionType.activityDelete,
       );
+    });
+
+    test('copyWith：普通更新与保持原值分支', () {
+      final log = ActionLog(
+        id: 'log1',
+        userId: 'u1',
+        activityId: 'a1',
+        entryId: 'e1',
+        actionType: ActionType.edit,
+        occurredAt: DateTime.utc(2026, 8, 10, 4),
+        deviceId: 'dev',
+        updatedAt: DateTime.utc(2026, 8, 10, 4),
+      );
+      // 普通更新
+      final updated = log.copyWith(
+        userId: 'u2',
+        actionType: ActionType.delete,
+        message: '新消息',
+      );
+      expect(updated.userId, 'u2');
+      expect(updated.actionType, ActionType.delete);
+      expect(updated.message, '新消息');
+      // 未传参数保持原值
+      expect(updated.id, 'log1');
+      expect(updated.activityId, 'a1');
+      expect(updated.entryId, 'e1');
+      expect(updated.deviceId, 'dev');
     });
 
     test('copyWith clear 标志可将关联字段置空', () {

@@ -103,6 +103,7 @@ class UpdateManifest {
     if (trimmed.isEmpty ||
         trimmed.contains(RegExp(r'\s')) ||
         uri == null ||
+        uri.userInfo.isNotEmpty ||
         (scheme != 'http' && scheme != 'https') ||
         uri.host.isEmpty) {
       throw FormatException(
