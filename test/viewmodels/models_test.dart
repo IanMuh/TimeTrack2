@@ -15,8 +15,16 @@ void main() {
       updatedAt: DateTime.utc(2026, 8, 10, 4),
     );
 
-    test('缺键容错：缺失字段回退默认值，不抛异常', () {
-      final restored = Activity.fromMap({'id': 'x'});
+    test('缺键容错：非必填字段缺失回退默认值；updated_at 缺失抛 FormatException', () {
+      // updated_at 语义必填（LWW 冲突判定关键字段）——缺失即抛错，不伪造当前时刻
+      expect(() => Activity.fromMap({'id': 'x'}), throwsFormatException);
+    });
+
+    test('缺键容错：非必填字段缺失回退默认值（提供必填 updated_at）', () {
+      final restored = Activity.fromMap({
+        'id': 'x',
+        'updated_at': '2026-08-10T04:00:00Z',
+      });
       expect(restored.id, 'x');
       expect(restored.name, '');
       expect(restored.color, Activity.defaultColor);
@@ -24,11 +32,6 @@ void main() {
       expect(restored.deletedAt, isNull);
       expect(restored.isUnassigned, isFalse);
       expect(restored.isOneOff, isFalse);
-      // updated_at 缺省回退为当前时间（紧窗口断言，防伪日期）
-      expect(
-        restored.updatedAt.difference(DateTime.now()).abs(),
-        lessThan(const Duration(minutes: 1)),
-      );
     });
 
     test('非法类型容错：值类型错误时回退默认，不抛异常', () {
@@ -38,7 +41,7 @@ void main() {
         'name': 456, // 数字 name
         'color': 'red', // 字符串 color
         'is_favorite': '1', // 字符串布尔
-        'updated_at': 'not-a-date', // 非法时间
+        'updated_at': '2026-08-10T04:00:00Z',
         'deleted_at': '', // 非法软删时间
       });
       expect(restored.userId, isNull);
@@ -46,10 +49,19 @@ void main() {
       expect(restored.color, Activity.defaultColor);
       expect(restored.isFavorite, isFalse);
       expect(restored.deletedAt, isNull);
-      // updated_at 非法 → 当前时间（紧窗口）
+      expect(restored.updatedAt.isAtSameMomentAs(DateTime.utc(2026, 8, 10, 4)),
+          isTrue);
+    });
+
+    test('updated_at 缺失/非法 → FormatException（不伪造时间戳）', () {
+      expect(() => Activity.fromMap({'id': 'x'}), throwsFormatException);
       expect(
-        restored.updatedAt.difference(DateTime.now()).abs(),
-        lessThan(const Duration(minutes: 1)),
+        () => Activity.fromMap({'id': 'x', 'updated_at': 'not-a-date'}),
+        throwsFormatException,
+      );
+      expect(
+        () => Activity.fromMap({'id': 'x', 'updated_at': 12345}),
+        throwsFormatException,
       );
     });
 
@@ -116,7 +128,11 @@ void main() {
     );
 
     test('缺键容错：activity_id 缺省为空串，不抛异常', () {
-      final restored = TimeEntry.fromMap({'id': 'e', 'start_at': '2026-08-10T04:00:00Z'});
+      final restored = TimeEntry.fromMap({
+        'id': 'e',
+        'start_at': '2026-08-10T04:00:00Z',
+        'updated_at': '2026-08-10T04:00:00Z',
+      });
       expect(restored.activityId, '');
       expect(restored.activityNameSnapshot, '');
       expect(restored.activityColorSnapshot, isNull);
@@ -193,6 +209,21 @@ void main() {
       // 双运行条目互相重叠
       final otherRunning = adjacent.copyWith(clearEndAt: true);
       expect(running.overlaps(otherRunning), isTrue);
+      // 反向边界：运行中条目与在其 startAt 之前已结束的历史条目不重叠（+∞ 语义不误读为"与一切重叠"）
+      final history = TimeEntry(
+        id: 'e4',
+        activityId: 'a2',
+        startAt: t1.subtract(const Duration(hours: 2)),
+        endAt: t1.subtract(const Duration(hours: 1)),
+        deviceId: 'dev-1',
+        updatedAt: t1,
+      );
+      expect(running.overlaps(history), isFalse);
+      // durationUntil：now 早于 startAt → Duration.zero
+      expect(
+        running.durationUntil(t1.subtract(const Duration(hours: 1))),
+        Duration.zero,
+      );
     });
 
     test('start_at 缺失或非法 → FormatException（不伪造时间戳）', () {
@@ -218,6 +249,7 @@ void main() {
         'activity_name': 789,
         'note': 999,
         'start_at': '2026-08-10T04:00:00Z',
+        'updated_at': '2026-08-10T04:00:00Z',
         'end_at': '', // 非法结束时间 → null（视为运行中，而非伪造）
       });
       expect(restored.userId, isNull);
@@ -242,7 +274,7 @@ void main() {
         const Duration(minutes: 30),
       );
 
-      // now 早于 startAt（窗口在条目开始之前结束）→ 0
+      // 窗口完全在条目开始之前结束 → 0
       expect(
         entry.durationInWindow(
           windowStart: t1.subtract(const Duration(hours: 2)),
@@ -299,10 +331,28 @@ void main() {
 
   group('ActivityCategory（层级）', () {
     test('parentId 缺键容错：缺省为 null（顶级）', () {
-      final restored = ActivityCategory.fromMap({'id': 'c1'});
+      final restored = ActivityCategory.fromMap({
+        'id': 'c1',
+        'updated_at': '2026-08-10T04:00:00Z',
+      });
       expect(restored.parentId, isNull);
       expect(restored.name, '');
       expect(restored.deletedAt, isNull);
+    });
+
+    test('updated_at 缺失/非法 → FormatException（不伪造时间戳）', () {
+      expect(() => ActivityCategory.fromMap({'id': 'c1'}), throwsFormatException);
+      expect(
+        () => ActivityCategory.fromMap({
+          'id': 'c1',
+          'updated_at': 'not-a-date',
+        }),
+        throwsFormatException,
+      );
+      expect(
+        () => ActivityCategory.fromMap({'id': 'c1', 'updated_at': 12345}),
+        throwsFormatException,
+      );
     });
 
     test('parentId round-trip 保真', () {
@@ -320,7 +370,11 @@ void main() {
     });
 
     test('copyWith clearParentId 可升为顶级', () {
-      final child = ActivityCategory.fromMap({'id': 'c', 'parent_id': 'p'});
+      final child = ActivityCategory.fromMap({
+        'id': 'c',
+        'parent_id': 'p',
+        'updated_at': '2026-08-10T04:00:00Z',
+      });
       expect(child.copyWith(clearParentId: true).parentId, isNull);
     });
 
@@ -331,6 +385,7 @@ void main() {
         'name': 456,
         'color': 'red',
         'parent_id': 789,
+        'updated_at': '2026-08-10T04:00:00Z',
       });
       expect(restored.userId, isNull);
       expect(restored.name, '');
@@ -346,11 +401,28 @@ void main() {
 
   group('ActivityCategoryLink', () {
     test('缺键容错 + isPrimary/sortOrder 默认值', () {
-      final restored = ActivityCategoryLink.fromMap({'id': 'l1'});
+      final restored = ActivityCategoryLink.fromMap({
+        'id': 'l1',
+        'updated_at': '2026-08-10T04:00:00Z',
+      });
       expect(restored.activityId, '');
       expect(restored.categoryId, '');
       expect(restored.isPrimary, isFalse);
       expect(restored.sortOrder, 0);
+    });
+
+    test('updated_at 缺失/非法 → FormatException', () {
+      expect(
+        () => ActivityCategoryLink.fromMap({'id': 'l1'}),
+        throwsFormatException,
+      );
+      expect(
+        () => ActivityCategoryLink.fromMap({
+          'id': 'l1',
+          'updated_at': 'not-a-date',
+        }),
+        throwsFormatException,
+      );
     });
 
     test('round-trip 保真', () {
@@ -382,13 +454,60 @@ void main() {
       expect(defaults.timezone, isNotEmpty);
     });
 
-    test('缺键容错：全部缺失回退默认', () {
-      final restored = ProfileSettings.fromMap(const {});
+    test('缺键容错：全部缺失回退默认（提供必填 updated_at）', () {
+      final restored = ProfileSettings.fromMap({
+        'updated_at': '2026-08-10T04:00:00Z',
+      });
       expect(restored.reminderMinutes, 45);
       expect(restored.reminderIntervalMinutes, 10);
       expect(restored.reminderMethod, ReminderMethod.dialog);
       expect(restored.reminderTimeOfDayMinutes, 540);
       expect(restored.mergeNeighborThresholdMinutes, 1);
+    });
+
+    test('updated_at 缺失 → FormatException', () {
+      expect(() => ProfileSettings.fromMap(const {}), throwsFormatException);
+    });
+
+    test('损坏数值容错：钳制到合法范围', () {
+      final restored = ProfileSettings.fromMap({
+        'updated_at': '2026-08-10T04:00:00Z',
+        'reminder_minutes': -5, // 钳制到 1
+        'reminder_interval_minutes': 0, // 钳制到 1
+        'reminder_time_of_day_minutes': 9999, // 钳制到 23*60+59
+        'merge_neighbor_threshold_minutes': -3, // 钳制到 0
+      });
+      expect(restored.reminderMinutes, 1);
+      expect(restored.reminderIntervalMinutes, 1);
+      expect(restored.reminderTimeOfDayMinutes, 23 * 60 + 59);
+      expect(restored.mergeNeighborThresholdMinutes, 0);
+    });
+
+    test('值相等语义：逐字段比较（供变更检测）', () {
+      final settings = ProfileSettings(
+        reminderMinutes: 30,
+        timezone: 'CST',
+        updatedAt: DateTime.utc(2026, 8, 10, 4),
+      );
+      expect(settings, settings.copyWith(reminderMinutes: 30),
+          reason: '字段全同视为相等');
+      expect(settings == settings.copyWith(reminderMinutes: 60), isFalse,
+          reason: '任一字段不同视为不相等');
+      expect(settings.hashCode, settings.copyWith(reminderMinutes: 30).hashCode);
+    });
+
+    test('clearUserId 可将 userId 置空', () {
+      final settings = ProfileSettings(
+        userId: 'u1',
+        timezone: 'CST',
+        updatedAt: DateTime.utc(2026, 8, 10, 4),
+      );
+      expect(settings.copyWith(clearUserId: true).userId, isNull);
+      expect(settings.copyWith(userId: 'u2').userId, 'u2');
+      expect(
+        settings.copyWith(userId: 'u2').copyWith(clearUserId: true).userId,
+        isNull,
+      );
     });
 
     test('round-trip 保真 + ReminderMethod 存储值', () {

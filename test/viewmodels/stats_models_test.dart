@@ -3,24 +3,15 @@ import 'package:timetrack2/viewmodels/stats/stats_models.dart';
 
 void main() {
   group('StatsEntrySlice', () {
-    test('durationBucketLabel 分桶边界', () {
-      // 边界用例
-      expect(
-        _slice(const Duration(minutes: 29)).durationBucketLabel,
-        '<30m',
-      );
-      expect(
-        _slice(const Duration(minutes: 30)).durationBucketLabel,
-        '30m-1h',
-      );
-      expect(
-        _slice(const Duration(hours: 1)).durationBucketLabel,
-        '1-3h',
-      );
-      expect(
-        _slice(const Duration(hours: 3)).durationBucketLabel,
-        '3h+',
-      );
+    test('durationBucketLabel 分桶边界（含紧邻阈值两侧）', () {
+      expect(_slice(const Duration(minutes: 29)).durationBucketLabel, '<30m');
+      expect(_slice(const Duration(minutes: 30)).durationBucketLabel, '30m-1h');
+      expect(_slice(const Duration(minutes: 59)).durationBucketLabel, '30m-1h');
+      expect(_slice(const Duration(minutes: 60)).durationBucketLabel, '1-3h');
+      expect(_slice(const Duration(minutes: 61)).durationBucketLabel, '1-3h');
+      expect(_slice(const Duration(minutes: 179)).durationBucketLabel, '1-3h');
+      expect(_slice(const Duration(minutes: 180)).durationBucketLabel, '3h+');
+      expect(_slice(const Duration(minutes: 181)).durationBucketLabel, '3h+');
     });
 
     test('durationBucketColor 与桶对应', () {
@@ -46,32 +37,71 @@ void main() {
       expect(_slice(Duration.zero).durationBucketLabel, '<30m');
     });
 
-    test('负时长构造触发非负断言（debug 模式）', () {
-      expect(
-        () => _slice(const Duration(minutes: -5)),
-        throwsA(isA<AssertionError>()),
-      );
+    test('负时长在 release 语义下归一化为 0（不依赖 assert）', () {
+      final slice = _slice(const Duration(minutes: -5));
+      expect(slice.duration, Duration.zero);
+      expect(slice.durationBucketLabel, '<30m');
     });
   });
 
   group('StatsGroupRow', () {
     test('copyWith 保留未变字段', () {
-      const row = StatsGroupRow(
+      final row = StatsGroupRow(
         id: 'g1',
         label: '工作 / 项目A',
-        totalDuration: Duration(minutes: 90),
+        totalDuration: const Duration(minutes: 90),
         count: 3,
         color: 0xff2563eb,
         depth: 1,
-        ancestorIds: ['root'],
+        ancestorIds: const ['root'],
       );
       final updated = row.copyWith(totalDuration: const Duration(hours: 2));
       expect(updated.id, 'g1');
       expect(updated.label, '工作 / 项目A');
       expect(updated.totalDuration, const Duration(hours: 2));
       expect(updated.count, 3);
+      expect(updated.color, 0xff2563eb);
       expect(updated.depth, 1);
       expect(updated.ancestorIds, ['root']);
+    });
+
+    test('ancestorIds 不可变视图', () {
+      final mutable = <String>['root', 'parent'];
+      final row = StatsGroupRow(
+        id: 'g1',
+        label: 'x',
+        totalDuration: Duration.zero,
+        count: 0,
+        color: 0,
+        ancestorIds: mutable,
+      );
+      mutable.add('被修改');
+      expect(row.ancestorIds, ['root', 'parent']);
+      expect(() => row.ancestorIds.add('x'), throwsUnsupportedError);
+    });
+
+    test('StatsEntrySlice 集合不可变视图', () {
+      final linked = <String>{'c1'};
+      final ancestors = <String>['root'];
+      final slice = StatsEntrySlice(
+        activityId: 'a1',
+        activityLabel: '工作',
+        activityColor: 0xff2563eb,
+        primaryCategoryId: null,
+        primaryCategoryLabel: null,
+        primaryCategoryColor: null,
+        linkedCategoryIds: linked,
+        categoryAncestorIds: ancestors,
+        duration: Duration.zero,
+      );
+      linked.add('c2');
+      ancestors.add('c1');
+      expect(slice.linkedCategoryIds, {'c1'});
+      expect(slice.categoryAncestorIds, ['root']);
+      expect(() => slice.linkedCategoryIds.add('x'),
+          throwsUnsupportedError);
+      expect(() => slice.categoryAncestorIds.add('x'),
+          throwsUnsupportedError);
     });
   });
 

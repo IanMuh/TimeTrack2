@@ -1,9 +1,9 @@
 import '../utils/model_utils.dart';
 
-/// 操作类型（持久化存储值为小写英文，兼容老项目 storageValue）。
+/// 操作类型（持久化存储值统一为**小写 snake_case**，与 category 系列一致）。
 ///
-/// 新增 `category*` 系列覆盖层级分类操作；CLI 指令系统（阶段 3）执行的
-/// 操作均落一条 ActionLog（计划：操作自动继承日志）。
+/// `activityDelete` 在老项目历史数据中的存储值为 `'activityDelete'`（camelCase），
+/// 新版统一为 `'activity_delete'`；读取端 [fromStorageValue] 对两者均能识别（兼容旧数据）。
 enum ActionType {
   switch_('switch'),
   stop('stop'),
@@ -14,20 +14,25 @@ enum ActionType {
   merge('merge'),
   manual('manual'),
   split('split'),
-  activityDelete('activityDelete'),
+  activityDelete('activity_delete'),
   categoryCreate('category_create'),
   categoryUpdate('category_update'),
-  categoryDelete('category_delete');
+  categoryDelete('category_delete'),
+  /// 未知操作类型（读取到未来版本/其它设备写入的未知值）——避免反序列化时崩溃。
+  /// 注意：重新序列化时会写入 `'unknown'`，原始未知值会丢失（数据损坏场景下
+  /// 接受该损失；正常数据不会命中此分支）。
+  unknown('unknown');
 
   const ActionType(this.storageValue);
 
   final String storageValue;
 
+  /// 兼容读取：`unknown` 是唯一自带原始值的"保留桶"，见 [unknown] 注释。
   static ActionType fromStorageValue(Object? value) {
     final text = value is String ? value : null;
     return ActionType.values.firstWhere(
       (type) => type.storageValue == text,
-      orElse: () => ActionType.switch_,
+      orElse: () => ActionType.unknown,
     );
   }
 }

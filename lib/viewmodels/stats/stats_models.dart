@@ -24,15 +24,15 @@ enum StatsDimension {
 
 /// 统计分组行（聚合结果的一行）。
 class StatsGroupRow {
-  const StatsGroupRow({
+  StatsGroupRow({
     required this.id,
     required this.label,
     required this.totalDuration,
     required this.count,
     required this.color,
     this.depth = 0,
-    this.ancestorIds = const [],
-  });
+    List<String> ancestorIds = const [],
+  }) : ancestorIds = List.unmodifiable(ancestorIds);
 
   final String id;
 
@@ -45,7 +45,7 @@ class StatsGroupRow {
   /// 树聚合时的缩进层级（0=顶层）。
   final int depth;
 
-  /// 祖先链 id（根 → 父），供树形折叠/展开。
+  /// 祖先链 id（根 → 父），供树形折叠/展开。不可变视图。
   final List<String> ancestorIds;
 
   StatsGroupRow copyWith({
@@ -71,17 +71,21 @@ class StatsGroupRow {
 
 /// 统计计算输入：单条时间条目切出的片段。
 class StatsEntrySlice {
-  const StatsEntrySlice({
+  StatsEntrySlice({
     required this.activityId,
     required this.activityLabel,
     required this.activityColor,
     required this.primaryCategoryId,
     required this.primaryCategoryLabel,
     required this.primaryCategoryColor,
-    this.linkedCategoryIds = const {},
-    this.categoryAncestorIds = const [],
-    required this.duration,
-  }) : assert(duration >= Duration.zero, 'duration 必须非负');
+    Set<String> linkedCategoryIds = const {},
+    List<String> categoryAncestorIds = const [],
+    required Duration duration,
+  })  : linkedCategoryIds = Set.unmodifiable(linkedCategoryIds),
+        categoryAncestorIds = List.unmodifiable(categoryAncestorIds),
+        // 生产环境防御：负时长一律归一为 0（不依赖 assert——release 下同样生效），
+        // 避免损坏数据被误归入错误时长桶。
+        duration = duration < Duration.zero ? Duration.zero : duration;
 
   final String activityId;
   final String activityLabel;

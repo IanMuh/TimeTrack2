@@ -85,10 +85,24 @@ class ActivityCategory {
       userId: readNullableString(map['user_id']),
       name: readString(map['name']),
       color: readInt(map['color'], fallback: defaultColor),
-      updatedAt: readDateTime(map['updated_at']),
+      // updated_at 语义必填（LWW 冲突判定关键字段）：缺失/非法即抛错，绝不伪造当前时刻。
+      updatedAt: _strictDateTime(map, 'ActivityCategory'),
       deletedAt: readNullableDateTime(map['deleted_at']),
       parentId: readNullableString(map['parent_id']),
     );
+  }
+
+  /// 严格读取必填时间字段：缺失或不可解析抛 [FormatException]（防伪造时间戳）。
+  static DateTime _strictDateTime(
+    Map<String, Object?> map,
+    String fromClass,
+  ) {
+    final value = map['updated_at'];
+    final parsed = value is String ? DateTime.tryParse(value) : null;
+    if (parsed == null) {
+      throw FormatException('$fromClass.fromMap: updated_at 缺失或非法');
+    }
+    return parsed.toLocal();
   }
 }
 
@@ -171,6 +185,15 @@ class ActivityCategoryLink {
     if (id is! String || id.isEmpty) {
       throw const FormatException('ActivityCategoryLink.fromMap: id 缺失或非法');
     }
+    final updatedAtValue = map['updated_at'];
+    final updatedAt = updatedAtValue is String
+        ? DateTime.tryParse(updatedAtValue)
+        : null;
+    if (updatedAt == null) {
+      throw const FormatException(
+        'ActivityCategoryLink.fromMap: updated_at 缺失或非法',
+      );
+    }
     return ActivityCategoryLink(
       id: id,
       userId: readNullableString(map['user_id']),
@@ -178,7 +201,7 @@ class ActivityCategoryLink {
       categoryId: readString(map['category_id']),
       isPrimary: readBool(map['is_primary']),
       sortOrder: readInt(map['sort_order']),
-      updatedAt: readDateTime(map['updated_at']),
+      updatedAt: updatedAt.toLocal(),
       deletedAt: readNullableDateTime(map['deleted_at']),
     );
   }

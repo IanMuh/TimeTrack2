@@ -59,7 +59,7 @@ void main() {
       expect(manifest.releaseNotes, '');
     });
 
-    test('缺版本 → FormatException（消息含 version）', () {
+    test('缺版本 / 非法 SemVer → FormatException（消息含 version）', () {
       expect(
         () => UpdateManifest.fromMap(const {}),
         throwsA(isA<FormatException>()
@@ -70,18 +70,35 @@ void main() {
         throwsA(isA<FormatException>()
             .having((e) => e.message, 'message', contains('version'))),
       );
-      // 非字符串 version 同样报错
+      // 非字符串 version
       expect(
         () => UpdateManifest.fromMap({'version': 123}),
         throwsA(isA<FormatException>()
             .having((e) => e.message, 'message', contains('version'))),
       );
+      // 非法 SemVer 格式（快速失败，而非等到语义比较才暴露）
+      for (final bad in ['abc', '1.2', '1.2.3.4', '1.2.3-beta..1', 'v']) {
+        expect(
+          () => UpdateManifest.fromMap({'version': bad}),
+          throwsA(isA<FormatException>()
+              .having((e) => e.message, 'message', contains('version'))),
+          reason: '非法版本 $bad 应被拒绝',
+        );
+      }
+      // 合法 SemVer（含 v 前缀/pre-release/build 元数据）通过
+      for (final good in ['1.2.3', 'v1.2.3', '1.2.3-pre.1', '1.2.3+build.5']) {
+        expect(
+          UpdateManifest.fromMap({'version': good}).version,
+          good,
+          reason: '合法版本 $good 应通过',
+        );
+      }
     });
 
     test('非字符串可选字段：容错回退默认，不抛异常', () {
       final manifest = UpdateManifest.fromMap({
         'version': '1.0.0',
-        'required': 'true', // 字符串布尔 → false
+        'required': 'true', // 字符串布尔 → 识别为 true（强制更新不因手写 JSON 丢失）
         'release_notes': 123, // 非字符串 → 空串
         'windows': {
           'url': 'https://example.com/a.zip',
@@ -89,12 +106,24 @@ void main() {
           'size': '123', // 非数字 → null
         },
       });
-      expect(manifest.required, isFalse);
+      expect(manifest.required, isTrue);
       expect(manifest.releaseNotes, '');
       expect(manifest.windows!.size, isNull);
     });
 
-    test('平台产物缺 url/sha256 / 空对象 / 非对象 → FormatException', () {
+    test('负 size → 回退 null', () {
+      final manifest = UpdateManifest.fromMap({
+        'version': '1.0.0',
+        'windows': {
+          'url': 'https://example.com/a.zip',
+          'sha256': 'abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789',
+          'size': -100,
+        },
+      });
+      expect(manifest.windows!.size, isNull);
+    });
+
+    test('平台产物缺 url/sha256 / 空对象 / 非对象 / 空白 url → FormatException', () {
       const sha = 'abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789';
       // 缺 url
       expect(
@@ -145,16 +174,43 @@ void main() {
         }),
         throwsFormatException,
       );
+      // 空串/纯空白 url → 抛错（产生无效下载链接前快速失败）
+      expect(
+        () => UpdateManifest.fromMap({
+          'version': '1.0.0',
+          'windows': {'url': '', 'sha256': sha},
+        }),
+        throwsA(isA<FormatException>()
+            .having((e) => e.message, 'message', contains('url'))),
+      );
+      expect(
+        () => UpdateManifest.fromMap({
+          'version': '1.0.0',
+          'windows': {'url': '   ', 'sha256': sha},
+        }),
+        throwsA(isA<FormatException>()
+            .having((e) => e.message, 'message', contains('url'))),
+      );
+      // 非 http/https scheme 拒绝
+      expect(
+        () => UpdateManifest.fromMap({
+          'version': '1.0.0',
+          'windows': {'url': 'file:///tmp/a.zip', 'sha256': sha},
+        }),
+        throwsA(isA<FormatException>()
+            .having((e) => e.message, 'message', contains('url'))),
+      );
     });
 
     test('sha256 格式非法（长度/非 hex）→ FormatException', () {
       const tooShort = 'abcdef';
       const notHex = 'zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz';
+      const url = 'https://example.com/a.zip';
       for (final bad in [tooShort, notHex]) {
         expect(
           () => UpdateManifest.fromMap({
             'version': '1.0.0',
-            'windows': {'url': 'x', 'sha256': bad},
+            'windows': {'url': url, 'sha256': bad},
           }),
           throwsA(isA<FormatException>()
               .having((e) => e.message, 'message', contains('sha256'))),

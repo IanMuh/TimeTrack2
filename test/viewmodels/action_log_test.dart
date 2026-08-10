@@ -3,10 +3,16 @@ import 'package:timetrack2/viewmodels/action_log.dart';
 
 void main() {
   group('ActionLog', () {
-    test('缺键容错：仅 id 存在即不抛异常', () {
-      final restored = ActionLog.fromMap({'id': 'log1'});
+    test('缺键容错：仅 id 存在即不抛异常（updated_at/occurred_at 缺失 → FormatException）', () {
+      expect(() => ActionLog.fromMap({'id': 'log1'}), throwsFormatException);
+      final restored = ActionLog.fromMap({
+        'id': 'log1',
+        'updated_at': '2026-08-10T04:00:00Z',
+        'occurred_at': '2026-08-10T04:00:00Z',
+      });
       expect(restored.id, 'log1');
-      expect(restored.actionType, ActionType.switch_);
+      expect(restored.actionType, ActionType.unknown,
+          reason: '缺省 action_type 回退 unknown 而非伪造 switch');
       expect(restored.activityId, isNull);
       expect(restored.entryId, isNull);
       expect(restored.message, '');
@@ -14,9 +20,32 @@ void main() {
       expect(restored.deletedAt, isNull);
     });
 
+    test('非空 deletedAt 序列化保真 + isDeleted getter', () {
+      final log = ActionLog(
+        id: 'log1',
+        actionType: ActionType.delete,
+        occurredAt: DateTime.utc(2026, 8, 10, 4),
+        deviceId: 'dev',
+        updatedAt: DateTime.utc(2026, 8, 10, 4),
+        deletedAt: DateTime.utc(2026, 8, 10, 4, 30),
+      );
+      expect(log.isDeleted, isTrue);
+      final restored = ActionLog.fromMap(log.toMap());
+      expect(restored.isDeleted, isTrue);
+      expect(
+        restored.deletedAt!.isAtSameMomentAs(DateTime.utc(2026, 8, 10, 4, 30)),
+        isTrue,
+      );
+      final cleared = restored.copyWith(clearDeletedAt: true);
+      expect(cleared.isDeleted, isFalse);
+      expect(cleared.deletedAt, isNull);
+    });
+
     test('非法类型容错：非关键字段类型错误回退默认，不抛异常', () {
       final restored = ActionLog.fromMap({
         'id': 'log1',
+        'updated_at': '2026-08-10T04:00:00Z',
+        'occurred_at': '2026-08-10T04:00:00Z',
         'user_id': 123,
         'action_type': 456,
         'activity_id': 789,
@@ -24,7 +53,7 @@ void main() {
         'message': 1213,
       });
       expect(restored.userId, isNull);
-      expect(restored.actionType, ActionType.switch_);
+      expect(restored.actionType, ActionType.unknown);
       expect(restored.activityId, isNull);
       expect(restored.entryId, isNull);
       expect(restored.message, '');
@@ -73,30 +102,24 @@ void main() {
       expect(restored.updatedAt.isAtSameMomentAs(local), isTrue);
     });
 
-    test('未知/缺失/非字符串 action_type 回退 switch', () {
-      expect(ActionType.fromStorageValue('nope'), ActionType.switch_);
-      expect(ActionType.fromStorageValue(null), ActionType.switch_);
-      expect(ActionType.fromStorageValue(''), ActionType.switch_);
-      expect(ActionType.fromStorageValue(123), ActionType.switch_);
+    test('未知/缺失/非字符串 action_type 回退 unknown', () {
+      expect(ActionType.fromStorageValue('nope'), ActionType.unknown);
+      expect(ActionType.fromStorageValue(null), ActionType.unknown);
+      expect(ActionType.fromStorageValue(''), ActionType.unknown);
+      expect(ActionType.fromStorageValue(123), ActionType.unknown);
     });
 
-    test('新增 category 操作类型：精确存储值 + 可序列化', () {
+    test('activityDelete 与 category 系列存储值为小写 snake_case', () {
       const cases = <(ActionType, String)>[
+        (ActionType.activityDelete, 'activity_delete'),
         (ActionType.categoryCreate, 'category_create'),
         (ActionType.categoryUpdate, 'category_update'),
         (ActionType.categoryDelete, 'category_delete'),
       ];
       for (final (type, storageValue) in cases) {
-        final log = ActionLog(
-          id: 'x',
-          actionType: type,
-          occurredAt: DateTime.utc(2026, 8, 10),
-          deviceId: 'dev',
-          updatedAt: DateTime.utc(2026, 8, 10),
-        );
-        expect(log.toMap()['action_type'], storageValue);
-        final restored = ActionLog.fromMap(log.toMap());
-        expect(restored.actionType, type);
+        expect(type.storageValue, storageValue);
+        // 读取端回环
+        expect(ActionType.fromStorageValue(storageValue), type);
       }
     });
 
