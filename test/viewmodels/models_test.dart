@@ -274,6 +274,18 @@ void main() {
         }),
         throwsFormatException,
       );
+      // 直接构造：debug 下断言 AssertionError（release 下构造体硬校验 ArgumentError）
+      expect(
+        () => TimeEntry(
+          id: 'e',
+          activityId: 'a1',
+          startAt: DateTime.utc(2026, 8, 10, 4),
+          endAt: DateTime.utc(2026, 8, 10, 2),
+          deviceId: 'dev',
+          updatedAt: DateTime.utc(2026, 8, 10, 4),
+        ),
+        throwsA(isA<AssertionError>()),
+      );
       // end_at == start_at 允许（零长段不视为脏数据）
       final same = TimeEntry.fromMap({
         'id': 'e',
@@ -485,7 +497,8 @@ void main() {
         }),
         throwsFormatException,
       );
-      // 直接构造触发构造断言
+      // 直接构造：debug 下断言抛 AssertionError；release 下构造体硬校验抛 ArgumentError
+      // （此处运行于 debug 模式，断言 AssertionError）
       expect(
         () => ActivityCategory(
           id: 'c1',
@@ -496,6 +509,21 @@ void main() {
         ),
         throwsA(isA<AssertionError>()),
       );
+    });
+
+    test('空白 parentId 归一化为 null（顶级）', () {
+      final fromWhitespace = ActivityCategory.fromMap({
+        'id': 'c1',
+        'parent_id': '   ',
+        'updated_at': '2026-08-10T04:00:00Z',
+      });
+      expect(fromWhitespace.parentId, isNull);
+      final fromEmpty = ActivityCategory.fromMap({
+        'id': 'c1',
+        'parent_id': '',
+        'updated_at': '2026-08-10T04:00:00Z',
+      });
+      expect(fromEmpty.parentId, isNull);
     });
 
     test('parentId round-trip 保真', () {
@@ -696,6 +724,14 @@ void main() {
       expect(fromWhitespace.timezone, expected);
       final copied = fromEmpty.copyWith(timezone: '');
       expect(copied.timezone, expected);
+      // 直接构造空 timezone：debug 下断言拒绝（唯一旁路入口）
+      expect(
+        () => ProfileSettings(
+          timezone: '',
+          updatedAt: DateTime.utc(2026, 8, 10, 4),
+        ),
+        throwsA(isA<AssertionError>()),
+      );
     });
 
     test('clearUserId 可将 userId 置空', () {

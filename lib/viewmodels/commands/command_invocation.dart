@@ -81,13 +81,19 @@ class CommandInvocation {
   }
 
   /// 含空白/引号/反斜杠/空串/前导横线的值为保证可往返解析，用双引号包裹；
-  /// 转义顺序：先反斜杠（`\` → `\\`）再双引号（`"` → `\"`），保证无损还原。
+  /// 转义顺序：反斜杠 → 双引号 → 控制字符（\n → \\n、\t → \\t、\r → \\r），
+  /// 保证无损还原（解析器按转义规则反转义）。
   static String _quoteIfNeeded(String value) {
     final needsQuote = value.isEmpty ||
         value.startsWith('-') ||
         value.contains(_needsQuotePattern);
     if (!needsQuote) return value;
-    return '"${value.replaceAll('\\', r'\\').replaceAll('"', r'\"')}"';
+    return '"${value
+        .replaceAll('\\', r'\\')
+        .replaceAll('"', r'\"')
+        .replaceAll('\n', r'\n')
+        .replaceAll('\t', r'\t')
+        .replaceAll('\r', r'\r')}"';
   }
 
   /// 值相等语义：比较 name/args/options（raw 仅作追溯，不参与相等性）。
@@ -123,11 +129,9 @@ class CommandInvocation {
   }
 
   static int _hashMap(Map<String, String> map) {
-    var hash = 0;
-    for (final entry in map.entries) {
-      hash = hash ^ Object.hash(entry.key, entry.value);
-    }
-    return hash;
+    return Object.hashAllUnordered(
+      map.entries.map((entry) => Object.hash(entry.key, entry.value)),
+    );
   }
 }
 
@@ -163,7 +167,7 @@ class CommandSuccess<T> extends CommandResult {
   final String? message;
 
   @override
-  String toString() => 'CommandSuccess<T>(message: $message)';
+  String toString() => '$runtimeType(message: $message)';
 
   @override
   bool operator ==(Object other) =>

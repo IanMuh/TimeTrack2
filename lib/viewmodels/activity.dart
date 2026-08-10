@@ -17,7 +17,7 @@ class Activity {
     this.deletedAt,
     this.isUnassigned = false,
     this.isOneOff = false,
-  });
+  }) : assert(id != '', 'id 不能为空');
 
   /// 默认事项色（与 `constants/app_constants.dart` 的 `defaultActivityColor` 保持一致）。
   static const defaultColor = 0xff64748b;

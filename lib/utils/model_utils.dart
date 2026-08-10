@@ -9,8 +9,9 @@
 /// - 时间读取：需要默认值时显式传 `fallback`；不传且缺键/非法 → 抛 [FormatException]。
 library;
 
-/// 读取布尔字段：兼容 bool、有限数字（0/1）、`'true'`/`'false'`（忽略大小写/空白）与 null。
-/// 非有限数字（NaN/±Infinity）与无法识别的值一律回退 false。
+/// 读取布尔字段：兼容 bool、有限数字（**任意非零视为 true，仅 0 视为 false**）、
+/// `'true'`/`'false'`（忽略大小写/空白）与 null。非有限数字（NaN/±Infinity）与
+/// 无法识别的值一律回退 false。
 ///
 /// 注意：字符串 `'1'`/`'0'` **不识别**为布尔（仅识别 `'true'`/`'false'`）——若上游
 /// 序列化用 `"0"/"1"` 表达布尔，字段会回退 false 并在 round-trip 后丢失标记；
@@ -58,40 +59,28 @@ int? readNullableInt(Object? value) {
 /// [FormatException]——默认绝不回退当前时间，防止伪造时间戳污染同步/冲突判定。
 /// 要求携带时区偏移的原因：无时区字符串（如 `2026-08-10T04:00:00`）会被解释为
 /// 读取设备本地时间，同一存储值在不同时区设备上得到不同绝对时刻，破坏 LWW 比较。
-DateTime readDateTime(Object? value, {DateTime? fallback}) {
-  if (value is String) {
-    final text = value.trim();
-    if (hasTimezoneOffset(text)) {
-      final parsed = DateTime.tryParse(text);
-      if (parsed != null) return parsed.toLocal();
-    }
-  }
+/// [fieldName] 用于异常消息定位（如 `updated_at`），风格与各模型一致。
+DateTime readDateTime(Object? value, {DateTime? fallback, String fieldName = '时间字段'}) {
+  final parsed = _parseUtcDateTime(value);
+  if (parsed != null) return parsed;
   if (fallback != null) return fallback;
-  throw const FormatException('readDateTime: 时间字段缺失或非法');
+  throw FormatException('readDateTime: $fieldName 缺失或非法');
 }
 
 /// 读取可空日期时间字段：null / 非 String / 无时区偏移 / 不可解析的值一律返回 null，
 /// 绝不伪造时间戳——避免把损坏数据误判为"已删除/运行中"。
 DateTime? readNullableDateTime(Object? value) {
-  if (value is String) {
-    final text = value.trim();
-    if (hasTimezoneOffset(text)) {
-      final parsed = DateTime.tryParse(text);
-      return parsed?.toLocal();
-    }
-  }
-  return null;
+  return _parseUtcDateTime(value);
 }
 
-/// 判断 ISO8601 字符串是否携带时区偏移。
-///
-/// 判定方式：`DateTime.parse` 对携带偏移（`Z`/`±HH:MM`/`±HHMM`/`±HH`）的时间串
-/// 解析结果为 UTC（`isUtc == true`），无偏移时间串按本地时间解析（`isUtc == false`）。
-/// 用解析结果而非正则匹配，可避免 `2026-08-10` 中 `-10` 被误判为偏移等边界问题。
-/// 时间字段要求必须携带偏移：无偏移字符串会被 `DateTime.parse` 解释为读取设备
-/// 本地时间，跨设备得到不同绝对时刻，破坏 LWW 比较。
-bool hasTimezoneOffset(String text) {
+/// 单次解析：同时完成"是否携带时区偏移"判定与解析，避免对同一字符串解析两次。
+/// 仅接受携带偏移（`Z`/`±HH:MM`/`±HHMM`/`±HH`）的 ISO8601 字符串——携带偏移时
+/// [DateTime.parse] 结果为 UTC（`isUtc == true`），无偏移串按本地时间解析（isUtc == false，
+/// 跨设备绝对时刻不一致，一律拒绝）。
+DateTime? _parseUtcDateTime(Object? value) {
+  if (value is! String) return null;
+  final text = value.trim();
   final parsed = DateTime.tryParse(text);
-  if (parsed == null) return false;
-  return parsed.isUtc;
+  if (parsed == null || !parsed.isUtc) return null;
+  return parsed.toLocal();
 }

@@ -182,6 +182,29 @@ void main() {
         categoryAncestorIds: ['c1', 'root'],
         duration: const Duration(minutes: 30),
       ), isFalse);
+      // 多元素 linkedCategoryIds 顺序无关：== 与 hashCode 一致
+      final multi1 = StatsEntrySlice(
+        activityId: 'a1',
+        activityLabel: '工作',
+        activityColor: 0xff2563eb,
+        primaryCategoryId: null,
+        primaryCategoryLabel: null,
+        primaryCategoryColor: null,
+        linkedCategoryIds: {'c1', 'c2', 'c3'},
+        duration: Duration.zero,
+      );
+      final multi2 = StatsEntrySlice(
+        activityId: 'a1',
+        activityLabel: '工作',
+        activityColor: 0xff2563eb,
+        primaryCategoryId: null,
+        primaryCategoryLabel: null,
+        primaryCategoryColor: null,
+        linkedCategoryIds: {'c3', 'c1', 'c2'},
+        duration: Duration.zero,
+      );
+      expect(multi1 == multi2, isTrue, reason: 'Set 顺序无关');
+      expect(multi1.hashCode, multi2.hashCode);
     });
   });
 

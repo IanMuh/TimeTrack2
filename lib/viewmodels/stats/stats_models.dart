@@ -7,6 +7,35 @@ Duration normalizeNonNegativeDuration(Duration duration) {
   return duration < Duration.zero ? Duration.zero : duration;
 }
 
+/// 时长桶：统一承载边界判定、标签与颜色（单一事实来源，
+/// 避免标签-颜色字符串 switch 漂移；新增分桶只改此处）。
+enum DurationBucket {
+  under30('<30m', Duration(minutes: 30), 0xff94a3b8),
+  halfTo1h('30m-1h', Duration(hours: 1), 0xff0ea5e9),
+  oneTo3h('1-3h', Duration(hours: 3), 0xff7c3aed),
+  over3h('3h+', null, 0xffdc2626);
+
+  const DurationBucket(this.label, this.upperBound, this.color);
+
+  /// 展示标签（如 `<30m`）。
+  final String label;
+
+  /// 桶上界（不含）；最后一桶为 null（无上界）。
+  final Duration? upperBound;
+
+  /// 图表颜色。
+  final int color;
+
+  /// 按时长落入的桶（时长已归一为非负）。
+  static DurationBucket fromDuration(Duration duration) {
+    for (final bucket in values) {
+      final upper = bucket.upperBound;
+      if (upper == null || duration < upper) return bucket;
+    }
+    return over3h;
+  }
+}
+
 /// 统计聚合维度。
 ///
 /// 老项目 4 维 + 一期新增 `categoryTree`（树聚合：按分类祖先链归并，
@@ -133,7 +162,8 @@ class StatsEntrySlice {
   final int? primaryCategoryColor;
   final Set<String> linkedCategoryIds;
 
-  /// 主分类的祖先链 id（根 → 父），供树聚合归并。
+  /// 主分类的祖先链 id，**含自身**（根 → … → 自身，如 `['root', 'c1']`）；
+  /// 供树聚合按祖先链归并。有主分类时非空（根分类传 `[自身id]`），无主分类时空。
   final List<String> categoryAncestorIds;
   final Duration duration;
 
@@ -161,7 +191,7 @@ class StatsEntrySlice {
         primaryCategoryLabel,
         primaryCategoryColor,
         duration,
-        Object.hashAll(linkedCategoryIds.toList()..sort()),
+        Object.hashAllUnordered(linkedCategoryIds),
         Object.hashAll(categoryAncestorIds),
       );
 
@@ -178,20 +208,10 @@ class StatsEntrySlice {
     return true;
   }
 
-  String get durationBucketLabel {
-    if (duration < const Duration(minutes: 30)) return '<30m';
-    if (duration < const Duration(hours: 1)) return '30m-1h';
-    if (duration < const Duration(hours: 3)) return '1-3h';
-    return '3h+';
-  }
+  /// 所属时长桶（由 [DurationBucket.fromDuration] 统一判定）。
+  DurationBucket get durationBucket => DurationBucket.fromDuration(duration);
 
-  int get durationBucketColor {
-    return switch (durationBucketLabel) {
-      '<30m' => 0xff94a3b8,
-      '30m-1h' => 0xff0ea5e9,
-      '1-3h' => 0xff7c3aed,
-      '3h+' => 0xffdc2626,
-      _ => throw StateError('Unexpected bucket label: $durationBucketLabel'),
-    };
-  }
+  String get durationBucketLabel => durationBucket.label;
+
+  int get durationBucketColor => durationBucket.color;
 }

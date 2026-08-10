@@ -11,6 +11,9 @@ void main() {
       expect(readBool(1.0), isTrue);
       expect(readBool(0.0), isFalse);
       expect(readBool(2), isTrue, reason: '任意非零数字视为 true');
+      expect(readBool(-1), isTrue, reason: '负数同样视为 true');
+      expect(readBool(0.5), isTrue, reason: '小数非零视为 true');
+      expect(readBool(-0.0), isFalse);
       expect(readBool('true'), isTrue);
       expect(readBool('TRUE'), isTrue);
       expect(readBool(' false '), isFalse, reason: '忽略大小写与空白');
@@ -99,6 +102,11 @@ void main() {
       // 仅日期（`-10` 是日部分，不是时区偏移）同样判非法
       expect(
         () => readDateTime('2026-08-10'),
+        throwsFormatException,
+      );
+      // 空格分隔且无偏移的格式同样非法（拒绝一切无偏移时间串）
+      expect(
+        () => readDateTime('2026-08-10 04:00:00'),
         throwsFormatException,
       );
       // 有 fallback → 回退 fallback（不采用无偏移值）

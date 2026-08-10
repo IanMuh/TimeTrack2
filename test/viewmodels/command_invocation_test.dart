@@ -171,23 +171,20 @@ void main() {
       );
     });
 
-    test('值相等语义', () {
-      expect(const CommandFailure('a'), const CommandFailure('a'));
-      expect(const CommandFailure('a') == const CommandFailure('b'), isFalse);
-      expect(const CommandSuccess<int>(data: 1),
-          const CommandSuccess<int>(data: 1));
-      expect(const CommandSuccess<int>(data: 1) ==
-          const CommandSuccess<int>(data: 2), isFalse);
-      expect(const CommandSuccess<int>(data: 1).hashCode,
-          const CommandSuccess<int>(data: 1).hashCode);
+    test('值相等语义（非 const 实例驱动 ==/hashCode 逻辑）', () {
+      // 非 const：避免常量规范化使 identical 短路，真正验证值相等实现
+      final failureA = CommandFailure('a');
+      final failureB = CommandFailure('a');
+      expect(failureA == failureB, isTrue);
+      expect(failureA.hashCode, failureB.hashCode);
+      expect(failureA == CommandFailure('b'), isFalse);
+      final successA = CommandSuccess<int>(data: 1);
+      final successB = CommandSuccess<int>(data: 1);
+      expect(successA == successB, isTrue);
+      expect(successA.hashCode, successB.hashCode);
+      expect(successA == CommandSuccess<int>(data: 2), isFalse);
       // 不同泛型参数的实例视为不同（runtimeType 区分）
-      expect(const CommandSuccess<int>(data: 1) ==
-          const CommandSuccess<num>(data: 1), isFalse);
-      // 泛型 data 保留类型（编译期约束，运行时取回即原始类型）
-      const success = CommandSuccess<int>(data: 42);
-      expect(success.data, 42);
-      expect(success.data is int, isTrue);
-      expect(success.data is String, isFalse);
+      expect(successA == CommandSuccess<num>(data: 1), isFalse);
     });
   });
 }

@@ -57,6 +57,9 @@ class UpdateManifest {
   /// SHA-256：64 位小写 hex。
   static final _sha256Pattern = RegExp(r'^[0-9a-f]{64}$');
 
+  /// URL 中不允许的空白字符。
+  static final _whitespacePattern = RegExp(r'\s');
+
   Map<String, Object?> toMap() {
     return {
       'version': version,
@@ -122,7 +125,7 @@ class UpdateManifest {
     final uri = Uri.tryParse(trimmed);
     final scheme = uri?.scheme.toLowerCase();
     if (trimmed.isEmpty ||
-        trimmed.contains(RegExp(r'\s')) ||
+        trimmed.contains(_whitespacePattern) ||
         uri == null ||
         uri.userInfo.isNotEmpty ||
         (scheme != 'http' && scheme != 'https') ||

@@ -22,7 +22,15 @@ class TimeEntry {
   }) : assert(
           endAt == null || !endAt.isBefore(startAt),
           'end_at 不能早于 start_at',
-        );
+        ) {
+    // 时间顺序运行时硬校验（release 下 assert 被移除，此处兜底）：
+    // 直接构造/copyWith 是绕过 fromMap 硬校验的旁路入口，非法条目一旦持久化，
+    // 下次 fromMap 反序列化会抛错导致加载失败——必须在此拦截。
+    final end = endAt;
+    if (end != null && end.isBefore(startAt)) {
+      throw ArgumentError('end_at 不能早于 start_at');
+    }
+  }
 
   final String id;
   final String? userId;
@@ -154,15 +162,8 @@ class TimeEntry {
       throw const FormatException('TimeEntry.fromMap: id 缺失或非法');
     }
     // start_at 语义必填且必须携带时区偏移（Z/±HH:MM 等）：缺失、无偏移或不可解析
-    // 即抛错，绝不伪造"当前时刻"的幽灵条目。
-    final startAtValue = map['start_at'];
-    final startAtText = startAtValue is String ? startAtValue.trim() : null;
-    final startAt = startAtText != null && hasTimezoneOffset(startAtText)
-        ? DateTime.tryParse(startAtText)
-        : null;
-    if (startAt == null) {
-      throw const FormatException('TimeEntry.fromMap: start_at 缺失或非法');
-    }
+    // 即抛错（readDateTime 单次解析 + fieldName 定位），绝不伪造"当前时刻"的幽灵条目。
+    final startAt = readDateTime(map['start_at'], fieldName: 'start_at');
     // end_at 区分"缺失(null，运行中)"与"存在但非法(抛错)"——损坏的非空值
     // 不能静默当作运行中（否则已结束条目被误判 isRunning，时长无限增长）。
     final endAt = map['end_at'] == null

@@ -7,7 +7,7 @@ import '../utils/model_utils.dart';
 /// 无环不变量：分类树不允许自引用（parentId == id）或成环——模型层防御自引用，
 /// 深度成环由仓储层在落库前校验（parentId 环检测）。
 class ActivityCategory {
-  const ActivityCategory({
+  ActivityCategory({
     required this.id,
     this.userId,
     required this.name,
@@ -15,7 +15,18 @@ class ActivityCategory {
     required this.updatedAt,
     this.deletedAt,
     this.parentId,
-  }) : assert(parentId != id, '分类不能是自身的父分类（自引用环）');
+  }) : assert(parentId != id, '分类不能是自身的父分类（自引用环）') {
+    // 自引用运行时硬校验（release 下 assert 被移除，此处兜底）：
+    // 直接构造是绕过 fromMap/copyWith 的旁路入口，必须同样拦截自引用环，
+    // 否则分类树遍历/递归软删可能无法终止。
+    if (parentId == id) {
+      throw ArgumentError.value(
+        parentId,
+        'parentId',
+        '分类不能是自身的父分类（自引用环）',
+      );
+    }
+  }
 
   /// 默认分类色（与 `constants/app_constants.dart` 保持一致）。
   static const defaultColor = 0xff0f766e;
@@ -94,10 +105,12 @@ class ActivityCategory {
       throw const FormatException('ActivityCategory.fromMap: id 缺失或非法');
     }
     final rawParentId = readNullableString(map['parent_id']);
-    // 空串归一化为 null（顶级）——防止指向不存在父分类的无效父子关系。
-    final parentId = (rawParentId == null || rawParentId.isEmpty)
-        ? null
-        : rawParentId;
+    // 空串/空白串归一化为 null（顶级）——防止指向不存在父分类的无效父子关系。
+    final trimmedParentId = rawParentId?.trim();
+    final parentId =
+        (trimmedParentId == null || trimmedParentId.isEmpty)
+            ? null
+            : trimmedParentId;
     if (parentId == id) {
       throw const FormatException(
         'ActivityCategory.fromMap: 分类不能是自身的父分类（自引用环）',

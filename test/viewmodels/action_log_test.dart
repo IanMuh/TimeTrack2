@@ -3,6 +3,36 @@ import 'package:timetrack2/viewmodels/action_log.dart';
 
 void main() {
   group('ActionLog', () {
+    test('id 严格校验：缺失/空串/非字符串 → FormatException', () {
+      final times = {
+        'updated_at': '2026-08-10T04:00:00Z',
+        'occurred_at': '2026-08-10T04:00:00Z',
+      };
+      expect(() => ActionLog.fromMap(times), throwsFormatException,
+          reason: '缺 id');
+      expect(
+        () => ActionLog.fromMap({'id': '', ...times}),
+        throwsFormatException,
+        reason: '空串 id',
+      );
+      expect(
+        () => ActionLog.fromMap({'id': 123, ...times}),
+        throwsFormatException,
+        reason: '非字符串 id',
+      );
+    });
+
+    test('deleted_at 非法值 → 静默回退 null（可空字段容错契约）', () {
+      final restored = ActionLog.fromMap({
+        'id': 'log1',
+        'updated_at': '2026-08-10T04:00:00Z',
+        'occurred_at': '2026-08-10T04:00:00Z',
+        'deleted_at': 'not-a-date', // 非法 → null（不抛错、不误判为已删除）
+      });
+      expect(restored.deletedAt, isNull);
+      expect(restored.isDeleted, isFalse);
+    });
+
     test('严格校验：缺失 updated_at/occurred_at 抛 FormatException', () {
       expect(() => ActionLog.fromMap({'id': 'log1'}), throwsFormatException);
       // 分别缺失单个必填时间字段，定位是哪个字段的校验在生效
@@ -36,6 +66,23 @@ void main() {
           'id': 'log1',
           'updated_at': '2026-08-10T04:00:00Z',
           'occurred_at': 'not-a-date',
+        }),
+        throwsFormatException,
+      );
+      // 可解析但无时区偏移 → 同样非法（跨设备绝对时刻不一致）
+      expect(
+        () => ActionLog.fromMap({
+          'id': 'log1',
+          'updated_at': '2026-08-10T04:00:00',
+          'occurred_at': '2026-08-10T04:00:00Z',
+        }),
+        throwsFormatException,
+      );
+      expect(
+        () => ActionLog.fromMap({
+          'id': 'log1',
+          'updated_at': '2026-08-10T04:00:00Z',
+          'occurred_at': '2026-08-10T04:00:00',
         }),
         throwsFormatException,
       );

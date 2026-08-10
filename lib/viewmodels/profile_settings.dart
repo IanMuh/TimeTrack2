@@ -41,7 +41,9 @@ class ProfileSettings {
         ),
         assert(mergeNeighborThresholdMinutes >= 0 &&
             mergeNeighborThresholdMinutes <=
-                maxMergeNeighborThresholdMinutes);
+                maxMergeNeighborThresholdMinutes),
+        // timezone 语义上非空（fromMap/copyWith 均有空串兜底，直接构造是唯一旁路）。
+        assert(timezone != '', 'timezone 不能为空');
 
   static const defaultReminderMinutes = 45;
   static const defaultReminderIntervalMinutes = 10;
@@ -108,6 +110,11 @@ class ProfileSettings {
         updatedAt,
       );
 
+  /// 复制并生成新实例。
+  ///
+  /// 注意：`copyWith` **不会自动推进 `updatedAt`**——LWW 合并以 updatedAt 决胜负，
+  /// 修改业务字段后必须显式传入新的 updatedAt，否则修改会携带旧时间戳
+  /// 在同步合并中被远端版本覆盖而丢失。
   ProfileSettings copyWith({
     String? userId,
     bool clearUserId = false,
