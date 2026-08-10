@@ -47,15 +47,19 @@ class CommandInvocation {
   /// 原始输入文本（供日志/追溯，可为空）。
   final String? raw;
 
-  /// name 硬校验（release 下同样生效）：trim 后非空、无内部空白、无前后空白。
+  /// name 硬校验（release 下同样生效）：trim 后非空、无内部/前后空白、不含引号/
+  /// 反斜杠、不以 `-` 开头（避免被解析器误判为选项）——保证 toString 输出的
+  /// 指令名始终是干净的单 token。
   static String _validateName(String name) {
     if (name != name.trim() ||
         name.trim().isEmpty ||
-        name.trim().contains(RegExp(r'\s'))) {
+        name.trim().contains(RegExp(r'\s')) ||
+        name.trim().contains(RegExp(r'"|\\')) ||
+        name.trim().startsWith('-')) {
       throw ArgumentError.value(
         name,
         'name',
-        '指令名必须为单 token（无前后/内部空白，多词请用点分/连字符形式）',
+        '指令名必须为单 token（无空白/引号/反斜杠，不以 - 开头，多词请用点分/连字符形式）',
       );
     }
     return name.trim();
@@ -69,7 +73,8 @@ class CommandInvocation {
 
   @override
   String toString() {
-    final buffer = StringBuffer(name);
+    // name 已由 _validateName 保证为干净单 token，此处双保险走引号包裹。
+    final buffer = StringBuffer(_quoteIfNeeded(name));
     for (final arg in args) {
       buffer.write(' ${_quoteIfNeeded(arg)}');
     }

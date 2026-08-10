@@ -100,10 +100,13 @@ class ActivityCategory {
   }
 
   static ActivityCategory fromMap(Map<String, Object?> map) {
-    final id = map['id'];
-    if (id is! String || id.isEmpty) {
+    final rawId = map['id'];
+    if (rawId is! String || rawId.trim().isEmpty) {
       throw const FormatException('ActivityCategory.fromMap: id 缺失或非法');
     }
+    // id 与 parent_id 同样 trim 归一化，保持父子引用语义一致
+    // （避免空白 id 绕过自引用检测或产生悬空父子引用）。
+    final id = rawId.trim();
     final rawParentId = readNullableString(map['parent_id']);
     // 空串/空白串归一化为 null（顶级）——防止指向不存在父分类的无效父子关系。
     final trimmedParentId = rawParentId?.trim();

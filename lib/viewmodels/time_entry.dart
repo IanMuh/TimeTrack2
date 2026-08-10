@@ -168,7 +168,7 @@ class TimeEntry {
     // 不能静默当作运行中（否则已结束条目被误判 isRunning，时长无限增长）。
     final endAt = map['end_at'] == null
         ? null
-        : readDateTime(map['end_at']);
+        : readDateTime(map['end_at'], fieldName: 'end_at');
     // 时间顺序不变量：end_at 早于 start_at 是脏数据，会令 overlaps/统计失真——
     // 严格拒绝而非静默容忍。
     if (endAt != null && endAt.isBefore(startAt)) {

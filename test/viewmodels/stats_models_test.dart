@@ -119,6 +119,18 @@ void main() {
             categoryAncestorIds: const []),
         throwsA(isA<AssertionError>()),
       );
+      // 无主分类但祖先链非空 → 断言失败（debug，对称不变量）
+      expect(
+        () => _slice(Duration.zero, categoryAncestorIds: const ['root']),
+        throwsA(isA<AssertionError>()),
+      );
+      // 有主分类但祖先链末尾不是主分类自身 → 断言失败（含自身约定）
+      expect(
+        () => _slice(Duration.zero, primaryCategoryId: 'c1',
+            primaryCategoryLabel: '工作', primaryCategoryColor: 0xff000000,
+            categoryAncestorIds: const ['root']),
+        throwsA(isA<AssertionError>()),
+      );
     });
 
     test('值相等：同字段切片相等、异字段不等', () {
@@ -170,7 +182,7 @@ void main() {
         categoryAncestorIds: ['root', 'c1'],
         duration: const Duration(minutes: 30),
       ), isFalse);
-      // 集合字段顺序不同（categoryAncestorIds 顺序敏感）
+      // 集合字段内容不同（categoryAncestorIds 内容差异；顺序敏感由"末尾含自身"约定约束）
       expect(a == StatsEntrySlice(
         activityId: 'a1',
         activityLabel: '工作',
@@ -179,7 +191,7 @@ void main() {
         primaryCategoryLabel: '项目A',
         primaryCategoryColor: 0xff0f766e,
         linkedCategoryIds: {'c1'},
-        categoryAncestorIds: ['c1', 'root'],
+        categoryAncestorIds: ['root', 'a', 'c1'],
         duration: const Duration(minutes: 30),
       ), isFalse);
       // 多元素 linkedCategoryIds 顺序无关：== 与 hashCode 一致
@@ -254,14 +266,14 @@ void main() {
         depth: 1,
         ancestorIds: const ['root'],
       );
-      // 同 id、统计字段不同 → 仍判等（持久实体语义）
+      // 同 id、统计字段与 label/color 均不同 → 仍判等（持久实体语义）
       expect(
         row == StatsGroupRow(
           id: 'g1',
-          label: '工作',
+          label: '其他',
           totalDuration: const Duration(hours: 5),
           count: 99,
-          color: 0xff2563eb,
+          color: 0xffff0000,
           depth: 2,
           ancestorIds: const ['root', 'x'],
         ),
@@ -270,10 +282,10 @@ void main() {
       expect(row.hashCode,
           StatsGroupRow(
             id: 'g1',
-            label: '工作',
+            label: '其他',
             totalDuration: const Duration(hours: 5),
             count: 99,
-            color: 0xff2563eb,
+            color: 0xffff0000,
             depth: 2,
             ancestorIds: const ['root', 'x'],
           ).hashCode);

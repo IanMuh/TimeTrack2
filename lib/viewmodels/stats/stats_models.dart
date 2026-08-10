@@ -9,6 +9,10 @@ Duration normalizeNonNegativeDuration(Duration duration) {
 
 /// 时长桶：统一承载边界判定、标签与颜色（单一事实来源，
 /// 避免标签-颜色字符串 switch 漂移；新增分桶只改此处）。
+///
+/// ⚠️ **声明顺序即边界顺序**：`values` 必须按 `upperBound` 升序排列，且仅最后一桶
+/// 的 `upperBound` 为 null（无上界）。[fromDuration] 遍历时按序命中即返回，
+/// 末尾 `return over3h` 实际不可达（兜底，防枚举被误改为空）。
 enum DurationBucket {
   under30('<30m', Duration(minutes: 30), 0xff94a3b8),
   halfTo1h('30m-1h', Duration(hours: 1), 0xff0ea5e9),
@@ -147,6 +151,11 @@ class StatsEntrySlice {
         assert(
           primaryCategoryId != null || categoryAncestorIds.isEmpty,
           '无主分类时 categoryAncestorIds 必须为空',
+        ),
+        assert(
+          primaryCategoryId == null ||
+              categoryAncestorIds.last == primaryCategoryId,
+          '有主分类时 categoryAncestorIds 末尾必须是主分类自身（含自身约定）',
         ),
         assert(duration >= Duration.zero, 'duration 必须非负（debug 快速失败）'),
         linkedCategoryIds = Set.unmodifiable(linkedCategoryIds),

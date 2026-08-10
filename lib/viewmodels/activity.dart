@@ -7,7 +7,7 @@ import '../utils/model_utils.dart';
 /// 例外（语义必填，缺失/非法抛 [FormatException]）：`id`、`updated_at`——
 /// `updated_at` 是 LWW 冲突判定关键字段，绝不伪造时间戳。
 class Activity {
-  const Activity({
+  Activity({
     required this.id,
     this.userId,
     required this.name,
@@ -17,7 +17,13 @@ class Activity {
     this.deletedAt,
     this.isUnassigned = false,
     this.isOneOff = false,
-  }) : assert(id != '', 'id 不能为空');
+  }) : assert(id != '', 'id 不能为空') {
+    // release 下 assert 被移除：直接构造/copyWith 传空 id 是绕过 fromMap 硬校验的
+    // 旁路，空 id 会污染 ==/hashCode 且持久化后无法再反序列化（加载失败）。
+    if (id.isEmpty) {
+      throw ArgumentError.value(id, 'id', 'id 不能为空');
+    }
+  }
 
   /// 默认事项色（与 `constants/app_constants.dart` 的 `defaultActivityColor` 保持一致）。
   static const defaultColor = 0xff64748b;

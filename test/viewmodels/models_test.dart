@@ -67,6 +67,19 @@ void main() {
           isNull);
     });
 
+    test('空 id 构造拒绝（debug 断言 AssertionError，release 硬校验 ArgumentError）', () {
+      expect(
+        () => Activity(
+          id: '',
+          name: 'x',
+          color: 0,
+          isFavorite: false,
+          updatedAt: DateTime.utc(2026, 8, 10, 4),
+        ),
+        throwsA(anyOf(isA<AssertionError>(), isA<ArgumentError>())),
+      );
+    });
+
     test('is_unassigned / is_one_off 正例解析与 round-trip 保真', () {
       final restored = Activity.fromMap({
         'id': 'u1',
@@ -274,7 +287,7 @@ void main() {
         }),
         throwsFormatException,
       );
-      // 直接构造：debug 下断言 AssertionError（release 下构造体硬校验 ArgumentError）
+      // 直接构造：debug 下断言 AssertionError，release 下构造体硬校验 ArgumentError
       expect(
         () => TimeEntry(
           id: 'e',
@@ -284,7 +297,7 @@ void main() {
           deviceId: 'dev',
           updatedAt: DateTime.utc(2026, 8, 10, 4),
         ),
-        throwsA(isA<AssertionError>()),
+        throwsA(anyOf(isA<AssertionError>(), isA<ArgumentError>())),
       );
       // end_at == start_at 允许（零长段不视为脏数据）
       final same = TimeEntry.fromMap({
@@ -497,8 +510,7 @@ void main() {
         }),
         throwsFormatException,
       );
-      // 直接构造：debug 下断言抛 AssertionError；release 下构造体硬校验抛 ArgumentError
-      // （此处运行于 debug 模式，断言 AssertionError）
+      // 直接构造：debug 下断言 AssertionError，release 下构造体硬校验 ArgumentError
       expect(
         () => ActivityCategory(
           id: 'c1',
@@ -507,7 +519,18 @@ void main() {
           updatedAt: DateTime.utc(2026, 8, 10, 4),
           parentId: 'c1',
         ),
-        throwsA(isA<AssertionError>()),
+        throwsA(anyOf(isA<AssertionError>(), isA<ArgumentError>())),
+      );
+      // copyWith 旁路：无 assert，直接抛 ArgumentError
+      final category = ActivityCategory(
+        id: 'c1',
+        name: 'x',
+        color: 0,
+        updatedAt: DateTime.utc(2026, 8, 10, 4),
+      );
+      expect(
+        () => category.copyWith(id: 'c1', parentId: 'c1'),
+        throwsArgumentError,
       );
     });
 
@@ -724,13 +747,13 @@ void main() {
       expect(fromWhitespace.timezone, expected);
       final copied = fromEmpty.copyWith(timezone: '');
       expect(copied.timezone, expected);
-      // 直接构造空 timezone：debug 下断言拒绝（唯一旁路入口）
+      // 直接构造空 timezone：debug 下断言 AssertionError，release 下构造体硬校验 ArgumentError
       expect(
         () => ProfileSettings(
           timezone: '',
           updatedAt: DateTime.utc(2026, 8, 10, 4),
         ),
-        throwsA(isA<AssertionError>()),
+        throwsA(anyOf(isA<AssertionError>(), isA<ArgumentError>())),
       );
     });
 

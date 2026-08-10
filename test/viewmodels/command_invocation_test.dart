@@ -107,6 +107,20 @@ void main() {
         () => CommandInvocation(name: 'add', options: {'': 'v'}),
         throwsArgumentError,
       );
+      // name 含引号/反斜杠/前导横线 → ArgumentError（保证 toString 输出干净单 token）
+      expect(
+        () => CommandInvocation(name: 'a"b'),
+        throwsArgumentError,
+      );
+      expect(
+        () => CommandInvocation(name: 'a\\b'),
+        throwsArgumentError,
+      );
+      expect(
+        () => CommandInvocation(name: '--foo'),
+        throwsArgumentError,
+        reason: '前导横线会被解析器误判为选项',
+      );
       // 合法构造不抛
       expect(
         () => CommandInvocation(name: 'category_create', options: {'note': 'v'}),

@@ -23,7 +23,7 @@ enum ReminderMethod {
 ///
 /// 本地库中为 id=1 的单行；含提醒设置与"相邻未分配条目合并阈值"。
 class ProfileSettings {
-  const ProfileSettings({
+  ProfileSettings({
     this.userId,
     this.reminderMinutes = defaultReminderMinutes,
     this.reminderIntervalMinutes = defaultReminderIntervalMinutes,
@@ -42,8 +42,14 @@ class ProfileSettings {
         assert(mergeNeighborThresholdMinutes >= 0 &&
             mergeNeighborThresholdMinutes <=
                 maxMergeNeighborThresholdMinutes),
-        // timezone 语义上非空（fromMap/copyWith 均有空串兜底，直接构造是唯一旁路）。
-        assert(timezone != '', 'timezone 不能为空');
+        // timezone 语义上非空（fromMap/copyWith 均有空白兜底，直接构造是唯一旁路）。
+        assert(timezone != '', 'timezone 不能为空') {
+    // release 下 assert 被移除：直接构造空白 timezone 是绕过 fromMap/copyWith
+    // 兜底的旁路，空白时区值会随 toMap 持久化污染数据。
+    if (timezone.trim().isEmpty) {
+      throw ArgumentError.value(timezone, 'timezone', 'timezone 不能为空');
+    }
+  }
 
   static const defaultReminderMinutes = 45;
   static const defaultReminderIntervalMinutes = 10;
