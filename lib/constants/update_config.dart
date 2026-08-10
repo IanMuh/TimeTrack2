@@ -10,6 +10,10 @@ import 'build_config.dart';
 class UpdateConfig {
   UpdateConfig._();
 
+  /// 默认清单地址字面量（单一事实来源：defaultValue 与回退共用，防 URL 更新漏改）。
+  static const _defaultManifestUrl =
+      'https://raw.githubusercontent.com/IanMuh/TimeTrack2/main/update.json';
+
   /// 清单默认地址：本仓库 raw.githubusercontent（规避 Releases API 60 req/h 限额）。
   /// 可通过 `--dart-define=UPDATE_MANIFEST_URL=...` 覆盖；
   /// 注入串非法（不可解析/非绝对/非 http·https/无主机名）时回退默认仓库地址，
@@ -18,13 +22,10 @@ class UpdateConfig {
       resolveManifestUrl(
         AppBuildConfig.getString(
           AppBuildConfig.updateManifestUrlKey,
-          defaultValue:
-              'https://raw.githubusercontent.com/IanMuh/TimeTrack2/main/update.json',
+          defaultValue: _defaultManifestUrl,
         ),
       ) ??
-      Uri.parse(
-        'https://raw.githubusercontent.com/IanMuh/TimeTrack2/main/update.json',
-      );
+      Uri.parse(_defaultManifestUrl);
 
   /// 校验清单 URL（纯函数，可独立单测）：合法返回 Uri，非法返回 null（调用方回退默认）。
   ///
