@@ -14,17 +14,21 @@ class ActivityCategory {
     required this.color,
     required this.updatedAt,
     this.deletedAt,
-    this.parentId,
-  }) : id = id.trim() {
+    String? parentId,
+  })  : id = id.trim(),
+        parentId = (parentId == null || parentId.trim().isEmpty)
+            ? null
+            : parentId.trim() {
     // 自引用运行时硬校验（debug 下 assert + release 下构造体，双保险）：
     // 直接构造是绕过 fromMap/copyWith 的旁路入口，必须同样拦截自引用环，
     // 否则分类树遍历/递归软删可能无法终止。
-    // 注：id 已在 initializer 中 trim 归一化（内存对象身份与存储主键一致），
-    // 此处 this.id 即归一化后的值。
-    assert(parentId != this.id, '分类不能是自身的父分类（自引用环）');
-    if (parentId == this.id) {
+    // 注：id 与 parentId 均在 initializer 中归一化（trim，空→null），
+    // 与 fromMap 语义一致——校验用归一化后的字段（this.parentId / this.id），
+    // 避免被带空白的原始参数绕过。
+    assert(this.parentId != this.id, '分类不能是自身的父分类（自引用环）');
+    if (this.parentId == this.id) {
       throw ArgumentError.value(
-        parentId,
+        this.parentId,
         'parentId',
         '分类不能是自身的父分类（自引用环）',
       );

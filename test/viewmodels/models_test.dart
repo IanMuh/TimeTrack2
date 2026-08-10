@@ -595,6 +595,26 @@ void main() {
         ),
         throwsA(anyOf(isA<AssertionError>(), isA<ArgumentError>())),
       );
+      // 空白 parentId 同样归一化后参与自引用判定（绕过检测的旁路被封死）
+      expect(
+        () => ActivityCategory(
+          id: 'c4',
+          name: 'x',
+          color: 0,
+          updatedAt: DateTime.utc(2026, 8, 10, 4),
+          parentId: ' c4 ',
+        ),
+        throwsA(anyOf(isA<AssertionError>(), isA<ArgumentError>())),
+      );
+      // 空白 parentId 归一化为 null（顶级）
+      final parentless = ActivityCategory(
+        id: 'c5',
+        name: 'x',
+        color: 0,
+        updatedAt: DateTime.utc(2026, 8, 10, 4),
+        parentId: '   ',
+      );
+      expect(parentless.parentId, isNull);
     });
 
     test('parentId round-trip 保真', () {
