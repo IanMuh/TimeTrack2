@@ -20,7 +20,10 @@ enum SyncPeerKind {
   static SyncPeerKind fromStorageValue(String value) {
     return SyncPeerKind.values.firstWhere(
       (k) => k.storageValue == value,
-      orElse: () => SyncPeerKind.lanClient,
+      // 未知存储值显式抛错而非静默映射为 lanClient：防脏数据/旧版本遗留值被
+      // 当作有效客户端参与同步（掩盖数据损坏、误把 authorized 对端当普通客户端）。
+      // 抛错被各读取方法的 catch 收敛为 AppFailure，不会裸抛到调用方。
+      orElse: () => throw StateError('未知的 SyncPeerKind 存储值: $value'),
     );
   }
 }
@@ -64,30 +67,42 @@ class SyncPeerStore with RepositoryMappings {
   }
 
   /// 当前 LAN 客户端对端（kind=lanClient 最新一条）。
-  Future<SyncPeer?> currentLanClientPeer() async {
-    final query = database.select(database.syncPeers)
-      ..where((t) => t.kind.equals(SyncPeerKind.lanClient.storageValue))
-      ..orderBy([(t) => OrderingTerm.desc(t.updatedAt)])
-      ..limit(1);
-    final row = await query.getSingleOrNull();
-    return row == null ? null : _peerFromRow(row);
+  Future<AppResult<SyncPeer?>> currentLanClientPeer() async {
+    try {
+      final query = database.select(database.syncPeers)
+        ..where((t) => t.kind.equals(SyncPeerKind.lanClient.storageValue))
+        ..orderBy([(t) => OrderingTerm.desc(t.updatedAt)])
+        ..limit(1);
+      final row = await query.getSingleOrNull();
+      return AppSuccess(row == null ? null : _peerFromRow(row));
+    } catch (e) {
+      return AppFailure('读取 LAN 客户端对端失败：$e');
+    }
   }
 
   /// 全部已配对客户端（kind=lanAuthorizedClient，按更新时间倒序）。
-  Future<List<SyncPeer>> authorizedClients() async {
-    final query = database.select(database.syncPeers)
-      ..where((t) => t.kind.equals(SyncPeerKind.lanAuthorizedClient.storageValue))
-      ..orderBy([(t) => OrderingTerm.desc(t.updatedAt)]);
-    final rows = await query.get();
-    return rows.map(_peerFromRow).toList();
+  Future<AppResult<List<SyncPeer>>> authorizedClients() async {
+    try {
+      final query = database.select(database.syncPeers)
+        ..where((t) => t.kind.equals(SyncPeerKind.lanAuthorizedClient.storageValue))
+        ..orderBy([(t) => OrderingTerm.desc(t.updatedAt)]);
+      final rows = await query.get();
+      return AppSuccess(rows.map(_peerFromRow).toList());
+    } catch (e) {
+      return AppFailure('读取已配对客户端失败：$e');
+    }
   }
 
   /// 按 id 查对端。
-  Future<SyncPeer?> peerById(String id) async {
-    final query = database.select(database.syncPeers)
-      ..where((t) => t.id.equals(id));
-    final row = await query.getSingleOrNull();
-    return row == null ? null : _peerFromRow(row);
+  Future<AppResult<SyncPeer?>> peerById(String id) async {
+    try {
+      final query = database.select(database.syncPeers)
+        ..where((t) => t.id.equals(id));
+      final row = await query.getSingleOrNull();
+      return AppSuccess(row == null ? null : _peerFromRow(row));
+    } catch (e) {
+      return AppFailure('读取同步对端失败：$e');
+    }
   }
 
   /// 删除对端（登出/断开 LAN）。
@@ -106,6 +121,22 @@ class SyncPeerStore with RepositoryMappings {
     try {
       await (database.delete(database.syncPeers)
             ..where((t) => t.kind.equals(SyncPeerKind.lanClient.storageValue)))
+          .go();
+      return const AppSuccess(null);
+    } catch (e) {
+      return AppFailure('清除 LAN 对端失败：$e');
+    }
+  }
+
+  /// 清除 lanClient 对端（保留 [keepId]）。
+  ///
+  /// 供"先存新对端、再清旧对端"的配对流程使用：新对端落库后只清旧行，
+  /// 不误删刚插入的新对端（upsert 失败时旧对端保持完好，无数据丢失窗口）。
+  Future<AppResult<void>> clearLanClientPeersExcept(String keepId) async {
+    try {
+      await (database.delete(database.syncPeers)
+            ..where((t) => t.kind.equals(SyncPeerKind.lanClient.storageValue) &
+                t.id.isNotValue(keepId)))
           .go();
       return const AppSuccess(null);
     } catch (e) {
