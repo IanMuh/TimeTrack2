@@ -51,6 +51,28 @@ void main() {
       }
     });
 
+    test('从未同步时 markFailure：错误写入、hasSynced 保持 false、后续成功清错误', () async {
+      final db = AppDatabase(NativeDatabase.memory());
+      try {
+        final store = SyncStatusStore(database: db);
+        // 无游标直接 markFailure
+        await store.markFailure('首次失败');
+        var status = (await store.read()).requireValue();
+        expect(status.lastError, '首次失败', reason: '无游标时错误仍写入');
+        expect(status.hasSynced, isFalse, reason: '失败不清游标（仍从未同步）');
+        expect(status.lastTarget, isNull);
+
+        // 后续成功：游标推进 + 错误清除
+        final t = DateTime.now().toUtc().subtract(const Duration(minutes: 30));
+        await store.markSuccess(syncedAt: t, target: SyncTarget.supabase);
+        status = (await store.read()).requireValue();
+        expect(status.hasSynced, isTrue, reason: '成功后 hasSynced 为 true');
+        expect(status.lastError, isNull, reason: '成功清错误');
+      } finally {
+        await db.close();
+      }
+    });
+
     test('markFailure 只记错误、不清游标（精确值）', () async {
       final db = AppDatabase(NativeDatabase.memory());
       try {
@@ -71,7 +93,7 @@ void main() {
       }
     });
 
-    test('markSuccess 单调性：乱序完成不覆盖游标/目标，且仍清错误', () async {
+    test('markSuccess 单调性：乱序完成不覆盖游标/目标，且仍保留错误', () async {
       final db = AppDatabase(NativeDatabase.memory());
       try {
         final store = SyncStatusStore(database: db);
@@ -279,7 +301,7 @@ void main() {
         expect(rejected.isSuccess, isFalse, reason: '未来 syncedAt 拒绝');
         expect(
           rejected.when(onSuccess: (_) => '', onFailure: (m) => m),
-          contains('不合理'),
+          contains(SyncStatusMessages.cursorUnreasonable),
         );
         // read 拒绝未来存储游标
         await db.into(db.appMetadata).insert(AppMetadataCompanion.insert(
@@ -385,10 +407,14 @@ void main() {
       expect((await backend.syncNow()).isSuccess, isFalse);
       expect((await backend.signOut()).isSuccess, isFalse,
           reason: '未配置场景登出返回失败（与其余方法一致，防误判登出成功）');
-      // 登录态流：订阅即收到 null（未登录）——确定性等待（不依赖固定延时）。
-      await expectLater(backend.authStateStream, emits(null));
-      // 多订阅者**并发**监听同一流实例：均立即收到 null（broadcast 契约）。
+      // 登录态流契约：多次访问 getter 返回**同一流实例**（所有订阅者共享
+      // 同一事件源）。
       final stream = backend.authStateStream;
+      expect(identical(backend.authStateStream, stream), isTrue,
+          reason: '多次访问 getter 必须返回同一流实例（契约）');
+      // 订阅即收到 null（未登录）——确定性等待（不依赖固定延时）。
+      await expectLater(stream, emits(null));
+      // 多订阅者**并发**监听同一流实例：均立即收到 null（broadcast 契约）。
       await Future.wait([
         expectLater(stream, emits(null)),
         expectLater(stream, emits(null)),

@@ -80,7 +80,13 @@ class SupabaseAuthService {
   }
 
   void _closeAllAuthControllers() {
-    for (final controller in List.of(_authControllers)) {
+    // 清空列表 + 置空底层订阅：否则残留的已关闭 controller 使"最后一个取消
+    // 时释放"永远无法触发（_authControllers 永不为空 → 内存泄漏），且 _authSub
+    // 非 null 时新订阅者无法重建底层订阅（登录态流永久失效）。
+    final controllers = List.of(_authControllers);
+    _authControllers.clear();
+    _authSub = null;
+    for (final controller in controllers) {
       if (!controller.isClosed) controller.close();
     }
   }
@@ -130,19 +136,11 @@ class SupabaseAuthService {
         token: trimmedToken,
         type: OtpType.email,
       );
-      var userId = response.user?.id;
-      if (userId == null && response.session != null) {
-        // OTP 一次性凭证已被消费：response.user 缺失但本次 verifyOTP 确实建立
-        // 了会话时，从当前会话兜底取值（防"服务端已登录但 user 为空"被误判
-        // 失败，用户重试必然失败）。**仅在本次会话已建立时才兜底**——防此前
-        // 已登录账号 A、本次用邮箱 B 登录而会话尚未切换时把 A 的 id 误当 B
-        // 的登录结果（身份错配）。
-        final current = _client.auth.currentUser;
-        if (current != null &&
-            current.email?.toLowerCase() == trimmedEmail) {
-          userId = current.id;
-        }
-      }
+      // OTP 一次性凭证已被消费：response.user 可能为空，但 response.session.user
+      // 才是本次登录建立的会话的**权威用户**——优先从中取值（不依赖
+      // currentUser：会话切换未完成时 currentUser 仍是旧账号会误判失败，
+      // OTP 已被消费无法重试会锁死用户；旧账号恰同邮箱则身份错配）。
+      final userId = response.user?.id ?? response.session?.user.id;
       if (userId == null) {
         // 中性表述（失败结果不应自称"登录成功"）。
         return const AppFailure('无法确认登录用户，请重试');

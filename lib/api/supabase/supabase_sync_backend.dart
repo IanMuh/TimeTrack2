@@ -7,6 +7,7 @@
 library;
 
 import 'dart:async';
+import 'dart:io' show stderr;
 
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -195,26 +196,23 @@ class SupabaseSyncBackend implements SyncBackend {
             return const AppFailure('登录已过期，请重新登录');
           }
         } on AuthException catch (e) {
-          // 区分"会话失效"与"网络瞬时故障"：优先用结构化错误码判定（文案易变），
-          // code 缺失时再以消息特征兜底。会话失效类 code 白名单尽量全（含
-          // session_not_found/user_not_found/bad_jwt/token_expired 等常见值）。
+          // 区分"会话失效"与"网络瞬时故障"：优先用结构化错误码精确白名单判定
+          //（文案易变；code 白名单**收窄**——不含宽泛 'token'/'invalid' 子串，
+          // 防把 token 端点瞬时错误/网络故障误判为会话失效强制重登）。
           final code = e.code?.toLowerCase();
           if (code != null) {
             if (code.contains('refresh_token') ||
                 code.contains('invalid_grant') ||
-                code.contains('expired') ||
                 code.contains('session_not_found') ||
                 code.contains('user_not_found') ||
                 code.contains('bad_jwt') ||
-                code.contains('token')) {
+                code.contains('token_expired')) {
               return const AppFailure('登录已过期，请重新登录');
             }
             return const AppFailure('登录状态异常，请重新登录或稍后重试');
           }
           final msg = e.message.toLowerCase();
           if (msg.contains('expired') ||
-              msg.contains('invalid') ||
-              msg.contains('refresh_token') ||
               msg.contains('session_not_found') ||
               msg.contains('user_not_found') ||
               msg.contains('bad_jwt')) {
@@ -228,8 +226,12 @@ class SupabaseSyncBackend implements SyncBackend {
       }
       // 刷新（或校验）后重新获取 userId：并发登出/换号（await 挂起点交错）
       // 时不得用刷新前的旧 userId 同步（防按已登出/已切换身份写入数据）。
+      // **与刷新前 userId 比对**：会话切换到另一账号且未触发 reset（epoch
+      // 不变）时，丢弃本轮同步（防旧会话本地数据写到新用户云端）。
       final effectiveUserId = currentUserId;
-      if (effectiveUserId == null || _lazyClient.auth.currentSession == null) {
+      if (effectiveUserId == null ||
+          effectiveUserId != userId ||
+          _lazyClient.auth.currentSession == null) {
         return const AppFailure('请先登录后再同步');
       }
       try {
@@ -241,11 +243,16 @@ class SupabaseSyncBackend implements SyncBackend {
         }
         return result;
       } catch (e) {
-        return AppFailure('同步失败：$e');
+        // 异常细节写日志，不向用户透出（防泄露 SQL/URL/堆栈等内部信息）。
+        // ignore: avoid_print
+        stderr.writeln('[supabase-sync] 同步异常：$e');
+        return const AppFailure('同步失败，请稍后重试');
       }
     } catch (e) {
       // 整段 _runSync 兜底（懒初始化/客户端构造/GoTrue 读取等异常也转 AppResult）。
-      return AppFailure('同步失败：$e');
+      // ignore: avoid_print
+      stderr.writeln('[supabase-sync] 同步初始化异常：$e');
+      return const AppFailure('同步失败，请稍后重试');
     }
   }
 }

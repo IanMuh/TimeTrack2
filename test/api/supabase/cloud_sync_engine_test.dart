@@ -589,12 +589,12 @@ void main() {
         }
         h.remote.resetCallCount();
         h.remote.pullLog.clear(); // 清首次同步的拉取日志，本次断言从 0 计
-        // 调用序号：0 = pull:activities 第 1 页，1 = pull:activities 第 2 页
-        h.remote.failOnCallIndex = 1;
+        // 语义化失败钩子：activities 第 2 页拉取失败（不依赖裸调用序号）。
+        h.remote.failOnCall = 'pull:activities#1';
         final failed = await h.engine.syncNow(userId: CloudHarness.userId);
         expect(failed.isSuccess, isFalse, reason: '中途失败应返回失败');
         // pullLog 在抛错前记录：断言失败确实发生在 activities 第 2 页
-        //（防引擎调用顺序变化导致序号命中错误调用而静默失真）。
+        //（防引擎调用顺序变化导致失败点静默移位）。
         expect(h.remote.pullLog, hasLength(greaterThanOrEqualTo(2)));
         expect(h.remote.pullLog[1].table, 'activities');
         expect(h.remote.pullLog[1].page, 1);
@@ -653,14 +653,15 @@ void main() {
         ))
             .requireValue();
 
-        // 第二次同步：在 push:activities 时失败（推送阶段）。
-        // 调用序号（push 前）：6 次 pull + 1 次 updated_at:activities
-        // = 第 7 次调用命中 push:activities。
+        // 第二次同步：在 push:activities 时失败（推送阶段）——语义化钩子，
+        // 不依赖"6 次 pull + 1 次 updated_at"的精确序号。
         h.remote.resetCallCount();
         h.remote.pullLog.clear();
-        h.remote.failOnCallIndex = 7;
+        h.remote.failOnCall = 'push:activities';
         final failed = await h.engine.syncNow(userId: CloudHarness.userId);
         expect(failed.isSuccess, isFalse, reason: '推送阶段失败应返回失败');
+        // 失败确实发生在推送阶段（updated_at 查询已执行、push 未完成）。
+        expect(h.remote.callLog, contains('updated_at:activities'));
 
         var status = (await h.statusStore.read(userId: CloudHarness.userId))
             .requireValue();

@@ -62,6 +62,16 @@ class SyncStatus {
 /// 新用户不得复用上一用户的成功游标（否则增量窗口晚于新用户远端最新更新，
 /// 拉取/推送永久漏行）；**lastError 同样按 userId 分区**（共享设备上互不串扰、
 /// 不误清）；未传 userId（null）时使用全局键（默认/向后兼容）。
+///
+/// 失败文案常量（供测试引用做精确断言——不绑定具体措辞变化）。
+abstract final class SyncStatusMessages {
+  /// 游标损坏（无法解析/无时区偏移）失败前缀。
+  static const cursorCorrupted = '同步游标数据损坏，无法解析：';
+
+  /// 未来/不合理游标失败前缀（提示需重置）。
+  static const cursorUnreasonable = '同步游标时间不合理（晚于当前时间）';
+}
+
 class SyncStatusStore with RepositoryMappings {
   SyncStatusStore({required this.database});
 
@@ -86,20 +96,23 @@ class SyncStatusStore with RepositoryMappings {
           _statusKey(AppMetadataKeys.lastSyncTarget, userId):
               AppMetadataKeys.lastSyncTarget,
         };
+        // 一次 IN 查询取齐三个状态键（单事务快照一致，降往返/持锁时间）。
+        final rows = await (database.select(database.appMetadata)
+              ..where((t) => t.key.isIn(statusKeys.keys.toList())))
+            .get();
+        final byKey = {for (final row in rows) row.key: row.value};
         for (final entry in statusKeys.entries) {
-          final row = await (database.select(database.appMetadata)
-                ..where((t) => t.key.equals(entry.key)))
-              .getSingleOrNull();
-          if (row == null) continue;
+          final value = byKey[entry.key];
+          if (value == null) continue;
           switch (entry.value) {
             case AppMetadataKeys.lastSyncAt:
               // 区分"键不存在"（正常 null）与"值损坏"（显式失败）：
               // 损坏值静默降级为"从未同步"会触发无谓全量拉取。
               // 严格校验带时区偏移（isUtc）：无偏移值被 Dart 按本地时区
               // 解析，游标单调比较会发生时区漂移。
-              final parsed = DateTime.tryParse(row.value);
+              final parsed = DateTime.tryParse(value);
               if (parsed == null || !parsed.isUtc) {
-                return AppFailure('同步游标数据损坏，无法解析：${row.value}');
+                return AppFailure('${SyncStatusMessages.cursorCorrupted}$value');
               }
               // 未来时间游标（旧版本写入/远端时钟偏差）显式失败：上层据此
               // 提示需重置，防以其为增量起点导致同步永久停滞（与 markSuccess
@@ -108,7 +121,7 @@ class SyncStatusStore with RepositoryMappings {
                 DateTime.now().toUtc().add(const Duration(minutes: 5)),
               )) {
                 return AppFailure(
-                  '同步游标时间不合理（晚于当前时间），需重置：${row.value}',
+                  '${SyncStatusMessages.cursorUnreasonable}，需重置：$value',
                 );
               }
               // lastSuccessfulSyncAt 是增量同步游标，会被上层序列化传给远端：
@@ -117,10 +130,10 @@ class SyncStatusStore with RepositoryMappings {
               lastSyncAt = parsed;
               break;
             case AppMetadataKeys.lastSyncError:
-              lastError = row.value.isEmpty ? null : row.value;
+              lastError = value.isEmpty ? null : value;
               break;
             case AppMetadataKeys.lastSyncTarget:
-              lastTarget = row.value.isEmpty ? null : row.value;
+              lastTarget = value.isEmpty ? null : value;
               break;
           }
         }
@@ -156,7 +169,7 @@ class SyncStatusStore with RepositoryMappings {
     if (syncedAt.toUtc().isAfter(DateTime.now().toUtc().add(
           const Duration(minutes: 5),
         ))) {
-      return AppFailure('同步游标时间不合理（晚于当前时间）：$syncedAt');
+      return AppFailure('${SyncStatusMessages.cursorUnreasonable}：$syncedAt');
     }
     try {
       return await database.transaction(() async {
@@ -170,7 +183,7 @@ class SyncStatusStore with RepositoryMappings {
           final existingAt = DateTime.tryParse(existing.value);
           if (existingAt == null || !existingAt.isUtc) {
             // 与 read() 一致：损坏游标显式失败，不静默重置（防回退实际成功点）。
-            return AppFailure('同步游标数据损坏，无法解析：${existing.value}');
+            return AppFailure('${SyncStatusMessages.cursorCorrupted}${existing.value}');
           }
           // 库中已有游标为未来时间（旧版本写入/远端时钟偏差）：后续所有真实
           // syncedAt 都判"未推进"而永久停滞且无恢复路径——显式失败并提示重置。
@@ -178,7 +191,7 @@ class SyncStatusStore with RepositoryMappings {
             DateTime.now().toUtc().add(const Duration(minutes: 5)),
           )) {
             return AppFailure(
-              '同步游标时间不合理（晚于当前时间），需重置：${existing.value}',
+              '${SyncStatusMessages.cursorUnreasonable}，需重置：${existing.value}',
             );
           }
           if (syncedAt.toUtc().isBefore(existingAt)) {

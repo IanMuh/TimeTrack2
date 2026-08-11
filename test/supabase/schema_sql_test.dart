@@ -11,7 +11,10 @@ void main() {
   // IDE 单测/CI 子目录运行时也能正确定位）。
   Directory findRoot(Directory dir) {
     if (File('${dir.path}/pubspec.yaml').existsSync()) return dir;
-    if (dir.parent.path == dir.path) return dir; // 到文件系统根仍无 → 用当前目录
+    if (dir.parent.path == dir.path) {
+      // 找不到 pubspec.yaml：明确抛错（防静默回退到当前目录掩盖定位失败）。
+      throw StateError('未在目录树中找到 pubspec.yaml（从 ${dir.path} 向上查找）');
+    }
     return findRoot(dir.parent);
   }
 

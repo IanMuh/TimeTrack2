@@ -59,6 +59,7 @@ class MemoryRemote implements RemoteTableGateway {
   void resetCallCount() {
     _callCount = 0;
     failOnCallIndex = null;
+    failOnCall = null;
     nextError = null;
   }
 
@@ -84,16 +85,22 @@ class MemoryRemote implements RemoteTableGateway {
     }
     callLog.add('pull:$table');
     pullLog.add((table: table, since: since, page: page));
-    _maybeThrow();
+    _maybeThrow('pull:$table#$page');
     final rows = (tables[table]?.values ?? const <Map<String, Object?>>[])
         .where((row) {
+      // 行内容校验（防直接注入 tables 绕过 seed/upsertRows 校验）：缺
+      // updated_at 或不可解析时抛明确错误（与真网关 fail-stop 风格对齐）。
+      final rawAt = row['updated_at'];
+      if (rawAt is! String || DateTime.tryParse(rawAt) == null) {
+        throw FormatException('[$table] 行缺少可解析的 updated_at：$row');
+      }
       // 与真网关 .eq('user_id', userId) 严格过滤一致：按值判定归属
       //（toMap 恒含 user_id 键但值可能为 null=无主；null 视为无主行按
       // allowUnownedRows 开关；非 null 他人值排除——防跨用户泄漏）。
       final rowUser = row['user_id'];
       if (rowUser != null && rowUser != userId) return false;
       if (rowUser == null && !allowUnownedRows) return false;
-      final updatedAt = DateTime.parse(row['updated_at']! as String);
+      final updatedAt = DateTime.parse(rawAt);
       if (since == null) return true;
       return !updatedAt.isBefore(since);
     }).toList()
@@ -133,7 +140,7 @@ class MemoryRemote implements RemoteTableGateway {
     String idKey = 'id',
   }) async {
     callLog.add('updated_at:$table');
-    _maybeThrow();
+    _maybeThrow('updated_at:$table');
     final result = <String, DateTime>{};
     for (final id in ids) {
       // 按 idKey 匹配行 + 按 userId 过滤（与真网关 eq('user_id') + inFilter
@@ -149,8 +156,17 @@ class MemoryRemote implements RemoteTableGateway {
             return true;
           })
           .firstOrNull;
-      if (row != null && row['updated_at'] is String) {
-        final parsed = DateTime.parse(row['updated_at']! as String).toUtc();
+      if (row != null) {
+        // 与真网关 fail-stop 语义一致：updated_at 缺失/类型异常/不可解析
+        // 抛明确错误（防调用方把"缺该 id"误判为"远端无此行"而推旧覆盖新、
+        // LWW 数据静默丢失）。
+        final rawAt = row['updated_at'];
+        if (rawAt is! String || DateTime.tryParse(rawAt) == null) {
+          throw FormatException(
+            '[$table] 行 $id 的 updated_at 缺失或无法解析：$rawAt',
+          );
+        }
+        final parsed = DateTime.parse(rawAt).toUtc();
         // 应用远端时间戳偏差（模拟"拉取后、推送检查时远端被并发更新"）。
         final bias = updatedAtBias[id];
         result[id] = bias == null ? parsed : parsed.add(bias);
@@ -179,7 +195,7 @@ class MemoryRemote implements RemoteTableGateway {
   }) async {
     callLog.add('push:$table');
     lastPushedIds.clear(); // 语义："本次调用尚未写入任何行"（失败路径也清空）
-    _maybeThrow();
+    _maybeThrow('push:$table');
     onBeforePush?.call(table, userId);
     final target = tables.putIfAbsent(table, () => {});
 
@@ -206,8 +222,10 @@ class MemoryRemote implements RemoteTableGateway {
       //   覆盖无主行，与 fetch 严格模式过滤对称）。
       final existing = target[id as String];
       final existingUser = existing?['user_id'];
+      // 按值判定（非 String 的 user_id 也是归属冲突——类型漏洞防直接注入
+      // tables 绕过校验）。
       final claimedConflict =
-          existing != null && existingUser is String && existingUser != userId;
+          existing != null && existingUser != null && existingUser != userId;
       final unownedConflict =
           existing != null && existingUser == null && !allowUnownedRows;
       if (claimedConflict || unownedConflict) {
@@ -223,13 +241,23 @@ class MemoryRemote implements RemoteTableGateway {
     }
   }
 
-  void _maybeThrow() {
+  /// 语义化失败钩子：设非 null 时，**操作描述匹配**的网关调用抛异常
+  ///（如 'pull:activities#1' = activities 第 1 页拉取、'push:activities' =
+  /// activities 推送）——不依赖裸调用序号，防引擎调用顺序变化时失败点
+  /// 静默移位。
+  String? failOnCall;
+
+  void _maybeThrow(String call) {
     final error = nextError;
     if (error != null) {
       nextError = null;
-      failOnCallIndex = null; // 互斥：nextError 触发时清除条件失败钩子
+      failOnCallIndex = null; // 互斥：nextError 触发时清除序号钩子
       _callCount += 1; // 与 callLog 计数对齐（防 failOnCallIndex 相对偏移）
       throw error;
+    }
+    if (failOnCall != null && call == failOnCall) {
+      failOnCall = null; // 单次生效
+      throw Exception('mock 条件失败（操作 $call）');
     }
     final indexError = failOnCallIndex;
     final isTarget = indexError != null && _callCount == indexError;
