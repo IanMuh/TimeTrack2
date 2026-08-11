@@ -77,7 +77,7 @@ void main() {
         final t0 = DateTime(2026, 8, 11, 10);
         final t1 = t0.add(const Duration(minutes: 5));
         await store.markSuccess(syncedAt: t1, target: SyncTarget.supabase);
-        await store.markFailure('先前失败'); // 先设错误，验证乱序分支清错误
+        await store.markFailure('先前失败'); // 先设错误，验证乱序分支保留
 
         // 乱序完成的旧同步（syncedAt 早于现有游标）→ 不覆盖游标/目标
         await store.markSuccess(syncedAt: t0, target: 'other-target');
@@ -90,8 +90,9 @@ void main() {
         expect(status.lastTarget, SyncTarget.supabase,
             reason: '乱序完成不得把目标覆盖为旧同步的目标（与游标指向的'
                 '最近成功点保持一致）');
-        expect(status.lastError, isNull,
-            reason: '乱序完成分支仍应清错误');
+        expect(status.lastError, '先前失败',
+            reason: '乱序完成**保留** lastError——较早开始的慢同步乱序完成不得'
+                '抹掉更新的失败记录（"错误反映最近一次失败"语义）');
       } finally {
         await db.close();
       }

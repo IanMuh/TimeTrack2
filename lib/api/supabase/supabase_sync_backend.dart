@@ -142,6 +142,24 @@ class SupabaseSyncBackend implements SyncBackend {
   @override
   Future<AppResult<SyncReport>> syncNow() async {
     if (!isConfigured) return const AppFailure('云同步未配置');
+    // 互斥/去重：并发调用共享同一 in-flight Future（防并发双 refreshSession
+    // 消费同一 refresh token 导致二次刷新失败、以及重复执行同一轮同步）。
+    final inFlight = _syncInFlight;
+    if (inFlight != null) return inFlight;
+    final future = _runSync();
+    _syncInFlight = future;
+    try {
+      return await future;
+    } finally {
+      if (identical(_syncInFlight, future)) {
+        _syncInFlight = null;
+      }
+    }
+  }
+
+  Future<AppResult<SyncReport>>? _syncInFlight;
+
+  Future<AppResult<SyncReport>> _runSync() async {
     final userId = currentUserId;
     if (userId == null) {
       return const AppFailure('请先登录后再同步');
@@ -154,10 +172,11 @@ class SupabaseSyncBackend implements SyncBackend {
     }
     final expiresAt = session.expiresAt;
     // expiresAt 缺失时无法确认 token 有效性：按需刷新兜底（防已过期/未知
-    // 状态的 token 直接交给引擎读写）。
+    // 状态的 token 直接交给引擎读写）。提前 30s 视为过期——临界过期的 token
+    // 可能在同步执行中途失效导致请求 401，提前刷新留出余量。
     final expired = expiresAt == null ||
         DateTime.fromMillisecondsSinceEpoch(expiresAt * 1000)
-            .isBefore(DateTime.now());
+            .isBefore(DateTime.now().add(const Duration(seconds: 30)));
     if (expired) {
       try {
         final refreshed = await _lazyClient.auth.refreshSession();
@@ -165,9 +184,17 @@ class SupabaseSyncBackend implements SyncBackend {
           return const AppFailure('登录已过期，请重新登录');
         }
       } on AuthException catch (e) {
-        // 区分"会话失效"与"网络瞬时故障"：刷新失败时网络错误也可能被包装成
-        // AuthException（如 "Failed to fetch"）——按消息特征判定，避免一律
-        // 误报"登录已过期"诱导用户重复登录。
+        // 区分"会话失效"与"网络瞬时故障"：优先用结构化错误码判定（文案易变），
+        // code 缺失时再以消息特征兜底。
+        final code = e.code?.toLowerCase();
+        if (code != null) {
+          if (code.contains('refresh_token') ||
+              code.contains('invalid_grant') ||
+              code.contains('expired')) {
+            return const AppFailure('登录已过期，请重新登录');
+          }
+          return const AppFailure('网络不可用，请稍后重试');
+        }
         final msg = e.message.toLowerCase();
         if (msg.contains('expired') ||
             msg.contains('invalid') ||

@@ -44,7 +44,11 @@ class SupabaseAuthService {
         onError: controller.addError,
         onDone: controller.close,
       );
-      controller.add(currentUserId);
+      // 底层流 onDone 后 controller 已关闭：再 add 会抛 StateError——
+      // 已关闭时取消底层订阅即可。
+      if (!controller.isClosed) {
+        controller.add(currentUserId);
+      }
       controller.onCancel = sub.cancel;
     },
     isBroadcast: true,
@@ -60,7 +64,7 @@ class SupabaseAuthService {
       if (trimmed.isEmpty || !_looksLikeEmail(trimmed)) {
         return const AppFailure('邮箱地址非法');
       }
-      await _client.auth.signInWithOtp(email: trimmed);
+      await _client.auth.signInWithOtp(email: trimmed, shouldCreateUser: false);
       return const AppSuccess(null);
     } on AuthException {
       // 远端错误细节不向用户透出（防泄露服务端内部信息）。
@@ -120,10 +124,11 @@ class SupabaseAuthService {
     // 非 AuthException 重新抛出保留堆栈（与 sendMagicLink 一致）。
   }
 
-  /// 极简邮箱形态校验（supabase 服务端仍会最终校验）：
-  /// 单个 @、本地部分/域名非空且无空格、域名含点、排除首尾点与连续点。
-  static final _emailRe =
-      RegExp(r'^[^@\s.](?:[^@\s]*[^@\s.])?@[^@\s.](?:[^@\s]*[^@\s.])?\.[^@\s.]+$');
+  /// 极简邮箱形态校验（supabase 服务端仍会最终校验）：单个 @、本地部分/域名
+  /// 非空且无空格、域名含点、**排除首尾点与连续点**。
+  static final _emailRe = RegExp(
+    r'^[^@\s.](?:[^@\s.]|\.(?!\.))*@[^@\s.](?:[^@\s.]|\.(?!\.))*\.[^@\s.]+$',
+  );
 
   bool _looksLikeEmail(String value) => _emailRe.hasMatch(value);
 }

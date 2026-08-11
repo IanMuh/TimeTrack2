@@ -52,7 +52,8 @@ class CloudSyncEngine {
     required this.settings,
     this.pageSize = 1000,
     this.pushBatchSize = 100,
-  });
+  })  : assert(pageSize > 0, 'pageSize 必须为正'),
+        assert(pushBatchSize > 0, 'pushBatchSize 必须为正');
 
   final AppDatabase database;
   final RemoteTableGateway gateway;
@@ -81,6 +82,9 @@ class CloudSyncEngine {
       return const AppFailure('同步正在进行中，请稍后再试');
     }
     _inFlight = true;
+    // 同步开始时刻（空全量同步的兜底游标基准）：同步期间新建行的 updated_at
+    // 必然晚于该值，不会漏；用结束时刻墙钟兜底才会吞掉同步期间新建的行。
+    final startedAt = DateTime.now();
     try {
       // 游标按 userId 分区：共享设备切换用户后不得复用上一用户游标
       //（否则增量窗口晚于新用户远端最新更新，拉取/推送永久漏行）。
@@ -147,9 +151,10 @@ class CloudSyncEngine {
       pulledRows += logsPull.count;
       maxSeen = _laterOf(maxSeen, logsPull.maxSeen);
       // profile_settings 单例行（每用户至多一行；分页逻辑与其余表一致）。
-      // 拉取归属校验：本地 id=1 单例行若属于**其他用户**（共享设备上前一登录
-      // 用户遗留），不得被当前用户远端配置覆盖（防跨用户串写，与推送侧对称）；
-      // 跳过行不计入 count/maxSeen——防游标推进吞掉当前用户远端配置的增量窗口。
+      // 网关 fetchRowsSince 已按 user_id=userId 过滤：返回行必属当前用户，
+      // 直接 LWW 应用——**不做本地归属跳过**（共享设备上前一用户遗留本地
+      // 单例行时，若因本地归属他人而跳过，当前用户自己的远端配置永远拉
+      // 不下来）。
       final settingsPull =
           await _pullTable(
             table: RemoteTables.profileSettings,
@@ -163,14 +168,6 @@ class CloudSyncEngine {
                 throw StateError('拉取表 profile_settings 失败：${failure.message}');
               }
               return const AppSuccess(null);
-            },
-            skipWhen: (row) async {
-              final localRow = await (database.select(database.profileSettings)
-                    ..where((t) => t.id.equals(1)))
-                  .getSingleOrNull();
-              return localRow != null &&
-                  localRow.userId != null &&
-                  localRow.userId != userId;
             },
           );
       pulledRows += settingsPull.count;
@@ -251,7 +248,9 @@ class CloudSyncEngine {
           (settingsRow.userId == null || settingsRow.userId == userId)) {
         final localSettings =
             (await settings.settings()).requireValue();
-        if (since == null || localSettings.updatedAt.isAfter(since)) {
+        // 包含式语义（与其它表 xxxSince 的 >= 一致）：相等时间戳照常写回
+        //（LWW upsert 幂等；严格 isAfter 会让恰等于游标的更新永久跳过不推）。
+        if (since == null || !localSettings.updatedAt.isBefore(since)) {
           final settingsPush = await _pushTable(
             userId: userId,
             since: since,
@@ -270,20 +269,20 @@ class CloudSyncEngine {
       // 游标须覆盖本轮**实际处理**的最大行 updated_at（拉取 maxSeen 与
       // 推送 pushedMax 取大）：防同步期间新建/更新的本地行（updated_at 晚于
       // 游标）未被覆盖而下一轮永久漏推。
-      // 空全量同步（since=null 且本轮无拉取无推送）**不推进游标**：保持 null
-      // 让下轮按全量重跑（LWW 幂等安全）——用结束时刻墙钟兜底会让同步期间
-      // 新建的本地行（updated_at 早于该墙钟）永久漏推（action_logs 等追加型
-      // 数据直接丢失）。
-      final effectiveCursor = _laterOf(maxSeen, pushedMax) ?? since;
-      if (effectiveCursor != null) {
-        final markResult = await statusStore.markSuccess(
-          syncedAt: effectiveCursor,
-          target: SyncTarget.supabase,
-          userId: userId,
-        );
-        if (markResult case AppFailure<void> failure) {
-          return AppFailure('保存同步游标失败：${failure.message}');
-        }
+      // 空全量同步（since=null 且本轮无拉取无推送）用**同步开始时刻**兜底：
+      // 同步期间新建行的 updated_at 必然晚于该值（不会漏），同时清除上次
+      // 失败遗留的 lastError、结束"永远全量重扫"状态——不用结束时刻墙钟
+      //（会吞掉同步期间新建的行）。注：wasFullSync=false 时 since 必非 null，
+      // wasFullSync=true 时 startedAt 非 null——effectiveCursor 恒非 null。
+      final effectiveCursor = _laterOf(maxSeen, pushedMax) ??
+          (wasFullSync ? startedAt : since);
+      final markResult = await statusStore.markSuccess(
+        syncedAt: effectiveCursor,
+        target: SyncTarget.supabase,
+        userId: userId,
+      );
+      if (markResult case AppFailure<void> failure) {
+        return AppFailure('保存同步游标失败：${failure.message}');
       }
       return AppSuccess(SyncReport(
         target: SyncTarget.supabase,

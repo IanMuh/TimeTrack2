@@ -154,16 +154,19 @@ class SyncStatusStore with RepositoryMappings {
             // 与 read() 一致：损坏游标显式失败，不静默重置（防回退实际成功点）。
             return AppFailure('同步游标数据损坏，无法解析：${existing.value}');
           }
+          // 库中已有游标为未来时间（旧版本写入/远端时钟偏差）：后续所有真实
+          // syncedAt 都判"未推进"而永久停滞且无恢复路径——显式失败并提示重置。
+          if (existingAt.isAfter(
+            DateTime.now().toUtc().add(const Duration(minutes: 5)),
+          )) {
+            return AppFailure(
+              '同步游标时间不合理（晚于当前时间），需重置：${existing.value}',
+            );
+          }
           if (syncedAt.toUtc().isBefore(existingAt)) {
-            // **乱序完成**（旧 syncedAt 早于现有游标）：不覆盖游标/目标
-            //（防并发完成时后结束的旧同步回退游标、且目标与游标指向的
-            // 最近成功点不一致），只清错误。
-            await database.batch((batch) {
-              batch.insert(database.appMetadata, AppMetadataCompanion.insert(
-                key: AppMetadataKeys.lastSyncError,
-                value: '',
-              ), mode: InsertMode.insertOrReplace);
-            });
+            // **乱序完成**（旧 syncedAt 早于现有游标）：不覆盖游标/目标，
+            // **保留 lastError**——较早开始的慢同步乱序完成不得抹掉更新的
+            // 失败记录（"错误反映最近一次失败"语义；正常推进分支才清错误）。
             return const AppSuccess(null);
           }
         }

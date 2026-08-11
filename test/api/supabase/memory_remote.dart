@@ -18,6 +18,11 @@ class MemoryRemote implements RemoteTableGateway {
   /// 抛出异常（模拟网络故障）：设非 null 时下次调用抛该异常。
   Object? nextError;
 
+  /// 是否放行缺失 user_id 的无主行（默认 true 兼容直接 seed 无归属行的
+  /// LWW 语义测试；**有 user_id 的行仍严格按归属过滤**——跨用户隔离测试
+  /// 不受影响，且无需主行泄漏场景可显式设 false 验证严格模式）。
+  bool allowUnownedRows = true;
+
   void seed(String table, Map<String, Object?> row) {
     assert(row['updated_at'] is String, 'seed 行必须携带 updated_at');
     // 行身份：常规表用 id；profile_settings 无 id 键（云端主键 user_id）。
@@ -27,13 +32,13 @@ class MemoryRemote implements RemoteTableGateway {
 
   /// 记录在远端存在但未在本地 mock 中的行（fetchRemoteUpdatedAt 用）。
   /// [idKey] 与 fetchRemoteUpdatedAt 的 idKey 对齐（profile_settings 用 user_id）；
-  /// 需显式传 [userId] 归属（否则该行会因 fetchRowsSince 的缺失 user_id 放行
-  /// 规则被当作完整远端行拉取，产生脏数据）。
+  /// [userId] **必填**（与真网关 eq('user_id') 一致——无主行会被任意用户
+  /// 看到，掩盖跨用户数据泄漏类缺陷）。
   void seedRemoteOnly(String table, String id, DateTime updatedAt,
-      {String idKey = 'id', String? userId}) {
+      {String idKey = 'id', required String userId}) {
     tables.putIfAbsent(table, () => {})[id] = {
       idKey: id,
-      'user_id': ?userId,
+      'user_id': userId,
       'updated_at': updatedAt.toUtc().toIso8601String(),
     };
   }
@@ -43,8 +48,12 @@ class MemoryRemote implements RemoteTableGateway {
   Object? failOnCallIndex;
   int _callCount = 0;
 
-  /// 重置调用计数（配合 [failOnCallIndex] 使用：先 reset 再设目标序号）。
-  void resetCallCount() => _callCount = 0;
+  /// 重置调用计数 + 清除失败钩子（防残留钩子在下个测试误触发）。
+  void resetCallCount() {
+    _callCount = 0;
+    failOnCallIndex = null;
+    nextError = null;
+  }
 
   @override
   Future<RemoteRowsPage> fetchRowsSince({
@@ -54,18 +63,24 @@ class MemoryRemote implements RemoteTableGateway {
     int pageSize = 1000,
     int page = 0,
   }) async {
-    assert(pageSize > 0 && page >= 0,
-        'fetchRowsSince: pageSize 必须为正、page 非负');
+    // 与真网关对齐：非法 pageSize 显式抛错（而非 assert——release 下剥离）。
+    if (pageSize < 1) {
+      throw ArgumentError.value(pageSize, 'pageSize', '必须为正数');
+    }
+    if (pageSize > 1000) {
+      throw ArgumentError.value(pageSize, 'pageSize', '不能超过 1000');
+    }
     callLog.add('pull:$table');
     pullLog.add((table: table, since: since, page: page));
     _maybeThrow();
     final rows = (tables[table]?.values ?? const <Map<String, Object?>>[])
         .where((row) {
-      // 与真网关 .eq('user_id', userId) 过滤一致：有 user_id 的行须归属当前
-      // 用户；**缺失 user_id**（历史宽松数据）放行——新落库行经 upsertRows
-      // 注入强制归属，不产生新的无主行。
+      // 与真网关 .eq('user_id', userId) 严格过滤一致：有 user_id 的行须归属
+      // 当前用户；无主行仅在 allowUnownedRows 时放行（且**仍须通过 since
+      // 过滤**——不能提前短路）。
       final rowUser = row['user_id'];
       if (rowUser is String && rowUser != userId) return false;
+      if (rowUser is! String && !allowUnownedRows) return false;
       final updatedAt = DateTime.parse(row['updated_at']! as String);
       if (since == null) return true;
       return !updatedAt.isBefore(since);
@@ -88,9 +103,10 @@ class MemoryRemote implements RemoteTableGateway {
     final end = (start + pageSize) < rows.length ? start + pageSize : rows.length;
     // hasMore 语义与真网关一致：末页恰好满页时返回 true（触发一次多余空页
     // 请求以结束），忠实模拟契约。
+    final pageRows = rows.sublist(start, end);
     return RemoteRowsPage(
-      rows: rows.sublist(start, end),
-      hasMore: rows.sublist(start, end).length == pageSize,
+      rows: pageRows,
+      hasMore: pageRows.length == pageSize,
     );
   }
 
@@ -131,14 +147,12 @@ class MemoryRemote implements RemoteTableGateway {
     _maybeThrow();
     final target = tables.putIfAbsent(table, () => {});
     for (final row in rows) {
-      // 模拟真网关"强制归属当前用户"：注入 user_id（防测试存下无主行）；
-      // updated_at 缺失时补齐（防后续强制解包抛 null-check 异常）。
-      final owned = {
-        ...row,
-        'user_id': userId,
-        if (!row.containsKey('updated_at'))
-          'updated_at': DateTime.now().toUtc().toIso8601String(),
-      };
+      // 与真网关一致：强制注入 user_id；**debug 下强制要求 updated_at 存在**
+      //（真网关不会补齐——静默补会让"调用方漏传 updated_at"的 bug 在测试
+      // 通过而在真实链路才暴露）。业务表强制要求 id。
+      assert(row.containsKey('updated_at'),
+          'upsertRows: 行必须携带 updated_at（真实网关不会补齐）');
+      final owned = {...row, 'user_id': userId};
       // 行身份：常规表用 id；profile_settings 无 id 键（云端主键 user_id）。
       final id = (owned['id'] ?? owned['user_id'])! as String;
       target[id] = owned;

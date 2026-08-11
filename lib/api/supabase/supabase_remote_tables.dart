@@ -80,16 +80,26 @@ class SupabaseRemoteTables with RepositoryMappings implements RemoteTableGateway
     // 次级排序键（唯一列）保证偏移分页跨请求稳定：多条行 updated_at 相同时
     // 页边界不丢/重行。常规表用 id；profile_settings 无 id 列，用 user_id。
     final tieBreakKey = table == 'profile_settings' ? 'user_id' : 'id';
+    // 请求 pageSize+1 行：返回数 > pageSize 才置 hasMore——PostgREST 服务端
+    // max-rows 若配置小于 pageSize，首页返回不足 pageSize 时按 == 判定会静默
+    // 漏数据（hasMore 恒 false）；> 判定在末页恰满页时也多一次空请求（预期）。
     final paged = filtered
         .order('updated_at')
         .order(tieBreakKey)
-        .range(page * effectivePageSize, (page + 1) * effectivePageSize - 1);
+        .range(
+          page * effectivePageSize,
+          (page + 1) * effectivePageSize, // 上界含（range 闭区间）+1 行
+        );
     final rows = await _withRetry(
       () async => (await paged).cast<Map<String, Object?>>(),
     );
+    final hasMore = rows.length > effectivePageSize;
+    final pageRows = hasMore
+        ? rows.sublist(0, effectivePageSize)
+        : rows;
     return RemoteRowsPage(
-      rows: rows,
-      hasMore: rows.length == effectivePageSize,
+      rows: pageRows,
+      hasMore: hasMore,
     );
   }
 
@@ -132,19 +142,26 @@ class SupabaseRemoteTables with RepositoryMappings implements RemoteTableGateway
       for (final row in rows) {
         final id = row[effectiveIdKey];
         final updatedAt = row['updated_at'];
-        if (id is String && updatedAt is String) {
-          final parsed = DateTime.tryParse(updatedAt);
-          if (parsed == null) {
-            // fail-stop：脏数据不可静默跳过——否则调用方误判"远端无此行"
-            // 而推本地旧行覆盖远端新数据（LWW 数据静默丢失）。
-            throw FormatException(
-              '[$table] 行 $id 的 updated_at 无法解析：$updatedAt',
-            );
-          }
-          // 返回 UTC（与网关其余路径 UTC 语义一致；toLocal 会让返回值随
-          // 机器时区偏移，下游与 UTC 值比较时产生整段偏差）。
-          result[id] = parsed.toUtc();
+        // 类型不符（null/非 String）与不可解析字符串一律 fail-stop：
+        // 调用方（推送防旧）会把"结果缺该 id"误判为"远端无此行"而推本地旧行
+        // 覆盖远端新数据——保持与解析失败的 fail-stop 语义一致。
+        if (id is! String || updatedAt is! String) {
+          throw FormatException(
+            '[$table] 行身份列/updated_at 类型异常：'
+            'id=$id, updated_at=$updatedAt',
+          );
         }
+        final parsed = DateTime.tryParse(updatedAt);
+        if (parsed == null) {
+          // fail-stop：脏数据不可静默跳过——否则调用方误判"远端无此行"
+          // 而推本地旧行覆盖远端新数据（LWW 数据静默丢失）。
+          throw FormatException(
+            '[$table] 行 $id 的 updated_at 无法解析：$updatedAt',
+          );
+        }
+        // 返回 UTC（与网关其余路径 UTC 语义一致；toLocal 会让返回值随
+        // 机器时区偏移，下游与 UTC 值比较时产生整段偏差）。
+        result[id] = parsed.toUtc();
       }
     }
     return result;
