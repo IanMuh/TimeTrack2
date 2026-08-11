@@ -96,6 +96,9 @@ void main() {
       expect(decoded.activities.single.isDeleted, isTrue,
           reason: '软删行必须随包传播');
       expect(decoded.timeEntries.single.activityNameSnapshot, '工作');
+      expect(decoded.timeEntries.single.activityColorSnapshot, 0xff2563eb);
+      expect(decoded.timeEntries.single.isDeleted, isFalse);
+      expect(decoded.activities.single.deletedAt!.isAtSameMomentAs(now), isTrue);
       expect(
         decoded.exportedAt.isAtSameMomentAs(now),
         isTrue,
@@ -201,6 +204,91 @@ void main() {
           (await deviceB.activities.activities(includeDeleted: true)).requireValue();
       expect(withDeleted.map((x) => x.id), contains(a.id),
           reason: '墓碑行保留（含删导出可见）');
+
+      // 墓碑 LWW 双向：B 本地存活行 updatedAt 更新 → A 旧墓碑不删除 B 的行
+      final aliveInB = await seedActivity(deviceB, 'B 存活');
+      await deviceB.activities.updateActivity(
+        activity: aliveInB,
+        name: 'B 存活(新)',
+        color: 0xff123456,
+      );
+      final oldTombstone = aliveInB.copyWith(
+        deletedAt: aliveInB.updatedAt.subtract(const Duration(hours: 1)),
+        updatedAt: aliveInB.updatedAt.subtract(const Duration(hours: 1)),
+      );
+      await deviceB.syncBundle.mergeBundle(SyncBundle(
+        schemaVersion: 2,
+        exportedAt: DateTime.now(),
+        sourceDeviceId: 'devA',
+        activities: [oldTombstone],
+      ));
+      final afterOldTombstone =
+          (await deviceB.activities.activities()).requireValue();
+      expect(afterOldTombstone.map((x) => x.id), contains(aliveInB.id),
+          reason: '旧墓碑不覆盖本地更新的存活行');
+
+      // 反向：B 本地行更旧 → A 新墓碑（updatedAt 更新）应删除
+      await deviceB.syncBundle.mergeBundle(SyncBundle(
+        schemaVersion: 2,
+        exportedAt: DateTime.now(),
+        sourceDeviceId: 'devA',
+        activities: [oldTombstone.copyWith(
+          deletedAt: aliveInB.updatedAt.add(const Duration(hours: 2)),
+          updatedAt: aliveInB.updatedAt.add(const Duration(hours: 2)),
+        )],
+      ));
+      final afterNewTombstone =
+          (await deviceB.activities.activities()).requireValue();
+      expect(afterNewTombstone.map((x) => x.id), isNot(contains(aliveInB.id)),
+          reason: '更新的墓碑删除本地行');
+    });
+
+    test('跨日条目合并：按本地日切段 + 确定性段 id（重复合并不重复）', () async {
+      final a = await seedActivity(deviceA, '跨日');
+      // A 有 23:00→次日 01:00 跨日条目（导出时已拆成两段：23:00-24:00、00:00-01:00）
+      await deviceA.entries.createManualEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 11, 23, 0),
+        endAt: DateTime(2026, 8, 12, 1, 0),
+        note: '跨日',
+      );
+      final bundleA = await deviceA.syncBundle.exportBundle(sourceDeviceId: 'devA');
+      await deviceB.syncBundle.mergeBundle(bundleA);
+
+      final day1 = await deviceB.entries.entriesForDay(DateTime(2026, 8, 11));
+      final day2 = await deviceB.entries.entriesForDay(DateTime(2026, 8, 12));
+      expect(day1.length, 1);
+      expect(day2.length, 1);
+      expect(day1.single.endAt!.isAtSameMomentAs(DateTime(2026, 8, 12, 0, 0)), isTrue);
+      expect(day2.single.startAt.isAtSameMomentAs(DateTime(2026, 8, 12, 0, 0)), isTrue);
+
+      // 重复合并（同包再合并一次）不产生重复段
+      final before = (await deviceB.entries.allEntries()).length;
+      await deviceB.syncBundle.mergeBundle(bundleA);
+      final after = (await deviceB.entries.allEntries()).length;
+      expect(after, before, reason: '确定性段 id 使重复合并不残留重复段');
+    });
+
+    test('profile_settings 单例行 LWW 合并', () async {
+      // A 保存设置并导出
+      await deviceA.settings.save((await deviceA.settings.settings()).requireValue()
+          .copyWith(reminderMinutes: 30));
+      final bundleA = await deviceA.syncBundle.exportBundle(sourceDeviceId: 'devA');
+      await deviceB.syncBundle.mergeBundle(bundleA);
+      expect((await deviceB.settings.settings()).requireValue().reminderMinutes, 30);
+
+      // B 本地更新的设置不被旧包覆盖
+      await deviceB.settings.save((await deviceB.settings.settings()).requireValue()
+          .copyWith(reminderMinutes: 50));
+      await deviceB.syncBundle.mergeBundle(SyncBundle(
+        schemaVersion: 2,
+        exportedAt: DateTime.now(),
+        sourceDeviceId: 'devA',
+        profileSettings: (await deviceA.settings.settings()).requireValue()
+            .copyWith(reminderMinutes: 30),
+      ));
+      expect((await deviceB.settings.settings()).requireValue().reminderMinutes, 50,
+          reason: '本地更新的设置不被旧包覆盖');
     });
 
     test('merge 后归一化：运行条目唯一 + 未分配单例存在', () async {
@@ -217,6 +305,11 @@ void main() {
 
       final runningB = await deviceB.entries.runningEntry();
       expect(runningB, isNotNull, reason: '归一化后仍有运行条目');
+      // 全部 running 行必须唯一（normalizeRunning 收敛，非仅 limit(1) 非空）
+      final runningRows = await deviceB.entries.allEntries();
+      final runningCount =
+          runningRows.where((e) => e.isRunning && !e.isDeleted).length;
+      expect(runningCount, 1, reason: '归一化后运行条目唯一');
       // 未分配单例已确保
       expect((await deviceB.activities.unassignedActivity()).requireValue().id,
           isNotEmpty);

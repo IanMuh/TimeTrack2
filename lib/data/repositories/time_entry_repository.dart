@@ -649,13 +649,36 @@ class TimeEntryRepository with RepositoryMappings {
   /// 合并保存（bundle merge 用）：补快照 + 跨日拆分 + 确定性段 id，不裁重叠
   ///（合并语义是行级 LWW 整行替换，非本地补记的裁剪语义）。无独立事务——
   /// 由调用方（SyncBundleRepository.mergeBundle）在统一事务内执行。
+  ///
+  /// - 每个派生段（含首段）**独立 LWW 判定**：仅当本地同名段缺失或更旧才替换，
+  ///   防旧包覆盖本地更新的段（父行 LWW 门控不覆盖派生段）；
+  /// - 活动缺失/已删时回退到未分配活动（外键约束在 foreign_keys=ON 下会因
+  ///   悬挂引用使整包合并失败——回退避免单条脏数据阻塞合并）。
   Future<void> saveMergedEntry(TimeEntry entry) async {
-    final normalized = await _activityRepo.entryWithActivitySnapshot(
+    var activityId = entry.activityId;
+    var normalized = await _activityRepo.entryWithActivitySnapshot(
       entry,
       executor: database,
     );
+    if (normalized.activityNameSnapshot.isEmpty &&
+        normalized.activityColorSnapshot == null) {
+      // 活动缺失/已删：快照未回填 → 回退未分配活动（防 FK 悬挂）。
+      final unassigned = await _activityRepo.ensureUnassignedActivity();
+      activityId = unassigned.id;
+      normalized = entry.copyWith(activityId: activityId);
+      normalized = await _activityRepo.entryWithActivitySnapshot(
+        normalized,
+        executor: database,
+      );
+    }
     final rows = _entryRowsForStorage(normalized);
     for (final row in rows) {
+      final query = database.select(database.timeEntries)
+        ..where((t) => t.id.equals(row.id));
+      final localRow = await query.getSingleOrNull();
+      final localNewer = localRow != null &&
+          readUtc(localRow.updatedAt).isAfter(row.updatedAt);
+      if (localNewer) continue;
       await database.into(database.timeEntries).insert(
             timeEntryToCompanion(row),
             mode: InsertMode.insertOrReplace,

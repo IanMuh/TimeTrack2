@@ -34,11 +34,11 @@ class FileInteropService {
           'timetrack-${DateFormat('yyyyMMdd-HHmmss').format(DateTime.now())}'
           '.timetrack.json';
 
-      final location = await _saveLocation(fileName);
-      if (location == null) return const AppFailure('未选择保存位置');
-      final file = File(location.path);
+      final targetPath = await _saveTargetPath(fileName);
+      if (targetPath == null) return const AppFailure('未选择保存位置');
+      final file = File(targetPath);
       await file.writeAsString(text, encoding: utf8);
-      return AppSuccess(location.path);
+      return AppSuccess(targetPath);
     } catch (e) {
       return AppFailure('导出失败：$e');
     }
@@ -52,10 +52,16 @@ class FileInteropService {
       final text = await file.readAsString(encoding: utf8);
       final bundle = const SyncBundleCodec().decode(text);
       final result = await syncBundleRepository.mergeBundle(bundle);
-      if (result.when(onSuccess: (_) => false, onFailure: (_) => true)) {
-        return AppFailure('导入合并失败');
+      if (result case AppFailure<void> failure) {
+        return AppFailure('导入合并失败：${failure.message}');
       }
-      await syncBundleRepository.normalizeAfterMerge();
+      final normalizeResult = await syncBundleRepository.normalizeAfterMerge();
+      if (normalizeResult case AppFailure<void> normalizeFailure) {
+        // 数据已合并入库，仅归一化未完成——明确提示避免误导。
+        return AppFailure('数据已合并但归一化未完成：${normalizeFailure.message}');
+      }
+      // 返回包内记录总数（含软删行与 LWW 未覆盖行——语义为"包内记录数"，
+      // 供提示展示，不代表实际写入行数）。
       final count = bundle.activities.length +
           bundle.categories.length +
           bundle.categoryLinks.length +
@@ -69,19 +75,26 @@ class FileInteropService {
     }
   }
 
-  /// 保存对话框（file_selector）；平台不支持时降级选目录。
-  Future<FileSaveLocation?> _saveLocation(String suggestedName) async {
-    final location = await getSaveLocation(
-      suggestedName: suggestedName,
-      acceptedTypeGroups: const [
-        XTypeGroup(
-          label: 'TimeTrack JSON',
-          extensions: _extensions,
-          mimeTypes: ['application/json'],
-        ),
-      ],
-    );
-    return location;
+  /// 保存目标路径（file_selector）；平台不支持保存对话框时降级选目录（老项目语义）。
+  Future<String?> _saveTargetPath(String suggestedName) async {
+    try {
+      final location = await getSaveLocation(
+        suggestedName: suggestedName,
+        acceptedTypeGroups: const [
+          XTypeGroup(
+            label: 'TimeTrack JSON',
+            extensions: _extensions,
+            mimeTypes: ['application/json'],
+          ),
+        ],
+      );
+      return location?.path;
+    } on UnsupportedError {
+      // 平台不支持保存对话框：降级选目录，文件名拼接。
+      final dir = await getDirectoryPath();
+      if (dir == null) return null;
+      return '${dir.replaceAll('\\', '/')}/$suggestedName';
+    }
   }
 
   Future<XFile?> _openFile() {

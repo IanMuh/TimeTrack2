@@ -71,6 +71,13 @@ class SyncBundleRepository with RepositoryMappings {
   /// 表顺序与老项目一致：activities → categories → links → time_entries →
   /// action_logs → profile_settings（FK 依赖方向）。
   Future<AppResult<void>> mergeBundle(SyncBundle bundle) async {
+    if (bundle.schemaVersion < SyncBundle.minSchemaVersion ||
+        bundle.schemaVersion > SyncBundle.maxSchemaVersion) {
+      return AppFailure(
+        '同步包 schema 版本 ${bundle.schemaVersion} 不受支持'
+        '（支持 ${SyncBundle.minSchemaVersion}..${SyncBundle.maxSchemaVersion}）',
+      );
+    }
     try {
       await database.transaction(() async {
         for (final activity in bundle.activities) {
@@ -179,13 +186,20 @@ class SyncBundleRepository with RepositoryMappings {
   }
 
   /// 合并后归一化调用链（merge 之后执行，恢复本地数据不变量）。
-  Future<void> normalizeAfterMerge() async {
-    await timeEntries.normalizeRunningEntriesAfterMerge();
-    await timeEntries.normalizeStoredCrossDayEntries();
-    await timeEntries.backfillMissingEntrySnapshots();
-    await activities.ensureUnassignedActivity();
-    // 未分配条目合并（可能因合并带入新的相邻未分配段）。
-    final unassigned = (await activities.unassignedActivity()).requireValue();
-    await timeEntries.mergeAdjacentUnassignedEntries(unassigned.id);
+  ///
+  /// 返回 AppResult：任一步骤失败时后续归一化中断，调用方拿到明确失败
+  ///（数据可能已合并入库，提示需区分"合并失败"与"归一化未完成"）。
+  Future<AppResult<void>> normalizeAfterMerge() async {
+    try {
+      await timeEntries.normalizeRunningEntriesAfterMerge();
+      await timeEntries.normalizeStoredCrossDayEntries();
+      await timeEntries.backfillMissingEntrySnapshots();
+      await activities.ensureUnassignedActivity();
+      final unassigned = (await activities.unassignedActivity()).requireValue();
+      await timeEntries.mergeAdjacentUnassignedEntries(unassigned.id);
+      return const AppSuccess(null);
+    } catch (e) {
+      return AppFailure('合并后归一化失败：$e');
+    }
   }
 }

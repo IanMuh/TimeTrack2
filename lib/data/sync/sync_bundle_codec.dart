@@ -22,10 +22,10 @@ class SyncBundleCodec {
       throw const FormatException('同步包顶层必须是 JSON 对象');
     }
     final rawVersion = decoded['schema_version'];
-    if (rawVersion is! num) {
-      throw const FormatException('同步包缺少合法 schema_version');
+    if (rawVersion is! int) {
+      throw const FormatException('同步包缺少合法的整数 schema_version');
     }
-    final schemaVersion = rawVersion.toInt();
+    final schemaVersion = rawVersion;
     if (schemaVersion < SyncBundle.minSchemaVersion ||
         schemaVersion > SyncBundle.maxSchemaVersion) {
       throw FormatException(

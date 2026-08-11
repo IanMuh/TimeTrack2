@@ -55,15 +55,19 @@ class SyncBundle {
 
   static SyncBundle fromJson(Map<String, Object?> json) {
     return SyncBundle(
-      schemaVersion: (json['schema_version'] as num?)?.toInt() ?? 0,
+      schemaVersion: _requiredSchemaVersion(json),
       exportedAt: _requiredDateTime(json, 'exported_at'),
       sourceDeviceId: _requiredString(json, 'source_device_id'),
-      activities: _parseList(json, 'activities', Activity.fromMap),
-      categories: _parseList(json, 'categories', ActivityCategory.fromMap),
-      categoryLinks:
-          _parseList(json, 'category_links', ActivityCategoryLink.fromMap),
-      timeEntries: _parseList(json, 'time_entries', TimeEntry.fromMap),
-      actionLogs: _parseList(json, 'action_logs', ActionLog.fromMap),
+      activities: List.unmodifiable(
+          _parseList(json, 'activities', Activity.fromMap)),
+      categories: List.unmodifiable(
+          _parseList(json, 'categories', ActivityCategory.fromMap)),
+      categoryLinks: List.unmodifiable(
+          _parseList(json, 'category_links', ActivityCategoryLink.fromMap)),
+      timeEntries: List.unmodifiable(
+          _parseList(json, 'time_entries', TimeEntry.fromMap)),
+      actionLogs: List.unmodifiable(
+          _parseList(json, 'action_logs', ActionLog.fromMap)),
       profileSettings: _parseOptional(
         json['profile_settings'],
         ProfileSettings.fromMap,
@@ -115,9 +119,24 @@ class SyncBundle {
 
   static String _requiredString(Map<String, Object?> json, String key) {
     final value = json[key];
-    if (value is! String || value.isEmpty) {
+    if (value is! String || value.trim().isEmpty) {
       throw FormatException('bundle 必填字段缺失或非法：$key');
     }
-    return value;
+    return value.trim();
+  }
+
+  /// 严格校验 schema_version：整数且在 [minSchemaVersion, maxSchemaVersion]。
+  static int _requiredSchemaVersion(Map<String, Object?> json) {
+    final raw = json['schema_version'];
+    if (raw is! int) {
+      throw const FormatException('bundle 缺少合法的整数 schema_version');
+    }
+    if (raw < minSchemaVersion || raw > maxSchemaVersion) {
+      throw FormatException(
+        'bundle schema 版本 $raw 不受支持'
+        '（支持 $minSchemaVersion..$maxSchemaVersion）',
+      );
+    }
+    return raw;
   }
 }
