@@ -657,20 +657,26 @@ class TimeEntryRepository with RepositoryMappings {
   Future<void> saveMergedEntry(TimeEntry entry) async {
     // 直接按活动行存在性判定（快照字段不可靠：远端条目几乎都带快照，
     // "快照为空"既不等于活动缺失，也不该触发回退）。
+    // 已取到 activity，直接用它填充快照（避免 entryWithActivitySnapshot 二次查询）。
     final activity = await _activityRepo.activityById(
       entry.activityId,
       executor: database,
     );
-    var normalized = entry;
+    final TimeEntry normalized;
     if (activity == null || activity.isDeleted) {
       // 活动缺失/已删：回退未分配活动（防 FK 悬挂使整包合并失败）。
       final unassigned = await _activityRepo.ensureUnassignedActivity();
-      normalized = entry.copyWith(activityId: unassigned.id);
+      normalized = entry.copyWith(
+        activityId: unassigned.id,
+        activityNameSnapshot: unassigned.name,
+        activityColorSnapshot: unassigned.color,
+      );
+    } else {
+      normalized = entry.copyWith(
+        activityNameSnapshot: activity.name,
+        activityColorSnapshot: activity.color,
+      );
     }
-    normalized = await _activityRepo.entryWithActivitySnapshot(
-      normalized,
-      executor: database,
-    );
     final rows = _entryRowsForStorage(normalized);
     for (final row in rows) {
       final query = database.select(database.timeEntries)

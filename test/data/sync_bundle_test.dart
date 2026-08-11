@@ -141,6 +141,44 @@ void main() {
     });
   });
 
+  group('SyncBundleRepository 悬挂引用回退', () {
+    test('远端条目带快照但活动缺失 → 整包成功且回退未分配', () async {
+      final h = Harness2();
+      try {
+        final now = DateTime.now();
+        final bundle = SyncBundle(
+          schemaVersion: 2,
+          exportedAt: now,
+          sourceDeviceId: 'devX',
+          timeEntries: [
+            TimeEntry(
+              id: 'orphan-entry',
+              activityId: 'missing-activity', // 本地不存在
+              activityNameSnapshot: '已删活动', // 带非空快照（旧逻辑漏洞场景）
+              activityColorSnapshot: 0xff000000,
+              startAt: now,
+              endAt: now.add(const Duration(hours: 1)),
+              deviceId: 'devX',
+              updatedAt: now,
+            ),
+          ],
+        );
+        final result = await h.syncBundle.mergeBundle(bundle);
+        expect(result.isSuccess, isTrue,
+            reason: '带快照的悬挂引用不应使整包合并失败');
+
+        final unassigned = (await h.activities.unassignedActivity()).requireValue();
+        final entries = await h.entries.allEntries();
+        expect(entries.single.activityId, unassigned.id,
+            reason: '活动缺失的条目回退到未分配活动');
+        expect(entries.single.activityNameSnapshot, isNotEmpty,
+            reason: '回退后仍带未分配活动的快照');
+      } finally {
+        await h.close();
+      }
+    });
+  });
+
   group('SyncBundleRepository mergeBundle 防御', () {
     test('schema 版本非法 → 拒绝且不写库', () async {
       final h = Harness2();
