@@ -35,7 +35,7 @@ lib/
 5. 数据不兼容老 SQLite 文件：老数据进新库走 `.timetrack.json` 文件互通导入，不走库迁移
 6. 所有用户可见文字提取为 ARB 本地化（中/英）或常量配置，代码不硬编码
 7. 全部操作经 CLI 指令系统统一分发（UI/快捷键/深链/未来 AI 收敛同一通道），扩展 = 注册指令，不改核心代码
-8. 提交纪律：未经用户明确指示**不得推送远程（push）**，最多只能本地提交（commit）；提交信息遵循 Conventional Commits
+8. 提交与合并纪律（PR 工作流）：本地提交信息遵循 Conventional Commits；**合并到 main 一律走 feature 分支 + Pull Request**，禁止直接 push 到 main；feature 分支（`feat/`、`fix/`、`docs/` 等）可推送到远端并发起 PR（`gh pr create --base main`），**PR 合并须经用户审批**（用户明确指示后才 merge）；未经用户明确指示不得 push 除 feature 分支以外的任何分支
 
 ## 保留不变式（行为级，实现不得破坏）
 1. 离线优先：读写先落本地 SQLite，云/LAN 异步不阻塞
@@ -65,8 +65,10 @@ lib/
 - 运行：`flutter run -d windows`
 - 构建：`flutter build windows` / `flutter build apk --release`
 - 验证：`flutter analyze` / `flutter test`
+- PR 工作流：`git checkout -b feat/xxx` → 实现+本地 commit → `git push -u origin feat/xxx` → `gh pr create --base main`；合并（须用户指示）：`gh pr merge <编号> --merge`
 
 ## 安全与提交
 - `.gitignore` 不提交：SUPABASE_URL/ANON_KEY、AI key、本地 `*.sqlite`、`dist/` 构建产物
 - `--dart-define` 默认值指向公开地址（本仓库 raw.githubusercontent），可被覆盖；AI key 永不入编译参数
 - 阶段 0 起每个阶段一个 commit，信息写明阶段与内容
+- 合并到 main 一律走 feature 分支 + PR（铁律 8）；PR 合并须用户审批
