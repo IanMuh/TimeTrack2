@@ -7,14 +7,22 @@ import 'package:flutter_test/flutter_test.dart';
 ///
 /// 断言用不区分大小写的正则 + 空白归一化（防格式化工具调空白/大小写误报）。
 void main() {
-  final schemaFile = File('supabase/schema.sql');
+  // 从当前目录向上找 pubspec.yaml 定位项目根（消除对 cwd 的隐式依赖——
+  // IDE 单测/CI 子目录运行时也能正确定位）。
+  Directory findRoot(Directory dir) {
+    if (File('${dir.path}/pubspec.yaml').existsSync()) return dir;
+    if (dir.parent.path == dir.path) return dir; // 到文件系统根仍无 → 用当前目录
+    return findRoot(dir.parent);
+  }
+
+  final schemaFile =
+      File('${findRoot(Directory.current).path}/supabase/schema.sql');
   late final String raw;
   late final String schema;
 
   setUpAll(() {
-    // 请在项目根目录运行测试（路径依赖当前工作目录）。
     expect(schemaFile.existsSync(), isTrue,
-        reason: '未找到 supabase/schema.sql——请在项目根目录运行测试');
+        reason: '未找到 ${schemaFile.path}（已按 pubspec.yaml 定位项目根）');
     raw = schemaFile.readAsStringSync();
     // 仅剥离**行首**注释（`--` 起始的行）：函数体内的 `--`（如字符串/文本
     // 常量）是 SQL 语法的一部分，不能剥离；本文件注释均为行首整行。
@@ -70,8 +78,13 @@ void main() {
         expect(block, isNotNull, reason: '表 $table 的 CREATE 定义缺失');
         final columns = block!.group(1)!.toUpperCase();
         for (final column in entry.value) {
-          expect(columns.contains(column.toUpperCase()), isTrue,
-              reason: '$table 缺列 $column');
+          // 词边界匹配（防 owner_user_id 之类的子串误判为存在 user_id）。
+          expect(
+            RegExp(r'\b' + RegExp.escape(column.toUpperCase()) + r'\b')
+                .hasMatch(columns),
+            isTrue,
+            reason: '$table 缺列 $column',
+          );
         }
       }
       // user_id 必须为 uuid（与 auth.users(id)/auth.uid() 类型一致，
@@ -215,11 +228,13 @@ void main() {
           isTrue,
           reason: '$table 缺 UPDATE 策略（USING + WITH CHECK 绑定）',
         );
-        // 禁止 FOR DELETE 策略（防物理删除绕过软删体系）
+        // 禁止任何 FOR DELETE / FOR ALL（ALL 隐含 DELETE）策略——防物理删除
+        // 绕过软删体系（不只查固定命名 _DELETE_OWN）。
         expect(
-          has("CREATE POLICY ${table}_DELETE_OWN ON $table"),
+          has("CREATE POLICY [^;]* ON $table [^;]*"
+              r'FOR (DELETE|ALL)[^;]*'),
           isFalse,
-          reason: '$table 不应有 DELETE 策略（软删体系禁物理删除）',
+          reason: '$table 不应有任何物理删除策略（软删体系禁物理删除）',
         );
       }
     });

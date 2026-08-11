@@ -133,6 +133,9 @@ class SupabaseSyncBackend implements SyncBackend {
       // 存在，reset 后重建会重新水合旧会话，造成"登出失败但状态被清空随后
       // 又恢复登录"的不一致）。
       reset();
+      // 在途同步失效：登出后旧同步不得再以旧身份提交结果（返回陈旧结果/
+      // 新调用复用旧 Future）。
+      _syncInFlight = null;
     }
     return result;
   }
@@ -183,12 +186,17 @@ class SupabaseSyncBackend implements SyncBackend {
         }
       } on AuthException catch (e) {
         // 区分"会话失效"与"网络瞬时故障"：优先用结构化错误码判定（文案易变），
-        // code 缺失时再以消息特征兜底。
+        // code 缺失时再以消息特征兜底。会话失效类 code 白名单尽量全（含
+        // session_not_found/user_not_found/bad_jwt/token_expired 等常见值）。
         final code = e.code?.toLowerCase();
         if (code != null) {
           if (code.contains('refresh_token') ||
               code.contains('invalid_grant') ||
-              code.contains('expired')) {
+              code.contains('expired') ||
+              code.contains('session_not_found') ||
+              code.contains('user_not_found') ||
+              code.contains('bad_jwt') ||
+              code.contains('token')) {
             return const AppFailure('登录已过期，请重新登录');
           }
           return const AppFailure('网络不可用，请稍后重试');
@@ -196,7 +204,10 @@ class SupabaseSyncBackend implements SyncBackend {
         final msg = e.message.toLowerCase();
         if (msg.contains('expired') ||
             msg.contains('invalid') ||
-            msg.contains('refresh_token')) {
+            msg.contains('refresh_token') ||
+            msg.contains('session_not_found') ||
+            msg.contains('user_not_found') ||
+            msg.contains('bad_jwt')) {
           return const AppFailure('登录已过期，请重新登录');
         }
         return const AppFailure('网络不可用，请稍后重试');

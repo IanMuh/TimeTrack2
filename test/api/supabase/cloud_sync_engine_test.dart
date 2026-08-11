@@ -164,13 +164,13 @@ void main() {
                 );
         expect(after.name, '本地活动', reason: '旧远端不覆盖新本地');
 
-        // 远端新行（updatedAt 晚于本地）→ 覆盖
+        // 远端新行（updatedAt 晚于本地，且落在 markSuccess 合理性容差内）→ 覆盖
         final newRemote = localActivity.copyWith(
           name: '远端新名',
-          updatedAt: localActivity.updatedAt.add(const Duration(hours: 2)),
+          updatedAt: localActivity.updatedAt.add(const Duration(minutes: 1)),
         );
         h.remote.seed(RemoteTables.activities, newRemote.toMap());
-        await h.engine.syncNow(userId: CloudHarness.userId);
+        (await h.engine.syncNow(userId: CloudHarness.userId)).requireValue();
         after = (await h.activities.activities()).requireValue().firstWhere(
               (a) => a.id == localActivity.id,
             );
@@ -291,13 +291,14 @@ void main() {
             .requireValue();
 
         // 远端已有该 id、updatedAt 更新、且字段完整（远端新名）。
+        // +1min（落在 markSuccess 合理性容差内，且晚于本地创建时间）。
         final remoteNewer = localActivity.copyWith(
           name: '远端新名',
-          updatedAt: localActivity.updatedAt.add(const Duration(hours: 1)),
+          updatedAt: localActivity.updatedAt.add(const Duration(minutes: 1)),
         );
         h.remote.seed(RemoteTables.activities, remoteNewer.toMap());
 
-        await h.engine.syncNow(userId: CloudHarness.userId);
+        (await h.engine.syncNow(userId: CloudHarness.userId)).requireValue();
         // 防旧推送的本质：无论推送是否执行（相等时间戳写回也属 LWW 幂等），
         // 远端行内容与 updated_at 都不被本地旧值破坏——验证远端保持更新值。
         final remoteRow = h.remote.tables[RemoteTables.activities]![
@@ -359,6 +360,32 @@ void main() {
             h.remote.tables[RemoteTables.activities]![second.id];
         expect(remoteTombstone, isNotNull, reason: '远端无行时墓碑也要推送');
         expect(remoteTombstone!['deleted_at'], isNotNull);
+      } finally {
+        await h.close();
+      }
+    });
+
+    test('推送跳过分支：拉取后远端被并发更新 → 本地旧值不写回（remoteAt.isAfter 触发）', () async {
+      final h = CloudHarness.create();
+      try {
+        // 首次全量同步：本地 A 推送到远端（远端无该行 → 无跳过）。
+        final a = (await h.activities.createActivity(
+          name: '并发活动',
+          color: 0xffaabbcc,
+        ))
+            .requireValue();
+        (await h.engine.syncNow(userId: CloudHarness.userId)).requireValue();
+        expect(h.remote.lastPushedIds, contains(a.id),
+            reason: '首次推送落库');
+
+        // 第二次同步：拉取阶段远端无新值（本地已是远端副本，相等不覆盖）。
+        // 推送检查（fetchRemoteUpdatedAt）时模拟远端被并发更新（时间戳 +1min
+        // 更晚）→ remoteAt.isAfter(local) 成立 → 该行被跳过、不写回。
+        h.remote.updatedAtBias[a.id] = const Duration(minutes: 1);
+        h.remote.lastPushedIds.clear();
+        (await h.engine.syncNow(userId: CloudHarness.userId)).requireValue();
+        expect(h.remote.lastPushedIds, isNot(contains(a.id)),
+            reason: '远端严格更新 ⇒ 推送跳过（本地旧值不覆盖远端新值）');
       } finally {
         await h.close();
       }
@@ -507,19 +534,28 @@ void main() {
           );
         }
         h.remote.resetCallCount();
+        h.remote.pullLog.clear(); // 清首次同步的拉取日志，本次断言从 0 计
         // 调用序号：0 = pull:activities 第 1 页，1 = pull:activities 第 2 页
         h.remote.failOnCallIndex = 1;
         final failed = await h.engine.syncNow(userId: CloudHarness.userId);
         expect(failed.isSuccess, isFalse, reason: '中途失败应返回失败');
+        // pullLog 在抛错前记录：断言失败确实发生在 activities 第 2 页
+        //（防引擎调用顺序变化导致序号命中错误调用而静默失真）。
+        expect(h.remote.pullLog, hasLength(greaterThanOrEqualTo(2)));
+        expect(h.remote.pullLog[1].table, 'activities');
+        expect(h.remote.pullLog[1].page, 1);
 
         var status = (await h.statusStore.read(userId: CloudHarness.userId)).requireValue();
         expect(status.lastSuccessfulSyncAt!.isAtSameMomentAs(cursor), isTrue,
             reason: '中途失败不清游标');
         expect(status.lastError, isNotNull);
 
-        // 第 1 页行已部分落库（LWW 幂等：不丢已应用行）
+        // 第 1 页行已部分落库（LWW 幂等：不丢已应用行）；第 2 页行不得落库
+        //（失败点必须钉死在 activities 第 2 页）。
         final partial = (await h.activities.activities()).requireValue();
         expect(partial.map((a) => a.id), contains('mid-fail-0'));
+        expect(partial.map((a) => a.id), isNot(contains('mid-fail-2')),
+            reason: '失败必须发生在 activities 第 2 页（第 2 页行不得落库）');
 
         // 重试（不设失败）→ 从原游标重拉，补齐全部 3 行 + 游标推进
         await h.engine.syncNow(userId: CloudHarness.userId);
@@ -627,19 +663,20 @@ void main() {
           reason: '本地配置推送到远端',
         );
 
-        // 远端更新的配置 → 拉回合并（LWW；远端行需带 user_id）
+        // 远端更新的配置 → 拉回合并（LWW；远端行需带 user_id；updatedAt 落在
+        // markSuccess 合理性容差内：晚于本地保存时刻 +2min，但早于 now+5min）。
         final remoteUpdated = (await h.settings.settings())
             .requireValue()
             .copyWith(
               userId: CloudHarness.userId,
               reminderMinutes: 55,
-              updatedAt: DateTime(2099, 1, 1),
+              updatedAt: DateTime.now().add(const Duration(minutes: 2)),
             );
         h.remote.seed(
           RemoteTables.profileSettings,
           remoteUpdated.toMap(),
         );
-        await h.engine.syncNow(userId: CloudHarness.userId);
+        (await h.engine.syncNow(userId: CloudHarness.userId)).requireValue();
         expect(
           (await h.settings.settings()).requireValue().reminderMinutes,
           55,
@@ -669,20 +706,18 @@ void main() {
           h.engine.syncNow(userId: CloudHarness.userId),
           h.engine.syncNow(userId: CloudHarness.userId),
         ]);
-        // 至少一个成功、至多一个成功（另一个被 in-flight 锁拒绝）
+        // in-flight 锁在 syncNow 首个 await 前同步置位：确定性恰好一个成功、
+        // 另一个被拒绝（防 Future.wait 顺序求值假设失效时双双成功漏检）。
         final successes =
             results.where((r) => r.isSuccess).length;
-        expect(successes, greaterThanOrEqualTo(1));
-        expect(successes, lessThanOrEqualTo(1),
-            reason: '并发 syncNow 应互斥（一个被拒绝或排队）');
+        expect(successes, 1, reason: '并发 syncNow 应恰好一个成功');
         final rejected = results.where((r) => !r.isSuccess).toList();
-        if (rejected.isNotEmpty) {
-          expect(
-            rejected.first.when(onSuccess: (_) => '', onFailure: (m) => m),
-            contains('进行中'),
-            reason: '拒绝消息应明确为"同步进行中"',
-          );
-        }
+        expect(rejected, hasLength(1), reason: '另一个必须被 in-flight 锁拒绝');
+        expect(
+          rejected.single.when(onSuccess: (_) => '', onFailure: (m) => m),
+          contains('进行中'),
+          reason: '拒绝消息应明确为"同步进行中"',
+        );
 
         // 游标不因并发回退：最终游标非空
         final status = (await h.statusStore.read(userId: CloudHarness.userId)).requireValue();

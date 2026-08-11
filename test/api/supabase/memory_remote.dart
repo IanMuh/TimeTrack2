@@ -143,11 +143,26 @@ class MemoryRemote implements RemoteTableGateway {
           })
           .firstOrNull;
       if (row != null && row['updated_at'] is String) {
-        result[id] = DateTime.parse(row['updated_at']! as String).toUtc();
+        final parsed = DateTime.parse(row['updated_at']! as String).toUtc();
+        // 应用远端时间戳偏差（模拟"拉取后、推送检查时远端被并发更新"）。
+        final bias = updatedAtBias[id];
+        result[id] = bias == null ? parsed : parsed.add(bias);
       }
     }
     return result;
   }
+
+  /// upsert 前钩子：在 fetchRemoteUpdatedAt 之后、写入之前被调用（模拟"拉取后、
+  /// 推送前远端被并发更新"的竞态窗口——_pushTable 的跳过分支唯一可达路径）。
+  void Function(String table, String userId)? onBeforePush;
+
+  /// 最近一次 upsert 写入的行身份（断言推送跳过分支用）。
+  final List<String> lastPushedIds = [];
+
+  /// 远端时间戳偏差（id → 时差）：fetchRemoteUpdatedAt 返回存储值 + 偏差——
+  /// 模拟"拉取后、推送检查时远端被并发更新"（跳过分支 `remoteAt.isAfter`
+  /// 唯一可触发的构造）。
+  final Map<String, Duration> updatedAtBias = {};
 
   @override
   Future<void> upsertRows({
@@ -157,7 +172,9 @@ class MemoryRemote implements RemoteTableGateway {
   }) async {
     callLog.add('push:$table');
     _maybeThrow();
+    onBeforePush?.call(table, userId);
     final target = tables.putIfAbsent(table, () => {});
+    lastPushedIds.clear();
     for (final row in rows) {
       // 与真网关一致：强制注入 user_id；**显式要求 updated_at 存在**（真网关
       // 不会补齐——静默补会让"调用方漏传 updated_at"的 bug 在测试通过而在
@@ -172,6 +189,7 @@ class MemoryRemote implements RemoteTableGateway {
         throw ArgumentError('upsertRows: 行必须携带 id 或 user_id（行内容：$row）');
       }
       target[id as String] = owned;
+      lastPushedIds.add(id);
     }
   }
 

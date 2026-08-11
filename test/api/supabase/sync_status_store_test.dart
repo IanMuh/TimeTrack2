@@ -191,7 +191,7 @@ void main() {
       final db = AppDatabase(NativeDatabase.memory());
       try {
         final store = SyncStatusStore(database: db);
-        final tA = DateTime(2026, 8, 11, 10);
+        final tA = DateTime.now().toUtc().subtract(const Duration(minutes: 30));
         final tB = tA.add(const Duration(minutes: 5));
         await store.markSuccess(syncedAt: tA, target: SyncTarget.supabase,
             userId: 'user-A');
@@ -205,9 +205,17 @@ void main() {
         final bStatus =
             (await store.read(userId: 'user-B')).requireValue();
         expect(bStatus.lastSuccessfulSyncAt!.isAtSameMomentAs(tB), isTrue);
-        // null（默认/未登录）不受分区影响
+        // null 写入回落全局键：全局 read 能读到，且不影响用户分区
+        final tG = tB.add(const Duration(minutes: 5));
+        await store.markSuccess(syncedAt: tG, target: SyncTarget.supabase,
+            userId: null);
         final global = (await store.read()).requireValue();
-        expect(global.lastSuccessfulSyncAt, isNull);
+        expect(global.lastSuccessfulSyncAt!.isAtSameMomentAs(tG), isTrue,
+            reason: 'null userId 写入应落到全局键');
+        // 全局键写入不得影响用户分区
+        final aAfter2 =
+            (await store.read(userId: 'user-A')).requireValue();
+        expect(aAfter2.lastSuccessfulSyncAt!.isAtSameMomentAs(tA), isTrue);
         // B 的写入不覆盖 A（分区隔离）
         final aAfter =
             (await store.read(userId: 'user-A')).requireValue();
