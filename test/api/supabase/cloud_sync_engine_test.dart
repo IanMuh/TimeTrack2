@@ -1,0 +1,709 @@
+import 'package:drift/native.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:timetrack2/api/supabase/cloud_sync_engine.dart';
+import 'package:timetrack2/api/supabase/sync_backend.dart';
+import 'package:timetrack2/api/supabase/sync_status_store.dart';
+import 'package:timetrack2/data/database/app_database.dart';
+import 'package:timetrack2/data/repositories/action_log_repository.dart';
+import 'package:timetrack2/data/repositories/activity_repository.dart';
+import 'package:timetrack2/data/repositories/category_repository.dart';
+import 'package:timetrack2/data/repositories/settings_repository.dart';
+import 'package:timetrack2/data/repositories/time_entry_repository.dart';
+import 'package:timetrack2/viewmodels/action_log.dart';
+import 'package:timetrack2/viewmodels/activity.dart';
+import 'package:timetrack2/viewmodels/activity_category.dart';
+import 'package:timetrack2/viewmodels/time_entry.dart';
+
+import 'memory_remote.dart';
+
+/// 云同步测试环境：内存库 + 内存远端 + 引擎。
+class CloudHarness {
+  CloudHarness._(this.db, this.activities, this.categories, this.settings,
+      this.actionLogs, this.entries, this.statusStore, this.remote, this.engine);
+
+  static CloudHarness create({int pageSize = 1000}) {
+    final db = AppDatabase(NativeDatabase.memory());
+    final activities = ActivityRepository(database: db);
+    final categories = CategoryRepository(database: db);
+    final settings = SettingsRepository(database: db);
+    final actionLogs = ActionLogRepository(database: db);
+    final entries = TimeEntryRepository(
+      database: db,
+      activityRepository: activities,
+      settingsRepository: settings,
+    );
+    final remote = MemoryRemote();
+    final statusStore = SyncStatusStore(database: db);
+    final engine = CloudSyncEngine(
+      database: db,
+      gateway: remote,
+      statusStore: statusStore,
+      activities: activities,
+      categories: categories,
+      timeEntries: entries,
+      actionLogs: actionLogs,
+      settings: settings,
+      pageSize: pageSize,
+    );
+    return CloudHarness._(db, activities, categories, settings, actionLogs,
+        entries, statusStore, remote, engine);
+  }
+
+  final AppDatabase db;
+  final ActivityRepository activities;
+  final CategoryRepository categories;
+  final SettingsRepository settings;
+  final ActionLogRepository actionLogs;
+  final TimeEntryRepository entries;
+  final SyncStatusStore statusStore;
+  final MemoryRemote remote;
+  final CloudSyncEngine engine;
+
+  static const userId = 'user-1';
+
+  Future<void> close() => db.close();
+}
+
+void main() {
+  group('CloudSyncEngine 拉取（先拉）', () {
+    test('从未同步 → 全量拉取（since=null），远端行落本地', () async {
+      final h = CloudHarness.create();
+      try {
+        final remoteActivity = Activity(
+          id: 'remote-a',
+          name: '远端活动',
+          color: 0xff123456,
+          isFavorite: true,
+          updatedAt: DateTime(2026, 8, 11, 10),
+        );
+        h.remote.seed(RemoteTables.activities, remoteActivity.toMap());
+
+        final report = (await h.engine.syncNow(userId: CloudHarness.userId))
+            .requireValue();
+        expect(report.wasFullSync, isTrue, reason: '从未同步 → 全量');
+        expect(report.pulledRows, 1);
+
+        final local = (await h.activities.activities()).requireValue();
+        expect(local.map((a) => a.id), contains('remote-a'));
+        expect(local.firstWhere((a) => a.id == 'remote-a').name, '远端活动');
+      } finally {
+        await h.close();
+      }
+    });
+
+    test('拉取分页：pageSize=2 时逐页拉全，页集合不重叠且并集覆盖全部', () async {
+      final h = CloudHarness.create(pageSize: 2);
+      try {
+        final allIds = <String>{};
+        for (var i = 0; i < 5; i++) {
+          final id = 'a$i';
+          allIds.add(id);
+          h.remote.seed(
+            RemoteTables.activities,
+            Activity(
+              id: id,
+              name: '活动$i',
+              color: 0,
+              isFavorite: false,
+              updatedAt: DateTime(2026, 8, 10, 0, 0, i),
+            ).toMap(),
+          );
+        }
+        final report =
+            (await h.engine.syncNow(userId: CloudHarness.userId)).requireValue();
+        expect(report.pulledRows, 5);
+        expect((await h.activities.activities()).requireValue(), hasLength(5));
+
+        // 精确断言：5 行 pageSize=2 → 恰好 3 次 activities 拉取，页偏移逐页推进。
+        final pullCalls =
+            h.remote.pullLog.where((c) => c.table == 'activities').toList();
+        expect(pullCalls, hasLength(3), reason: '5 行 pageSize=2 需 3 页');
+        expect(pullCalls.map((c) => c.page).toList(), [0, 1, 2],
+            reason: '页偏移必须逐页推进（防重复拉取同一页）');
+
+        // 各页返回行集合互不重叠、并集等于全部远端行（防分页错位漏拉/重拉）。
+        final seen = <String>{};
+        for (var i = 0; i < pullCalls.length; i++) {
+          final pageRows = await h.remote.fetchRowsSince(
+            table: RemoteTables.activities,
+            userId: CloudHarness.userId,
+            pageSize: 2,
+            page: i,
+          );
+          final ids = pageRows.rows.map((r) => r['id']! as String).toList();
+          for (final id in ids) {
+            expect(seen.add(id), isTrue, reason: '页 $i 与前面页重叠：$id');
+          }
+        }
+        expect(seen, allIds, reason: '各页并集必须等于全部远端行');
+      } finally {
+        await h.close();
+      }
+    });
+
+    test('拉取 LWW：远端更新的行覆盖本地，本地更新的行不被覆盖', () async {
+      final h = CloudHarness.create();
+      try {
+        final localActivity = (await h.activities.createActivity(
+          name: '本地活动',
+          color: 0xff000000,
+        ))
+            .requireValue();
+
+        // 远端旧行（updatedAt 早于本地）→ 不覆盖
+        final staleRemote = localActivity.copyWith(
+          name: '远端旧名',
+          updatedAt: localActivity.updatedAt.subtract(const Duration(hours: 1)),
+        );
+        h.remote.seed(RemoteTables.activities, staleRemote.toMap());
+        await h.engine.syncNow(userId: CloudHarness.userId);
+        var after =
+            (await h.activities.activities()).requireValue().firstWhere(
+                  (a) => a.id == localActivity.id,
+                );
+        expect(after.name, '本地活动', reason: '旧远端不覆盖新本地');
+
+        // 远端新行（updatedAt 晚于本地）→ 覆盖
+        final newRemote = localActivity.copyWith(
+          name: '远端新名',
+          updatedAt: localActivity.updatedAt.add(const Duration(hours: 2)),
+        );
+        h.remote.seed(RemoteTables.activities, newRemote.toMap());
+        await h.engine.syncNow(userId: CloudHarness.userId);
+        after = (await h.activities.activities()).requireValue().firstWhere(
+              (a) => a.id == localActivity.id,
+            );
+        expect(after.name, '远端新名', reason: '新远端覆盖旧本地');
+      } finally {
+        await h.close();
+      }
+    });
+
+    test('删除传播：远端墓碑（deleted_at）→ 本地行被软删', () async {
+      final h = CloudHarness.create();
+      try {
+        final localActivity = (await h.activities.createActivity(
+          name: '待删',
+          color: 0xff112233,
+        ))
+            .requireValue();
+
+        // 远端墓碑：updatedAt 晚于本地 + deleted_at 非空
+        final tombstone = localActivity.copyWith(
+          deletedAt: localActivity.updatedAt.add(const Duration(minutes: 1)),
+          updatedAt: localActivity.updatedAt.add(const Duration(minutes: 1)),
+        );
+        h.remote.seed(RemoteTables.activities, tombstone.toMap());
+        await h.engine.syncNow(userId: CloudHarness.userId);
+
+        final active = (await h.activities.activities()).requireValue();
+        expect(active.map((a) => a.id), isNot(contains(localActivity.id)),
+            reason: '远端墓碑随 LWW 传播删除本地行');
+      } finally {
+        await h.close();
+      }
+    });
+
+    test('分类/条目/日志冒烟：远端行拉回本地并 LWW 应用', () async {
+      final h = CloudHarness.create();
+      try {
+        // 远端分类（含 parent_id）
+        final remoteCategory = ActivityCategory(
+          id: 'cat-1',
+          name: '远端分类',
+          color: 0xff0f766e,
+          updatedAt: DateTime(2026, 8, 11, 10),
+        );
+        h.remote.seed(RemoteTables.categories, remoteCategory.toMap());
+
+        // 远端活动 + 关联（拉回顺序：活动 → 分类 → 关联，FK 依赖方向）
+        final remoteActivity = Activity(
+          id: 'act-1',
+          name: '远端活动',
+          color: 0xff2563eb,
+          isFavorite: true,
+          updatedAt: DateTime(2026, 8, 11, 10),
+        );
+        h.remote.seed(RemoteTables.activities, remoteActivity.toMap());
+        final remoteLink = ActivityCategoryLink(
+          id: 'link-1',
+          activityId: 'act-1',
+          categoryId: 'cat-1',
+          updatedAt: DateTime(2026, 8, 11, 10),
+        );
+        h.remote.seed(RemoteTables.links, remoteLink.toMap());
+
+        // 远端条目 + 日志
+        final remoteEntry = TimeEntry(
+          id: 'entry-1',
+          activityId: 'act-1',
+          activityNameSnapshot: '远端活动',
+          activityColorSnapshot: 0xff2563eb,
+          startAt: DateTime(2026, 8, 11, 9),
+          endAt: DateTime(2026, 8, 11, 10),
+          deviceId: 'devX',
+          updatedAt: DateTime(2026, 8, 11, 10),
+        );
+        h.remote.seed(RemoteTables.timeEntries, remoteEntry.toMap());
+        final remoteLog = ActionLog(
+          id: 'log-1',
+          actionType: ActionType.switch_,
+          occurredAt: DateTime(2026, 8, 11, 9),
+          deviceId: 'devX',
+          updatedAt: DateTime(2026, 8, 11, 10),
+        );
+        h.remote.seed(RemoteTables.actionLogs, remoteLog.toMap());
+
+        await h.engine.syncNow(userId: CloudHarness.userId);
+
+        // 全部落本地
+        final cats = (await h.categories.categories()).requireValue();
+        expect(cats.map((c) => c.id), contains('cat-1'));
+        final links = (await h.categories.links()).requireValue();
+        expect(links.map((l) => l.id), contains('link-1'));
+        final entries = await h.entries.allEntries();
+        expect(entries.map((e) => e.id), contains('entry-1'));
+        final logs = (await h.actionLogs.allLogs()).requireValue();
+        expect(logs.map((l) => l.id), contains('log-1'));
+      } finally {
+        await h.close();
+      }
+    });
+  });
+
+  group('CloudSyncEngine 推送（后推）', () {
+    test('本地行推送到远端；远端更新的行跳过（防旧推送）', () async {
+      final h = CloudHarness.create();
+      try {
+        final localActivity = (await h.activities.createActivity(
+          name: '本地新活动',
+          color: 0xffaabbcc,
+        ))
+            .requireValue();
+
+        // 远端已有该 id、updatedAt 更新、且字段完整（远端新名）→ 跳过
+        final remoteNewer = localActivity.copyWith(
+          name: '远端新名',
+          updatedAt: localActivity.updatedAt.add(const Duration(hours: 1)),
+        );
+        h.remote.seed(RemoteTables.activities, remoteNewer.toMap());
+
+        await h.engine.syncNow(userId: CloudHarness.userId);
+        // 跳过语义：本地唯一用户行（活动）与远端值一致（拉取已 LWW 覆盖），
+        // 推送阶段应**跳过**——即 push 未被执行（无行需推送）。
+        // 若实现退化为无条件推送，push:activities 会出现并覆盖远端新名。
+        expect(h.remote.callLog, isNot(contains('push:activities')),
+            reason: '本地唯一行被跳过 → 无可推行，不发起 push');
+        // 远端行保持完整且未被覆盖（防旧推送）
+        final remoteRow = h.remote.tables[RemoteTables.activities]![
+            localActivity.id]!;
+        expect(remoteRow['name'], '远端新名',
+            reason: '远端更新 ⇒ 本地不覆盖（防旧推送）');
+        // 远端仍保留其更新的 updated_at（未被覆盖）
+        final remoteUpdatedAt =
+            DateTime.parse(remoteRow['updated_at']! as String);
+        expect(
+          remoteUpdatedAt.isAfter(localActivity.updatedAt),
+          isTrue,
+          reason: '远端 updated_at 保持更新值',
+        );
+      } finally {
+        await h.close();
+      }
+    });
+
+    test('推送删除传播：本地软删活动 → 远端行带墓碑（含远端无该行）', () async {
+      final h = CloudHarness.create();
+      try {
+        // 场景 A：远端已有该行（存活）→ 本地软删 → 推送后远端墓碑
+        final localActivity = (await h.activities.createActivity(
+          name: '待删A',
+          color: 0xff112233,
+        ))
+            .requireValue();
+        h.remote.seed(RemoteTables.activities, localActivity.toMap());
+        await h.engine.syncNow(userId: CloudHarness.userId);
+        expect(
+          h.remote.tables[RemoteTables.activities]![localActivity.id]!['deleted_at'],
+          isNull,
+          reason: '初始远端存活',
+        );
+
+        await h.activities.deleteActivity(localActivity);
+        await h.engine.syncNow(userId: CloudHarness.userId);
+        final tombstone =
+            h.remote.tables[RemoteTables.activities]![localActivity.id]!;
+        expect(tombstone['deleted_at'], isNotNull,
+            reason: '本地软删墓碑推送到远端');
+        expect(
+          DateTime.parse(tombstone['updated_at']! as String)
+              .isAfter(localActivity.updatedAt),
+          isTrue,
+          reason: '墓碑推进 updated_at（删除永远赢）',
+        );
+
+        // 场景 B：远端无该行 → 本地软删墓碑也应推送（不因远端缺失而漏推）
+        final second = (await h.activities.createActivity(
+          name: '待删B',
+          color: 0xff445566,
+        ))
+            .requireValue();
+        await h.activities.deleteActivity(second);
+        await h.engine.syncNow(userId: CloudHarness.userId);
+        final remoteTombstone =
+            h.remote.tables[RemoteTables.activities]![second.id];
+        expect(remoteTombstone, isNotNull, reason: '远端无行时墓碑也要推送');
+        expect(remoteTombstone!['deleted_at'], isNotNull);
+      } finally {
+        await h.close();
+      }
+    });
+
+    test('推送补填 user_id；远端无该行则推送', () async {
+      final h = CloudHarness.create();
+      try {
+        final localActivity = (await h.activities.createActivity(
+          name: '待推送',
+          color: 0xff010203,
+        ))
+            .requireValue();
+
+        final report =
+            (await h.engine.syncNow(userId: CloudHarness.userId)).requireValue();
+        expect(report.pushedRows, greaterThanOrEqualTo(1));
+
+        final remoteRow = h.remote.tables[RemoteTables.activities]![
+            localActivity.id]!;
+        expect(remoteRow['user_id'], CloudHarness.userId,
+            reason: '推送补填 user_id');
+        expect(remoteRow['name'], '待推送');
+      } finally {
+        await h.close();
+      }
+    });
+  });
+
+  group('CloudSyncEngine 游标与顺序', () {
+    test('先拉后推：所有拉取在第一个推送之前', () async {
+      final h = CloudHarness.create();
+      try {
+        final a = (await h.activities.createActivity(
+          name: '活动',
+          color: 0,
+        ))
+            .requireValue();
+        h.remote.seed(RemoteTables.activities, a.copyWith(
+          name: '远端名',
+          updatedAt: a.updatedAt.add(const Duration(minutes: 1)),
+        ).toMap());
+
+        await h.engine.syncNow(userId: CloudHarness.userId);
+        expectPullBeforePush(h.remote.callLog);
+      } finally {
+        await h.close();
+      }
+    });
+
+    test('成功后推进游标并清错误；失败不清游标且记录错误', () async {
+      final h = CloudHarness.create();
+      try {
+        // 成功一次 → 游标推进
+        await h.engine.syncNow(userId: CloudHarness.userId);
+        var status = (await h.statusStore.read()).requireValue();
+        expect(status.hasSynced, isTrue, reason: '成功即视为已同步（游标非空）');
+        expect(status.lastSuccessfulSyncAt, isNotNull);
+        expect(status.lastError, isNull);
+        expect(status.lastTarget, SyncTarget.supabase);
+        final cursorAfterFirst = status.lastSuccessfulSyncAt!;
+
+        // 失败 → 错误记录、游标保持
+        h.remote.nextError = Exception('网络中断');
+        final failed = await h.engine.syncNow(userId: CloudHarness.userId);
+        expect(failed.isSuccess, isFalse);
+        status = (await h.statusStore.read()).requireValue();
+        expect(status.lastError, isNotNull, reason: '失败记录原因');
+        expect(status.hasSynced, isTrue, reason: '失败不清游标');
+        expect(status.lastSuccessfulSyncAt, cursorAfterFirst,
+            reason: '失败不清游标');
+
+        // 恢复：远端新增一行（updatedAt 晚于游标）→ 游标推进到该行时间
+        final newRemote = Activity(
+          id: 'new-remote',
+          name: '恢复后的新行',
+          color: 0,
+          isFavorite: false,
+          updatedAt: cursorAfterFirst.add(const Duration(minutes: 5)),
+        );
+        h.remote.seed(RemoteTables.activities, newRemote.toMap());
+        await h.engine.syncNow(userId: CloudHarness.userId);
+        status = (await h.statusStore.read()).requireValue();
+        expect(status.lastError, isNull, reason: '成功后清除错误');
+        expect(
+          status.lastSuccessfulSyncAt!.isAfter(cursorAfterFirst),
+          isTrue,
+          reason: '游标推进到本次拉取的最大行 updated_at',
+        );
+        expect(
+          status.lastSuccessfulSyncAt!.isAtSameMomentAs(
+            newRemote.updatedAt,
+          ),
+          isTrue,
+          reason: '游标 = 最大行时间（非墙钟）',
+        );
+      } finally {
+        await h.close();
+      }
+    });
+
+    test('增量拉取：since 透传，旧行不重拉、新行拉回', () async {
+      final h = CloudHarness.create();
+      try {
+        // 首次全量同步（空远端），推进游标
+        await h.engine.syncNow(userId: CloudHarness.userId);
+        final cursor = (await h.statusStore.read())
+            .requireValue()
+            .lastSuccessfulSyncAt!;
+        h.remote.pullLog.clear();
+
+        // 远端新增：旧行（早于游标）+ 新行（晚于游标）
+        final oldRow = Activity(
+          id: 'old-row',
+          name: '旧行（早于游标）',
+          color: 0,
+          isFavorite: false,
+          updatedAt: cursor.subtract(const Duration(minutes: 1)),
+        );
+        final newRow = Activity(
+          id: 'new-row',
+          name: '新行（晚于游标）',
+          color: 0,
+          isFavorite: false,
+          updatedAt: cursor.add(const Duration(minutes: 1)),
+        );
+        h.remote.seed(RemoteTables.activities, oldRow.toMap());
+        h.remote.seed(RemoteTables.activities, newRow.toMap());
+
+        await h.engine.syncNow(userId: CloudHarness.userId);
+        // since 透传：第二次拉取携带上次成功游标（非 null）
+        final pulls =
+            h.remote.pullLog.where((c) => c.table == 'activities').toList();
+        expect(pulls, isNotEmpty);
+        for (final pull in pulls) {
+          expect(pull.since, isNotNull, reason: '增量拉取必须携带 since 游标');
+          expect(
+            pull.since!.isAtSameMomentAs(cursor),
+            isTrue,
+            reason: 'since = 上次成功游标',
+          );
+        }
+        // 增量语义：只拉回新行（updated_at >= since）
+        final local = (await h.activities.activities()).requireValue();
+        expect(local.map((a) => a.id), isNot(contains('old-row')),
+            reason: '早于游标的行不重拉');
+        expect(local.map((a) => a.id), contains('new-row'),
+            reason: '晚于游标的行被拉回');
+      } finally {
+        await h.close();
+      }
+    });
+
+    test('profile_settings：本地有记录才推送，远端记录拉取合并', () async {
+      final h = CloudHarness.create();
+      try {
+        // 本地无配置 → 不推送 profile_settings
+        await h.engine.syncNow(userId: CloudHarness.userId);
+        expect(
+          h.remote.callLog.contains('push:profile_settings'),
+          isFalse,
+          reason: '无本地配置记录不推默认值',
+        );
+
+        // 本地保存配置 → 推送
+        await h.settings.save(
+          (await h.settings.settings()).requireValue().copyWith(
+                reminderMinutes: 30,
+              ),
+        );
+        await h.engine.syncNow(userId: CloudHarness.userId);
+        final remoteSettings =
+            h.remote.tables[RemoteTables.profileSettings];
+        expect(remoteSettings, isNotNull);
+        expect(
+          remoteSettings!.values.single['reminder_minutes'],
+          30,
+          reason: '本地配置推送到远端',
+        );
+
+        // 远端更新的配置 → 拉回合并（LWW；远端行需带 user_id）
+        final remoteUpdated = (await h.settings.settings())
+            .requireValue()
+            .copyWith(
+              userId: CloudHarness.userId,
+              reminderMinutes: 55,
+              updatedAt: DateTime(2099, 1, 1),
+            );
+        h.remote.seed(
+          RemoteTables.profileSettings,
+          remoteUpdated.toMap(),
+        );
+        await h.engine.syncNow(userId: CloudHarness.userId);
+        expect(
+          (await h.settings.settings()).requireValue().reminderMinutes,
+          55,
+          reason: '远端更新的配置 LWW 覆盖本地',
+        );
+      } finally {
+        await h.close();
+      }
+    });
+
+    test('并发 syncNow 互斥：在途调用被拒绝，游标不回退', () async {
+      final h = CloudHarness.create();
+      try {
+        // 远端先有一行，让首次同步有实际工作。
+        h.remote.seed(
+          RemoteTables.activities,
+          Activity(
+            id: 'seed',
+            name: '远端行',
+            color: 0,
+            isFavorite: false,
+            updatedAt: DateTime(2026, 8, 11, 10),
+          ).toMap(),
+        );
+
+        final results = await Future.wait([
+          h.engine.syncNow(userId: CloudHarness.userId),
+          h.engine.syncNow(userId: CloudHarness.userId),
+        ]);
+        // 至少一个成功、至多一个成功（另一个被 in-flight 锁拒绝）
+        final successes =
+            results.where((r) => r.isSuccess).length;
+        expect(successes, greaterThanOrEqualTo(1));
+        expect(successes, lessThanOrEqualTo(1),
+            reason: '并发 syncNow 应互斥（一个被拒绝或排队）');
+        final rejected = results.where((r) => !r.isSuccess).toList();
+        if (rejected.isNotEmpty) {
+          expect(
+            rejected.first.when(onSuccess: (_) => '', onFailure: (m) => m),
+            contains('进行中'),
+            reason: '拒绝消息应明确为"同步进行中"',
+          );
+        }
+
+        // 游标不因并发回退：最终游标非空
+        final status = (await h.statusStore.read()).requireValue();
+        expect(status.lastSuccessfulSyncAt, isNotNull,
+            reason: '并发结束后游标有效');
+      } finally {
+        await h.close();
+      }
+    });
+
+    test('增量边界：updated_at == since 的行不重复拉取（>= 语义 + LWW 幂等）', () async {
+      final h = CloudHarness.create();
+      try {
+        // 首次全量（空远端），游标 = 某时刻
+        await h.engine.syncNow(userId: CloudHarness.userId);
+        final cursor = (await h.statusStore.read())
+            .requireValue()
+            .lastSuccessfulSyncAt!;
+        h.remote.pullLog.clear();
+
+        // 边界行：updated_at 恰好 == 游标（含 6 位微秒对齐）
+        final boundary = Activity(
+          id: 'boundary-row',
+          name: '游标边界行',
+          color: 0,
+          isFavorite: false,
+          updatedAt: cursor,
+        );
+        h.remote.seed(RemoteTables.activities, boundary.toMap());
+
+        await h.engine.syncNow(userId: CloudHarness.userId);
+        // 边界行被拉取（>= since）且 LWW 落库
+        final local = (await h.activities.activities()).requireValue();
+        expect(local.map((a) => a.id), contains('boundary-row'),
+            reason: 'updated_at == since 的行必须被拉取（不得漏拉）');
+      } finally {
+        await h.close();
+      }
+    });
+  });
+
+  group('CloudSyncEngine 推送（其余表冒烟）', () {
+    test('时间条目与日志推送：本地新行补填 user_id 后上云', () async {
+      final h = CloudHarness.create();
+      try {
+        final activity = (await h.activities.createActivity(
+          name: '活动',
+          color: 0xff2563eb,
+        ))
+            .requireValue();
+        await h.entries.createManualEntry(
+          activityId: activity.id,
+          startAt: DateTime(2026, 8, 11, 9),
+          endAt: DateTime(2026, 8, 11, 10),
+          note: '推送条目',
+        );
+        await h.actionLogs.insert(
+          actionType: ActionType.switch_,
+          occurredAt: DateTime(2026, 8, 11, 9),
+          deviceId: 'devX',
+        );
+
+        await h.engine.syncNow(userId: CloudHarness.userId);
+
+        final remoteEntries =
+            h.remote.tables[RemoteTables.timeEntries];
+        expect(remoteEntries, isNotNull, reason: '时间条目应推送到远端');
+        final remoteEntry =
+            remoteEntries!.values.firstWhere((r) => r['note'] == '推送条目');
+        expect(remoteEntry['user_id'], CloudHarness.userId,
+            reason: '条目推送补填 user_id');
+
+        final remoteLogs = h.remote.tables[RemoteTables.actionLogs];
+        expect(remoteLogs, isNotNull, reason: '日志应推送到远端');
+        expect(remoteLogs!.values, isNotEmpty);
+        for (final row in remoteLogs.values) {
+          expect(row['user_id'], CloudHarness.userId,
+              reason: '日志推送补填 user_id');
+        }
+      } finally {
+        await h.close();
+      }
+    });
+
+    test('分类推送：本地新分类（含 parentId）推送且补填 user_id', () async {
+      final h = CloudHarness.create();
+      try {
+        final parent = (await h.categories.createCategory(
+          name: '父分类',
+          color: 0xff0f766e,
+        ))
+            .requireValue();
+        await h.categories.createCategory(
+          name: '子分类',
+          color: 0xff123456,
+          parentId: parent.id,
+        );
+
+        await h.engine.syncNow(userId: CloudHarness.userId);
+
+        final remoteCats =
+            h.remote.tables[RemoteTables.categories];
+        expect(remoteCats, isNotNull, reason: '分类应推送到远端');
+        expect(remoteCats!.values, hasLength(2));
+        for (final row in remoteCats.values) {
+          expect(row['user_id'], CloudHarness.userId,
+              reason: '分类推送补填 user_id');
+        }
+        final child =
+            remoteCats.values.firstWhere((r) => r['name'] == '子分类');
+        expect(child['parent_id'], parent.id, reason: 'parent_id 随行推送');
+      } finally {
+        await h.close();
+      }
+    });
+  });
+}

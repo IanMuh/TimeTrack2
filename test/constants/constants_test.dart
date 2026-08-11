@@ -213,6 +213,8 @@ void main() {
       expect(AppMetadataKeys.all, containsAll([
         AppMetadataKeys.deviceId,
         AppMetadataKeys.lastSyncAt,
+        AppMetadataKeys.lastSyncError,
+        AppMetadataKeys.lastSyncTarget,
         AppMetadataKeys.ignoredUpdateVersion,
         AppMetadataKeys.lastCheckedManifestVersion,
         AppMetadataKeys.lastCleanupAt,

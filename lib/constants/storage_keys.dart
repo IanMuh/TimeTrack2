@@ -13,6 +13,12 @@ class AppMetadataKeys {
   /// 最近一次云同步完成时刻（UTC ISO8601；增量同步游标起点）。
   static const lastSyncAt = 'last_sync_at';
 
+  /// 最近一次云同步失败原因（可读消息；成功后清除）。
+  static const lastSyncError = 'last_sync_error';
+
+  /// 最近一次成功同步的目标（`supabase` / `lan`；未同步为空）。
+  static const lastSyncTarget = 'last_sync_target';
+
   /// 被用户"忽略此版本"的更新版本号（更新系统：忽略版本持久化）。
   static const ignoredUpdateVersion = 'ignored_update_version';
 
@@ -26,6 +32,8 @@ class AppMetadataKeys {
   static const all = <String>[
     deviceId,
     lastSyncAt,
+    lastSyncError,
+    lastSyncTarget,
     ignoredUpdateVersion,
     lastCheckedManifestVersion,
     lastCleanupAt,

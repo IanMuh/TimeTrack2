@@ -85,6 +85,27 @@ class ActionLogRepository with RepositoryMappings {
     }
   }
 
+  /// LWW upsert（删除永远赢：deleted_at 随行 LWW）。云同步拉取用。
+  Future<AppResult<void>> replaceIfRemoteNewer(ActionLog remote) async {
+    try {
+      // LWW 读-判-写同一事务：防比较后写入前本地新写入被旧远端覆盖。
+      await database.transaction(() async {
+        final query = database.select(database.actionLogs)
+          ..where((t) => t.id.equals(remote.id));
+        final row = await query.getSingleOrNull();
+        final local = row == null ? null : actionLogFromRow(row);
+        if (local == null || local.updatedAt.isBefore(remote.updatedAt)) {
+          await database.into(database.actionLogs).insertOnConflictUpdate(
+                actionLogToCompanion(remote),
+              );
+        }
+      });
+      return const AppSuccess(null);
+    } catch (e) {
+      return AppFailure('同步操作日志失败：$e');
+    }
+  }
+
   /// 全量日志（含已删除，bundle 导出用）。
   Future<AppResult<List<ActionLog>>> allLogs() async {
     try {
