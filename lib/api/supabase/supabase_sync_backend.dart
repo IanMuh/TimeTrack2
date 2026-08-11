@@ -86,9 +86,12 @@ class SupabaseSyncBackend implements SyncBackend {
   SupabaseAuthService get _lazyAuth => _auth ??= SupabaseAuthService(client: _lazyClient);
 
   /// 重置懒加载的 client/auth（登出清理会话/测试重建场景用）。
+  /// 一并失效在途同步：防后续 syncNow 复用陈旧的 in-flight future
+  ///（返回上一会话旧 userId 的同步结果）。
   void reset() {
     _client = null;
     _auth = null;
+    _syncInFlight = null;
   }
 
   @override

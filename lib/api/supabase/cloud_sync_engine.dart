@@ -50,7 +50,7 @@ class CloudSyncEngine {
     required this.timeEntries,
     required this.actionLogs,
     required this.settings,
-    this.pageSize = 1000,
+    this.pageSize = 999, // 与网关上限对齐（hasMore +1 探测不被服务端截断）
     this.pushBatchSize = 100,
   })  : assert(pageSize > 0, 'pageSize 必须为正'),
         assert(pushBatchSize > 0, 'pushBatchSize 必须为正');
@@ -338,6 +338,13 @@ class CloudSyncEngine {
         page: page,
       );
       for (final row in result.rows) {
+        // 防御性归属校验：不信任网关过滤（RLS 误配/实现缺陷可能返回他人行）——
+        // 归属他人的行跳过，且不计 count/maxSeen（防他人软删墓碑按"删除永远赢"
+        // 删掉本地行、或游标吞掉归属冲突增量窗口）。
+        final rowUser = row['user_id'];
+        if (rowUser is String && rowUser != userId) {
+          continue;
+        }
         if (skipWhen != null && await skipWhen(row)) {
           continue; // 跳过：不计 count，也不推进 maxSeen。
         }

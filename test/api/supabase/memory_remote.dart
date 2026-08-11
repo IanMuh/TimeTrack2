@@ -24,8 +24,9 @@ class MemoryRemote implements RemoteTableGateway {
   bool allowUnownedRows = true;
 
   void seed(String table, Map<String, Object?> row) {
-    if (row['updated_at'] is! String) {
-      throw ArgumentError('seed 行必须携带 updated_at（行内容：$row）');
+    if (row['updated_at'] is! String ||
+        DateTime.tryParse(row['updated_at']! as String) == null) {
+      throw ArgumentError('seed 行必须携带可解析的 updated_at（行内容：$row）');
     }
     // 行身份：常规表用 id；profile_settings 无 id 键（云端主键 user_id）。
     final id = row['id'] ?? row['user_id'];
@@ -84,12 +85,12 @@ class MemoryRemote implements RemoteTableGateway {
     _maybeThrow();
     final rows = (tables[table]?.values ?? const <Map<String, Object?>>[])
         .where((row) {
-      // 与真网关 .eq('user_id', userId) 严格过滤一致：有 user_id 的行须归属
-      // 当前用户；无主行仅在 allowUnownedRows 时放行（且**仍须通过 since
-      // 过滤**——不能提前短路）。
+      // 与真网关 .eq('user_id', userId) 严格过滤一致：按值判定归属
+      //（toMap 恒含 user_id 键但值可能为 null=无主；null 视为无主行按
+      // allowUnownedRows 开关；非 null 他人值排除——防跨用户泄漏）。
       final rowUser = row['user_id'];
-      if (rowUser is String && rowUser != userId) return false;
-      if (rowUser is! String && !allowUnownedRows) return false;
+      if (rowUser != null && rowUser != userId) return false;
+      if (rowUser == null && !allowUnownedRows) return false;
       final updatedAt = DateTime.parse(row['updated_at']! as String);
       if (since == null) return true;
       return !updatedAt.isBefore(since);
@@ -136,9 +137,10 @@ class MemoryRemote implements RemoteTableGateway {
       final row = tables[table]?.values
           .where((r) => r[idKey] == id)
           .where((r) {
+            // 与 fetchRowsSince 过滤规则完全对齐（含 allowUnownedRows 严格模式）。
             final rowUser = r['user_id'];
-            if (rowUser is String && rowUser != userId) return false;
-            if (rowUser is! String && !allowUnownedRows) return false;
+            if (rowUser != null && rowUser != userId) return false;
+            if (rowUser == null && !allowUnownedRows) return false;
             return true;
           })
           .firstOrNull;
@@ -171,16 +173,17 @@ class MemoryRemote implements RemoteTableGateway {
     required List<Map<String, Object?>> rows,
   }) async {
     callLog.add('push:$table');
+    lastPushedIds.clear(); // 语义："本次调用尚未写入任何行"（失败路径也清空）
     _maybeThrow();
     onBeforePush?.call(table, userId);
     final target = tables.putIfAbsent(table, () => {});
-    lastPushedIds.clear();
     for (final row in rows) {
-      // 与真网关一致：强制注入 user_id；**显式要求 updated_at 存在**（真网关
-      // 不会补齐——静默补会让"调用方漏传 updated_at"的 bug 在测试通过而在
-      // 真实链路才暴露；assert 在 release 下剥离，用显式抛错）。
-      if (row['updated_at'] is! String) {
-        throw ArgumentError('upsertRows: 行必须携带 updated_at（行内容：$row）');
+      // 与真网关一致：强制注入 user_id；**显式要求 updated_at 存在且可解析**
+      //（真网关不会补齐——静默补会让"调用方漏传 updated_at"的 bug 在测试
+      // 通过而在真实链路才暴露）。
+      if (row['updated_at'] is! String ||
+          DateTime.tryParse(row['updated_at']! as String) == null) {
+        throw ArgumentError('upsertRows: 行必须携带可解析的 updated_at（行内容：$row）');
       }
       final owned = {...row, 'user_id': userId};
       // 行身份：常规表用 id；profile_settings 无 id 键（云端主键 user_id）。
@@ -188,7 +191,16 @@ class MemoryRemote implements RemoteTableGateway {
       if (id == null) {
         throw ArgumentError('upsertRows: 行必须携带 id 或 user_id（行内容：$row）');
       }
-      target[id as String] = owned;
+      // 写入前归属校验：若目标 id 已有行且归属他人（跨用户场景），拒绝覆盖
+      //（与 fetch 严格过滤对齐，模拟真网关 RLS 拒绝）。
+      final existing = target[id as String];
+      final existingUser = existing?['user_id'];
+      if (existing != null && existingUser is String && existingUser != userId) {
+        throw StateError(
+          'upsertRows: 目标行 $id 归属他人（$existingUser），拒绝覆盖',
+        );
+      }
+      target[id] = owned;
       lastPushedIds.add(id);
     }
   }

@@ -55,7 +55,7 @@ void main() {
       final db = AppDatabase(NativeDatabase.memory());
       try {
         final store = SyncStatusStore(database: db);
-        final syncedAt = DateTime(2026, 8, 11, 10);
+        final syncedAt = DateTime.now().toUtc().subtract(const Duration(minutes: 30));
         await store.markSuccess(syncedAt: syncedAt, target: SyncTarget.supabase);
         await store.markFailure('同步失败：网络中断');
         final status = (await store.read()).requireValue();
@@ -75,7 +75,7 @@ void main() {
       final db = AppDatabase(NativeDatabase.memory());
       try {
         final store = SyncStatusStore(database: db);
-        final t0 = DateTime(2026, 8, 11, 10);
+        final t0 = DateTime.now().toUtc().subtract(const Duration(minutes: 30));
         final t1 = t0.add(const Duration(minutes: 5));
         await store.markSuccess(syncedAt: t1, target: SyncTarget.supabase);
         await store.markFailure('先前失败'); // 先设错误，验证乱序分支保留
@@ -103,7 +103,7 @@ void main() {
       final db = AppDatabase(NativeDatabase.memory());
       try {
         final store = SyncStatusStore(database: db);
-        final t0 = DateTime(2026, 8, 11, 10);
+        final t0 = DateTime.now().toUtc().subtract(const Duration(minutes: 30));
         final t1 = t0.add(const Duration(minutes: 5));
         // 并发同时触发 t1/t0 两次 markSuccess：断言最终游标仍为 t1
         //（读-改-写在同一 transaction 内，drift 串行化事务保证原子性）。
@@ -126,7 +126,7 @@ void main() {
       final db = AppDatabase(NativeDatabase.memory());
       try {
         final store = SyncStatusStore(database: db);
-        final syncedAt = DateTime(2026, 8, 11, 10);
+        final syncedAt = DateTime.now().toUtc().subtract(const Duration(minutes: 30));
         await store.markSuccess(syncedAt: syncedAt, target: SyncTarget.supabase);
         await store.markFailure('真实错误');
 
@@ -135,7 +135,7 @@ void main() {
         expect((await store.markFailure('   ')).isSuccess, isFalse);
         expect(
           (await store.markSuccess(
-            syncedAt: DateTime(2026, 8, 11, 10, 30),
+            syncedAt: DateTime.now().toUtc().subtract(const Duration(minutes: 20)),
             target: '  ',
           ))
               .isSuccess,
@@ -162,7 +162,7 @@ void main() {
           value: 'not-a-date',
         ));
         final result = await store.markSuccess(
-          syncedAt: DateTime(2026, 8, 11, 10),
+          syncedAt: DateTime.now().toUtc().subtract(const Duration(minutes: 30)),
           target: SyncTarget.supabase,
         );
         expect(result.isSuccess, isFalse,
@@ -221,6 +221,77 @@ void main() {
             (await store.read(userId: 'user-A')).requireValue();
         expect(aAfter.lastSuccessfulSyncAt!.isAtSameMomentAs(tA), isTrue,
             reason: '用户 B 的同步不得推进用户 A 的游标');
+
+        // lastError 分区隔离：A 的失败不被 B 读到、A 的 markSuccess 不清 B 的错误
+        await store.markFailure('A 失败', userId: 'user-A');
+        final aErr = (await store.read(userId: 'user-A')).requireValue();
+        expect(aErr.lastError, 'A 失败');
+        final bErr = (await store.read(userId: 'user-B')).requireValue();
+        expect(bErr.lastError, isNull, reason: 'B 不得读到 A 的失败原因');
+        // A 推进游标（更晚时间戳）→ 清 A 的错误，B 的错误不受影响
+        final tA2 = tA.add(const Duration(minutes: 30));
+        await store.markFailure('B 失败', userId: 'user-B');
+        await store.markSuccess(syncedAt: tA2, target: SyncTarget.supabase,
+            userId: 'user-A');
+        final aAfter3 = (await store.read(userId: 'user-A')).requireValue();
+        expect(aAfter3.lastError, isNull, reason: 'A 推进清 A 的错误');
+        final bAfter3 = (await store.read(userId: 'user-B')).requireValue();
+        expect(bAfter3.lastError, 'B 失败',
+            reason: 'A 的 markSuccess 不得清 B 的错误');
+      } finally {
+        await db.close();
+      }
+    });
+
+    test('相等时间戳分支：不覆盖游标、更新目标、保留错误', () async {
+      final db = AppDatabase(NativeDatabase.memory());
+      try {
+        final store = SyncStatusStore(database: db);
+        final t0 = DateTime.now().toUtc().subtract(const Duration(minutes: 30));
+        await store.markSuccess(syncedAt: t0, target: SyncTarget.supabase);
+        await store.markFailure('失败');
+
+        // 相等时间戳：游标不覆盖、lastTarget 更新为本次目标、lastError 保留
+        await store.markSuccess(syncedAt: t0, target: 'other-target');
+        final status = (await store.read()).requireValue();
+        expect(status.lastSuccessfulSyncAt!.isAtSameMomentAs(t0), isTrue);
+        expect(status.lastTarget, 'other-target',
+            reason: '相等分支更新 lastTarget（空跑反映本次目标）');
+        expect(status.lastError, '失败',
+            reason: '相等分支保留 lastError（游标未推进，不清真实失败）');
+      } finally {
+        await db.close();
+      }
+    });
+
+    test('未来时间守卫：read 与 markSuccess 均显式失败（需重置）', () async {
+      final db = AppDatabase(NativeDatabase.memory());
+      try {
+        final store = SyncStatusStore(database: db);
+        final future = DateTime.now()
+            .toUtc()
+            .add(const Duration(minutes: 30));
+        // markSuccess 拒绝未来 syncedAt
+        final rejected = await store.markSuccess(
+          syncedAt: future,
+          target: SyncTarget.supabase,
+        );
+        expect(rejected.isSuccess, isFalse, reason: '未来 syncedAt 拒绝');
+        expect(
+          rejected.when(onSuccess: (_) => '', onFailure: (m) => m),
+          contains('不合理'),
+        );
+        // read 拒绝未来存储游标
+        await db.into(db.appMetadata).insert(AppMetadataCompanion.insert(
+          key: AppMetadataKeys.lastSyncAt,
+          value: future.toIso8601String(),
+        ));
+        final readResult = await store.read();
+        expect(readResult.isSuccess, isFalse, reason: '未来游标 read 显式失败');
+        expect(
+          readResult.when(onSuccess: (_) => '', onFailure: (m) => m),
+          contains('需重置'),
+        );
       } finally {
         await db.close();
       }

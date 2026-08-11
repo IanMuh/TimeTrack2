@@ -86,7 +86,9 @@ class SupabaseAuthService {
   /// 校验邮箱 OTP 验证码并登录；成功返回用户 id。
   Future<AppResult<String>> verifyEmailOtp(String email, String token) async {
     try {
-      final trimmedEmail = email.trim();
+      // 与 sendMagicLink 一致：小写归一（GoTrue 按小写存储邮箱，防大小写
+      // 不一致导致 OTP 记录匹配失败）。
+      final trimmedEmail = email.trim().toLowerCase();
       final trimmedToken = token.trim();
       if (trimmedEmail.isEmpty || !_looksLikeEmail(trimmedEmail)) {
         return const AppFailure('邮箱地址非法');
@@ -108,18 +110,25 @@ class SupabaseAuthService {
         // （身份错配）。
         final current = _client.auth.currentUser;
         if (current != null &&
-            current.email?.toLowerCase() == trimmedEmail.toLowerCase()) {
+            current.email?.toLowerCase() == trimmedEmail) {
           userId = current.id;
         }
       }
       if (userId == null) {
-        return const AppFailure('登录成功但未取得用户信息');
+        // 中性表述（失败结果不应自称"登录成功"）。
+        return const AppFailure('无法确认登录用户，请重试');
       }
       return AppSuccess(userId);
     } on AuthException {
       return const AppFailure('验证失败，请检查验证码或稍后重试');
+    } on SocketException {
+      return const AppFailure('网络不可用，请稍后重试');
+    } on TimeoutException {
+      return const AppFailure('网络不可用，请稍后重试');
+    } on http.ClientException {
+      return const AppFailure('网络不可用，请稍后重试');
     }
-    // 非 AuthException 重新抛出保留堆栈（与 sendMagicLink 一致）。
+    // 其余非预期异常（编程错误）：重新抛出保留原始堆栈，由上层统一处理。
   }
 
   /// 登出。
@@ -129,8 +138,14 @@ class SupabaseAuthService {
       return const AppSuccess(null);
     } on AuthException {
       return const AppFailure('登出失败，请稍后重试');
+    } on SocketException {
+      return const AppFailure('网络不可用，请稍后重试');
+    } on TimeoutException {
+      return const AppFailure('网络不可用，请稍后重试');
+    } on http.ClientException {
+      return const AppFailure('网络不可用，请稍后重试');
     }
-    // 非 AuthException 重新抛出保留堆栈（与 sendMagicLink 一致）。
+    // 其余非预期异常（编程错误）：重新抛出保留原始堆栈，由上层统一处理。
   }
 
   /// 极简邮箱形态校验（supabase 服务端仍会最终校验）：单个 @、本地部分/域名

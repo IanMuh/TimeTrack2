@@ -573,6 +573,63 @@ void main() {
       }
     });
 
+    test('推送阶段失败：游标不推进、错误记录、重试补推本地未推送行', () async {
+      final h = CloudHarness.create();
+      try {
+        // 首轮 seed 远端行建立游标
+        h.remote.seed(
+          RemoteTables.activities,
+          Activity(
+            id: 'push-base',
+            name: '基准行',
+            color: 0,
+            isFavorite: false,
+            updatedAt: DateTime(2026, 8, 11, 10),
+          ).toMap(),
+        );
+        await h.engine.syncNow(userId: CloudHarness.userId);
+        final cursor = (await h.statusStore.read(userId: CloudHarness.userId))
+            .requireValue()
+            .lastSuccessfulSyncAt!;
+
+        // 本地新建活动（晚于游标，将进入推送窗口）
+        final newActivity = (await h.activities.createActivity(
+          name: '待推送',
+          color: 0xff112233,
+        ))
+            .requireValue();
+
+        // 第二次同步：在 push:activities 时失败（推送阶段）。
+        // 调用序号（push 前）：6 次 pull + 1 次 updated_at:activities
+        // = 第 7 次调用命中 push:activities。
+        h.remote.resetCallCount();
+        h.remote.pullLog.clear();
+        h.remote.failOnCallIndex = 7;
+        final failed = await h.engine.syncNow(userId: CloudHarness.userId);
+        expect(failed.isSuccess, isFalse, reason: '推送阶段失败应返回失败');
+
+        var status = (await h.statusStore.read(userId: CloudHarness.userId))
+            .requireValue();
+        expect(status.lastSuccessfulSyncAt!.isAtSameMomentAs(cursor), isTrue,
+            reason: '推送失败不清游标');
+        expect(status.lastError, isNotNull);
+
+        // 重试（不设失败）→ 从原游标重推，本地新行完整补推
+        await h.engine.syncNow(userId: CloudHarness.userId);
+        final remoteRow =
+            h.remote.tables[RemoteTables.activities]?[newActivity.id];
+        expect(remoteRow, isNotNull, reason: '重试后本地新行补推到远端');
+        expect(remoteRow!['name'], '待推送');
+        status = (await h.statusStore.read(userId: CloudHarness.userId))
+            .requireValue();
+        expect(status.lastError, isNull, reason: '重试成功后清错误');
+        expect(status.lastSuccessfulSyncAt!.isAfter(cursor), isTrue,
+            reason: '重试成功后游标推进');
+      } finally {
+        await h.close();
+      }
+    });
+
     test('增量拉取：since 透传，旧行不重拉、新行拉回', () async {
       final h = CloudHarness.create();
       try {

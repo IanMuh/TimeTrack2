@@ -52,7 +52,7 @@ class SupabaseRemoteTables with RepositoryMappings implements RemoteTableGateway
     required String table,
     required String userId,
     DateTime? since,
-    int pageSize = 1000,
+    int pageSize = _remoteMaxPageSize,
     int page = 0,
   }) async {
     _assertAllowedTable(table);
@@ -247,6 +247,9 @@ class SupabaseRemoteTables with RepositoryMappings implements RemoteTableGateway
     if (code == null) return true;
     final statusCode = int.tryParse(code);
     if (statusCode != null && statusCode >= 400 && statusCode < 500) {
+      // 429（限流）是瞬时错误：在指数退避框架下应重试（遵循 Retry-After），
+      // 其余 4xx（权限/校验/无数据）不可重试。
+      if (statusCode == 429) return false;
       return true;
     }
     if (code.startsWith('PGRST')) return true;

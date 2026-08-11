@@ -112,6 +112,17 @@ void main() {
         isTrue,
         reason: 'activity_categories 需 parent_id 自引用外键',
       );
+      // profile_settings 不软删（无 deleted_at——与本地 drift 镜像一致，
+      // 配置行不参与软删体系）：负向断言防误加。
+      final settingsBlock = RegExp(
+        r'CREATE TABLE IF NOT EXISTS PROFILE_SETTINGS \(([^;]*)\)',
+        caseSensitive: false,
+      ).firstMatch(schema)!.group(1)!;
+      expect(
+        RegExp(r'\bDELETED_AT\b', caseSensitive: false).hasMatch(settingsBlock),
+        isFalse,
+        reason: 'profile_settings 不应有 deleted_at（配置不软删）',
+      );
     });
   });
 
@@ -126,7 +137,8 @@ void main() {
         reason: '递归软删函数必须被触发器挂载',
       );
       // 递归逻辑限定在目标函数体内（负向前瞻拒绝跨定界符）：
-      // WITH RECURSIVE + CTE 种子（WHERE PARENT_ID = NEW.ID）+ 递归分支 UNION。
+      // WITH RECURSIVE + CTE 种子（WHERE PARENT_ID = NEW.ID）+ 递归分支 UNION
+      // + 递归分支引用 TREE（JOIN TREE t ON ... 才真正穿透多层子孙）。
       // 注意顺序：种子 SELECT 的 WHERE 在 UNION **之前**。
       const withinFunction = r'(?:(?!\$[A-Za-z0-9_]*\$)[\s\S])*?';
       expect(
@@ -136,11 +148,12 @@ void main() {
           r'WITH RECURSIVE TREE AS \( ' '$withinFunction'
           r'WHERE PARENT_ID = NEW\.ID' '$withinFunction'
           r'UNION( ALL)? ' '$withinFunction'
+          r'JOIN TREE T ON ' '$withinFunction'
           r'\$[A-Za-z0-9_]*\$',
         ),
         isTrue,
         reason: '递归删除函数体内必须保留 WITH RECURSIVE 递归 CTE'
-            '（种子 WHERE PARENT_ID = NEW.ID + UNION 防环）',
+            '（种子 WHERE PARENT_ID = NEW.ID + UNION 防环 + JOIN TREE 递归穿透）',
       );
     });
 
@@ -160,11 +173,13 @@ void main() {
         has(
           r'FUNCTION SOFT_DELETE_ACTIVITY_CATEGORY_CHILDREN\(\)'
           r'[\s\S]*?\$[A-Za-z0-9_]*\$' '$within'
+          r'UPDATED_AT = ' '$within'
           '$lwwPattern' '$within'
           r'\$[A-Za-z0-9_]*\$',
         ),
         isTrue,
-        reason: '递归删除函数内必须保留 LWW（greatest）传播',
+        reason: '递归删除函数内必须保留 LWW（greatest）传播且赋值给 updated_at'
+            '（SET ... updated_at = ... 写回列，防仅残留不写回的计算表达式）',
       );
     });
 
@@ -268,21 +283,24 @@ void main() {
           reason: '$fn 必须实际调用 assert_ref_exists',
         );
       }
-      // 校验触发器挂载到表
+      // 校验触发器挂载到表（[^;]* 限定单条语句，防跨语句假阳性）
       expect(
-        has(r'CREATE TRIGGER TRG_TIME_ENTRIES_REF_CHECK .*'
+        has(r'CREATE TRIGGER TRG_TIME_ENTRIES_REF_CHECK [^;]*'
             r'EXECUTE FUNCTION VALIDATE_TIME_ENTRY_REF\(\)'),
         isTrue,
+        reason: 'time_entries 引用校验触发器必须挂载',
       );
       expect(
-        has(r'CREATE TRIGGER TRG_ACTIVITY_CATEGORY_LINKS_REF_CHECK .*'
+        has(r'CREATE TRIGGER TRG_ACTIVITY_CATEGORY_LINKS_REF_CHECK [^;]*'
             r'EXECUTE FUNCTION VALIDATE_LINK_REF\(\)'),
         isTrue,
+        reason: 'links 引用校验触发器必须挂载',
       );
       expect(
-        has(r'CREATE TRIGGER TRG_ACTIVITY_CATEGORIES_PARENT_REF_CHECK .*'
+        has(r'CREATE TRIGGER TRG_ACTIVITY_CATEGORIES_PARENT_REF_CHECK [^;]*'
             r'EXECUTE FUNCTION VALIDATE_CATEGORY_PARENT_REF\(\)'),
         isTrue,
+        reason: '分类 parent 引用校验触发器必须挂载',
       );
     });
   });

@@ -58,10 +58,10 @@ class SyncStatus {
 
 /// 同步状态读写（app_metadata key-value）。
 ///
-/// **游标按 userId 分区**（键名 `lastSyncAt:<userId>`）：共享设备切换用户后，
+/// **游标与目标按 userId 分区**（键名 `lastSyncAt:<userId>`）：共享设备切换用户后，
 /// 新用户不得复用上一用户的成功游标（否则增量窗口晚于新用户远端最新更新，
-/// 拉取/推送永久漏行）；未传 userId（null）时使用全局键（默认/向后兼容）。
-/// lastError 保持全局（最近一次同步失败，不分用户）。
+/// 拉取/推送永久漏行）；**lastError 同样按 userId 分区**（共享设备上互不串扰、
+/// 不误清）；未传 userId（null）时使用全局键（默认/向后兼容）。
 class SyncStatusStore with RepositoryMappings {
   SyncStatusStore({required this.database});
 
@@ -111,7 +111,10 @@ class SyncStatusStore with RepositoryMappings {
                   '同步游标时间不合理（晚于当前时间），需重置：${row.value}',
                 );
               }
-              lastSyncAt = parsed.toLocal();
+              // lastSuccessfulSyncAt 是增量同步游标，会被上层序列化传给远端：
+              // 存储层固化 UTC 语义（parsed 已带偏移，直接返回，防 toLocal 后
+              // 无时区后缀被远端按不同时区解析产生窗口偏移）。
+              lastSyncAt = parsed;
               break;
             case AppMetadataKeys.lastSyncError:
               lastError = row.value.isEmpty ? null : row.value;
