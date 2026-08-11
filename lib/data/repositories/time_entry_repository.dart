@@ -646,6 +646,23 @@ class TimeEntryRepository with RepositoryMappings {
     return saved;
   }
 
+  /// 合并保存（bundle merge 用）：补快照 + 跨日拆分 + 确定性段 id，不裁重叠
+  ///（合并语义是行级 LWW 整行替换，非本地补记的裁剪语义）。无独立事务——
+  /// 由调用方（SyncBundleRepository.mergeBundle）在统一事务内执行。
+  Future<void> saveMergedEntry(TimeEntry entry) async {
+    final normalized = await _activityRepo.entryWithActivitySnapshot(
+      entry,
+      executor: database,
+    );
+    final rows = _entryRowsForStorage(normalized);
+    for (final row in rows) {
+      await database.into(database.timeEntries).insert(
+            timeEntryToCompanion(row),
+            mode: InsertMode.insertOrReplace,
+          );
+    }
+  }
+
   /// 事务内保存（供 switch/split/merge 等组合操作复用）。
   Future<List<TimeEntry>> _saveEntryRows(
     AppDatabase executor,
