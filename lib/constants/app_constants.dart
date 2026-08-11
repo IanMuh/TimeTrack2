@@ -33,6 +33,25 @@ class AppConstants {
   /// 相邻未分配条目合并判定阈值（分钟）默认值。
   static const defaultMergeNeighborThresholdMinutes = 1;
 
-  /// LAN 同步默认端口。
+  /// LAN 同步默认端口（端口候选范围起点）。
   static const lanDefaultPort = 8787;
+
+  /// LAN 同步端口候选范围（默认端口被占用时依次尝试到 8797）。
+  static const lanPortRangeStart = 8787;
+  static const lanPortRangeEnd = 8797;
+
+  /// LAN 配对码有效期（6 位数字，超期即失效，防猜测复用）。
+  static const lanPairingCodeTtl = Duration(minutes: 5);
+
+  /// LAN 每 IP 每分钟请求限流次数（配对/同步端点共用，防暴力猜码/滥用）。
+  static const lanRateLimitPerMinute = 5;
+
+  /// LAN 请求超时（连接/响应头/响应体各阶段共用）。
+  static const lanRequestTimeout = Duration(seconds: 8);
+
+  /// LAN 请求/响应体大小上限（防内存耗尽；正常全量 bundle 远小于此）。
+  static const lanMaxPayloadBytes = 256 * 1024 * 1024;
+
+  /// LAN 配对码位数（6 位数字）。
+  static const lanPairingCodeLength = 6;
 }
