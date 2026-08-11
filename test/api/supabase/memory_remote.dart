@@ -58,7 +58,9 @@ class MemoryRemote implements RemoteTableGateway {
     _maybeThrow();
     final rows = (tables[table]?.values ?? const <Map<String, Object?>>[])
         .where((row) {
-      // 与真网关 .eq('user_id', userId) 过滤一致：仅返回归属当前用户的行。
+      // 与真网关 .eq('user_id', userId) 过滤一致：有 user_id 的行须归属当前
+      // 用户；**缺失 user_id**（历史宽松数据）放行——新落库行经 upsertRows
+      // 注入强制归属，不产生新的无主行。
       final rowUser = row['user_id'];
       if (rowUser is String && rowUser != userId) return false;
       final updatedAt = DateTime.parse(row['updated_at']! as String);
@@ -122,9 +124,11 @@ class MemoryRemote implements RemoteTableGateway {
     _maybeThrow();
     final target = tables.putIfAbsent(table, () => {});
     for (final row in rows) {
+      // 模拟真网关"强制归属当前用户"：注入 user_id（防测试存下无主行）。
+      final owned = {...row, 'user_id': userId};
       // 行身份：常规表用 id；profile_settings 无 id 键（云端主键 user_id）。
-      final id = (row['id'] ?? row['user_id'])! as String;
-      target[id] = row;
+      final id = (owned['id'] ?? owned['user_id'])! as String;
+      target[id] = owned;
     }
   }
 
@@ -132,6 +136,7 @@ class MemoryRemote implements RemoteTableGateway {
     final error = nextError;
     if (error != null) {
       nextError = null;
+      _callCount += 1; // 与 callLog 计数对齐（防 failOnCallIndex 相对偏移）
       throw error;
     }
     final indexError = failOnCallIndex;

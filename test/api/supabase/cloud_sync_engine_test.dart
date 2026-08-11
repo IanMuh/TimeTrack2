@@ -413,7 +413,7 @@ void main() {
       try {
         // 成功一次 → 游标推进
         await h.engine.syncNow(userId: CloudHarness.userId);
-        var status = (await h.statusStore.read()).requireValue();
+        var status = (await h.statusStore.read(userId: CloudHarness.userId)).requireValue();
         expect(status.hasSynced, isTrue, reason: '成功即视为已同步（游标非空）');
         expect(status.lastSuccessfulSyncAt, isNotNull);
         expect(status.lastError, isNull);
@@ -424,7 +424,7 @@ void main() {
         h.remote.nextError = Exception('网络中断');
         final failed = await h.engine.syncNow(userId: CloudHarness.userId);
         expect(failed.isSuccess, isFalse);
-        status = (await h.statusStore.read()).requireValue();
+        status = (await h.statusStore.read(userId: CloudHarness.userId)).requireValue();
         expect(status.lastError, isNotNull, reason: '失败记录原因');
         expect(status.hasSynced, isTrue, reason: '失败不清游标');
         expect(status.lastSuccessfulSyncAt, cursorAfterFirst,
@@ -440,7 +440,7 @@ void main() {
         );
         h.remote.seed(RemoteTables.activities, newRemote.toMap());
         await h.engine.syncNow(userId: CloudHarness.userId);
-        status = (await h.statusStore.read()).requireValue();
+        status = (await h.statusStore.read(userId: CloudHarness.userId)).requireValue();
         expect(status.lastError, isNull, reason: '成功后清除错误');
         expect(
           status.lastSuccessfulSyncAt!.isAfter(cursorAfterFirst),
@@ -464,7 +464,7 @@ void main() {
       try {
         // 首次全量同步（空远端），推进游标
         await h.engine.syncNow(userId: CloudHarness.userId);
-        final cursor = (await h.statusStore.read())
+        final cursor = (await h.statusStore.read(userId: CloudHarness.userId))
             .requireValue()
             .lastSuccessfulSyncAt!;
 
@@ -487,7 +487,7 @@ void main() {
         final failed = await h.engine.syncNow(userId: CloudHarness.userId);
         expect(failed.isSuccess, isFalse, reason: '中途失败应返回失败');
 
-        var status = (await h.statusStore.read()).requireValue();
+        var status = (await h.statusStore.read(userId: CloudHarness.userId)).requireValue();
         expect(status.lastSuccessfulSyncAt!.isAtSameMomentAs(cursor), isTrue,
             reason: '中途失败不清游标');
         expect(status.lastError, isNotNull);
@@ -503,7 +503,7 @@ void main() {
           expect(after.map((a) => a.id), contains('mid-fail-$i'),
               reason: '重试后补齐中途未拉到的行');
         }
-        status = (await h.statusStore.read()).requireValue();
+        status = (await h.statusStore.read(userId: CloudHarness.userId)).requireValue();
         expect(status.lastError, isNull, reason: '重试成功后清错误');
         expect(status.lastSuccessfulSyncAt!.isAfter(cursor), isTrue,
             reason: '重试成功后游标推进');
@@ -517,7 +517,7 @@ void main() {
       try {
         // 首次全量同步（空远端），推进游标
         await h.engine.syncNow(userId: CloudHarness.userId);
-        final cursor = (await h.statusStore.read())
+        final cursor = (await h.statusStore.read(userId: CloudHarness.userId))
             .requireValue()
             .lastSuccessfulSyncAt!;
         h.remote.pullLog.clear();
@@ -649,7 +649,7 @@ void main() {
         }
 
         // 游标不因并发回退：最终游标非空
-        final status = (await h.statusStore.read()).requireValue();
+        final status = (await h.statusStore.read(userId: CloudHarness.userId)).requireValue();
         expect(status.lastSuccessfulSyncAt, isNotNull,
             reason: '并发结束后游标有效');
       } finally {
@@ -662,7 +662,7 @@ void main() {
       try {
         // 首次全量（空远端），游标 = 某时刻
         await h.engine.syncNow(userId: CloudHarness.userId);
-        final cursor = (await h.statusStore.read())
+        final cursor = (await h.statusStore.read(userId: CloudHarness.userId))
             .requireValue()
             .lastSuccessfulSyncAt!;
         h.remote.pullLog.clear();
@@ -685,7 +685,7 @@ void main() {
 
         // 边界行 updated_at 恰好 == 游标时游标不前进：下一轮按 >= 语义会再次
         // 拉取该行（属预期——gte 闭区间 + LWW 幂等，无数据丢失/重复入库）。
-        final cursor2 = (await h.statusStore.read())
+        final cursor2 = (await h.statusStore.read(userId: CloudHarness.userId))
             .requireValue()
             .lastSuccessfulSyncAt!;
         expect(cursor2.isAtSameMomentAs(cursor), isTrue,

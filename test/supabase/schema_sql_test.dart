@@ -43,15 +43,57 @@ void main() {
       }
     });
 
-    test('核心列：软删 deleted_at、parent_id 自引用、user_id(uuid)、updated_at', () {
-      expect(has(r'DELETED_AT TEXT'), isTrue);
-      expect(has(r'UPDATED_AT TEXT NOT NULL'), isTrue);
-      expect(has(r'PARENT_ID TEXT REFERENCES ACTIVITY_CATEGORIES\(ID\)'), isTrue,
-          reason: 'parent_id 自引用外键');
+    test('核心列逐表校验：user_id(uuid)/updated_at/deleted_at，分类表含 parent_id', () {
+      // 逐表捕获 CREATE TABLE 列块，在块内断言关键列——防"某张表丢列、另一
+      // 张表保留该列"时全 schema 子串搜索误通过。
+      final tables = <String, List<String>>{
+        'activities': ['user_id', 'updated_at', 'deleted_at'],
+        'activity_categories': ['user_id', 'updated_at', 'deleted_at'],
+        'activity_category_links': ['user_id', 'updated_at', 'deleted_at'],
+        'time_entries': ['user_id', 'updated_at', 'deleted_at'],
+        'action_logs': ['user_id', 'updated_at', 'deleted_at'],
+        // profile_settings 无 deleted_at（配置不软删）
+        'profile_settings': ['user_id', 'updated_at'],
+      };
+      for (final entry in tables.entries) {
+        final table = entry.key;
+        // 捕获列块（CREATE TABLE ... ( 到 ) 之间的内容）
+        final block = RegExp(
+          'CREATE TABLE IF NOT EXISTS $table \\(([^;]*)\\)',
+          caseSensitive: false,
+        ).firstMatch(schema);
+        expect(block, isNotNull, reason: '表 $table 的 CREATE 定义缺失');
+        final columns = block!.group(1)!.toUpperCase();
+        for (final column in entry.value) {
+          expect(columns.contains(column.toUpperCase()), isTrue,
+              reason: '$table 缺列 $column');
+        }
+      }
       // user_id 必须为 uuid（与 auth.users(id)/auth.uid() 类型一致，
-      // text→uuid 外键无法建、RLS text=uuid 比较会失败）。
-      expect(has(r'USER_ID\s+UUID REFERENCES AUTH\.USERS\(ID\)'), isTrue,
-          reason: 'user_id 应为 uuid（匹配 auth.uid()）');
+      // text→uuid 外键无法建、RLS text=uuid 比较会失败）——逐表校验。
+      for (final table in tables.keys) {
+        final block = RegExp(
+          'CREATE TABLE IF NOT EXISTS $table \\(([^;]*)\\)',
+          caseSensitive: false,
+        ).firstMatch(schema)!.group(1)!;
+        expect(
+          RegExp(r'USER_ID\s+UUID', caseSensitive: false).hasMatch(block),
+          isTrue,
+          reason: '$table 的 user_id 应为 uuid（匹配 auth.uid()）',
+        );
+      }
+      // parent_id 自引用外键（仅 activity_categories 需要）
+      final categoryBlock = RegExp(
+        r'CREATE TABLE IF NOT EXISTS ACTIVITY_CATEGORIES \(([^;]*)\)',
+        caseSensitive: false,
+      ).firstMatch(schema)!.group(1)!;
+      expect(
+        RegExp(r'PARENT_ID TEXT REFERENCES ACTIVITY_CATEGORIES\(ID\)',
+                caseSensitive: false)
+            .hasMatch(categoryBlock),
+        isTrue,
+        reason: 'activity_categories 需 parent_id 自引用外键',
+      );
     });
   });
 
@@ -74,13 +116,18 @@ void main() {
     });
 
     test('子孙 updated_at 用 greatest(自身, 父行) 保持 LWW 传播（限定函数体）', () {
-      // 通用美元引用定界符（$function$ / $$ 等）成对圈定函数体：
-      // 把断言限定在 soft_delete_activity_category_children 函数体内。
+      // 通用美元引用定界符（$function$ / $$ 等）成对圈定函数体，并用
+      // 负向前瞻 `(?:(?!\$[A-Za-z0-9_]*\$)[\s\S])*?` 拒绝跨过定界符——
+      // 防目标文本在函数体之外（如其他函数）时仍匹配成功。
       expect(
         has(r'FUNCTION SOFT_DELETE_ACTIVITY_CATEGORY_CHILDREN\(\)'
-            r'[\s\S]*?\$[A-Za-z0-9_]*\$[\s\S]*?'
+            r'[\s\S]*?\$[A-Za-z0-9_]*\$'
+            r'(?:(?!\$[A-Za-z0-9_]*\$)[\s\S])*?'
             r'WHEN UPDATED_AT > PARENT_TS THEN UPDATED_AT'
-            r'[\s\S]*?ELSE PARENT_TS[\s\S]*?\$[A-Za-z0-9_]*\$'),
+            r'(?:(?!\$[A-Za-z0-9_]*\$)[\s\S])*?'
+            r'ELSE PARENT_TS'
+            r'(?:(?!\$[A-Za-z0-9_]*\$)[\s\S])*?'
+            r'\$[A-Za-z0-9_]*\$'),
         isTrue,
         reason: '递归删除函数内必须保留 LWW（greatest）传播',
       );
@@ -140,8 +187,8 @@ void main() {
         expect(has("FUNCTION $fn\\("), isTrue, reason: '缺少函数 $fn');
       }
       // 调用点：assert_ref_exists 必须被**每个校验函数体**实际调用（PERFORM ...
-      // 限定在各自函数体内，防"某函数丢调用、另一函数重复调用"总数仍达标）。
-      // 注：函数名部分用普通字符串插值（$fn），其余用 raw string（\$ 为字面 $）。
+      // 限定在各自函数体内（负向前瞻拒绝跨过定界符），防"某函数丢调用、
+      // 另一函数重复调用"总数仍达标。注：函数名部分用普通字符串插值（$fn）。
       for (final fn in [
         'VALIDATE_TIME_ENTRY_REF',
         'VALIDATE_LINK_REF',
@@ -149,9 +196,11 @@ void main() {
       ]) {
         expect(
           has('FUNCTION $fn\\(\\)' // 插值函数名 + 正则转义括号
-              r'[\s\S]*?\$[A-Za-z0-9_]*\$[\s\S]*?'
+              r'[\s\S]*?\$[A-Za-z0-9_]*\$'
+              r'(?:(?!\$[A-Za-z0-9_]*\$)[\s\S])*?'
               'PERFORM ASSERT_REF_EXISTS'
-              r'[\s\S]*?\$[A-Za-z0-9_]*\$'),
+              r'(?:(?!\$[A-Za-z0-9_]*\$)[\s\S])*?'
+              r'\$[A-Za-z0-9_]*\$'),
           isTrue,
           reason: '$fn 必须实际调用 assert_ref_exists',
         );
@@ -176,19 +225,23 @@ void main() {
   });
 
   group('增量索引', () {
-    test('6 表 (user_id, updated_at) 增量索引齐全', () {
-      for (final table in [
-        'idx_activities_sync',
-        'idx_activity_categories_sync',
-        'idx_activity_category_links_sync',
-        'idx_time_entries_sync',
-        'idx_action_logs_sync',
-        'idx_profile_settings_sync',
-      ]) {
-        expect(has("CREATE INDEX IF NOT EXISTS $table"), isTrue,
-            reason: '缺少索引 $table');
+    test('6 表 (user_id, updated_at) 增量索引齐全（表名与列组合绑定）', () {
+      const indexTables = {
+        'idx_activities_sync': 'activities',
+        'idx_activity_categories_sync': 'activity_categories',
+        'idx_activity_category_links_sync': 'activity_category_links',
+        'idx_time_entries_sync': 'time_entries',
+        'idx_action_logs_sync': 'action_logs',
+        'idx_profile_settings_sync': 'profile_settings',
+      };
+      for (final entry in indexTables.entries) {
+        expect(
+          has("CREATE INDEX IF NOT EXISTS ${entry.key} "
+              "ON ${entry.value} \\(USER_ID, UPDATED_AT\\)"),
+          isTrue,
+          reason: '索引 ${entry.key} 必须绑定 ${entry.value}(user_id, updated_at)',
+        );
       }
-      expect(has(r'ON ACTIVITIES \(USER_ID, UPDATED_AT\)'), isTrue);
     });
   });
 }

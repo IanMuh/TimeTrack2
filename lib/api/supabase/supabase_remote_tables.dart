@@ -41,6 +41,7 @@ class SupabaseRemoteTables with RepositoryMappings implements RemoteTableGateway
   /// `id in (...)` 分批大小（防 URL 过长）。
   static const _idBatchSize = 50;
 
+  /// 最多尝试次数（**含首次**；=3 表示首次 + 2 次重试）。
   static const _maxAttempts = 3;
   static const _retryBaseDelay = Duration(milliseconds: 400);
 
@@ -103,6 +104,11 @@ class SupabaseRemoteTables with RepositoryMappings implements RemoteTableGateway
     // 与 fetchRowsSince/upsertRows 的表级判定对齐：profile_settings 无 id 列，
     // 漏传 idKey 时自动回退 user_id（防 PGRST204 报错或空结果静默漏同步）。
     final effectiveIdKey = table == 'profile_settings' ? 'user_id' : idKey;
+    // 列名白名单（纵深防御）：idKey 直接拼入 select/inFilter 列名，必须限定
+    // 为合法身份列——业务表仅 id、profile_settings 仅 user_id（防列名注入）。
+    if (effectiveIdKey != 'id' && effectiveIdKey != 'user_id') {
+      throw ArgumentError.value(idKey, 'idKey', '必须为 id 或 user_id');
+    }
     final result = <String, DateTime>{};
     for (var start = 0; start < ids.length; start += _idBatchSize) {
       final end = start + _idBatchSize < ids.length
@@ -123,9 +129,16 @@ class SupabaseRemoteTables with RepositoryMappings implements RemoteTableGateway
         final updatedAt = row['updated_at'];
         if (id is String && updatedAt is String) {
           final parsed = DateTime.tryParse(updatedAt);
+          if (parsed == null) {
+            // 脏数据解析失败：不静默跳过（防下游误判"远端无此行"推旧覆盖新）。
+            stderr.writeln(
+              '[supabase-sync] $table 行 $id 的 updated_at 无法解析：$updatedAt',
+            );
+            continue;
+          }
           // 返回 UTC（与网关其余路径 UTC 语义一致；toLocal 会让返回值随
           // 机器时区偏移，下游与 UTC 值比较时产生整段偏差）。
-          if (parsed != null) result[id] = parsed.toUtc();
+          result[id] = parsed.toUtc();
         }
       }
     }
@@ -140,18 +153,26 @@ class SupabaseRemoteTables with RepositoryMappings implements RemoteTableGateway
   }) async {
     _assertAllowedTable(table);
     if (rows.isEmpty) return; // 防御：空数组无意义，防 PostgREST 空 body 4xx。
-    await _withRetry(() async {
-      // 强制将行归属当前用户（纵深防御：即使调用方漏注入/本地残留他人 user_id
-      // 的行，也不会越权覆盖/写入其他用户数据；RLS 仍作最终防线）。
-      final sanitized = rows
-          .map((row) => {...row, 'user_id': userId})
-          .toList();
-      // PostgREST resolution=merge-duplicates：按主键合并（整行覆盖）。
-      // onConflict 显式固化合并键（业务表 id；profile_settings 为 user_id），
-      // 防 SDK 默认冲突列行为变化导致覆盖语义漂移。
-      final onConflict = table == 'profile_settings' ? 'user_id' : 'id';
-      await _client.from(table).upsert(sanitized, onConflict: onConflict);
-    });
+    // 分批 upsert（与 fetchRemoteUpdatedAt 的 _idBatchSize 分批一致）：首次
+    // 全量/大批量变更时防单请求体过大触发 413/超时，且每批独立退避重试。
+    for (var start = 0; start < rows.length; start += _idBatchSize) {
+      final end = start + _idBatchSize < rows.length
+          ? start + _idBatchSize
+          : rows.length;
+      final chunk = rows.sublist(start, end);
+      await _withRetry(() async {
+        // 强制将行归属当前用户（纵深防御：即使调用方漏注入/本地残留他人 user_id
+        // 的行，也不会越权覆盖/写入其他用户数据；RLS 仍作最终防线）。
+        final sanitized = chunk
+            .map((row) => {...row, 'user_id': userId})
+            .toList();
+        // PostgREST resolution=merge-duplicates：按主键合并（整行覆盖）。
+        // onConflict 显式固化合并键（业务表 id；profile_settings 为 user_id），
+        // 防 SDK 默认冲突列行为变化导致覆盖语义漂移。
+        final onConflict = table == 'profile_settings' ? 'user_id' : 'id';
+        await _client.from(table).upsert(sanitized, onConflict: onConflict);
+      });
+    }
   }
 
   /// 指数退避重试：网络层瞬时失败（含 SocketException/ClientException 等）重试；

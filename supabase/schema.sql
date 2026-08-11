@@ -235,9 +235,23 @@ EXECUTE FUNCTION soft_delete_category_links();
 -- 触发器：写入前外键存在性显式校验
 -- =============================================================
 
+-- =============================================================
+-- 触发器：写入前外键存在性显式校验
+--
+-- 关键：**软删 UPDATE（NEW.deleted_at 非空）跳过引用校验**——软删只置
+-- deleted_at/updated_at，不改变 activity_id/category_id/parent_id 等引用字段，
+-- 引用完整性由 INSERT 与活跃 UPDATE 保证。若软删也校验，级联软删（父分类删除
+-- 时 UPDATE 子孙/links）会因被引用行已软删而在 BEFORE UPDATE 抛异常，导致
+-- 整个级联连同用户的原始软删一起回滚——"删除永远赢"语义失效。
+-- =============================================================
+
 CREATE OR REPLACE FUNCTION validate_time_entry_ref()
 RETURNS trigger AS $$
 BEGIN
+  -- 软删不改变引用关系：跳过校验（防被引用活动已软删时条目无法软删）。
+  IF NEW.deleted_at IS NOT NULL THEN
+    RETURN NEW;
+  END IF;
   PERFORM assert_ref_exists('activities', NEW.activity_id);
   RETURN NEW;
 END;
@@ -250,6 +264,10 @@ FOR EACH ROW EXECUTE FUNCTION validate_time_entry_ref();
 CREATE OR REPLACE FUNCTION validate_link_ref()
 RETURNS trigger AS $$
 BEGIN
+  -- 软删不改变引用关系：跳过校验（防分类级联软删 links 时 category 已软删）。
+  IF NEW.deleted_at IS NOT NULL THEN
+    RETURN NEW;
+  END IF;
   PERFORM assert_ref_exists('activities', NEW.activity_id);
   PERFORM assert_ref_exists('activity_categories', NEW.category_id);
   RETURN NEW;
@@ -263,6 +281,11 @@ FOR EACH ROW EXECUTE FUNCTION validate_link_ref();
 CREATE OR REPLACE FUNCTION validate_category_parent_ref()
 RETURNS trigger AS $$
 BEGIN
+  -- 软删不改变引用关系：跳过校验（防父分类级联软删子孙时父已软删，
+  -- 递归 CTE 更新子孙的 BEFORE UPDATE 抛异常导致整个级联回滚）。
+  IF NEW.deleted_at IS NOT NULL THEN
+    RETURN NEW;
+  END IF;
   IF NEW.parent_id IS NOT NULL THEN
     PERFORM assert_ref_exists('activity_categories', NEW.parent_id);
   END IF;

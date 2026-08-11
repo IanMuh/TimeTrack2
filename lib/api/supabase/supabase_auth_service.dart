@@ -21,18 +21,28 @@ class SupabaseAuthService {
 
   /// 登录态流（当前用户 id；null = 未登录）。
   ///
-  /// 先订阅底层流、再补发快照：supabase 的 onAuthStateChange 是 broadcast 流，
-  /// 新订阅者不会立即收到当前状态；且「读快照 → 订阅」窗口内到达的登录/登出
-  /// 事件会被 async* 生成器永久丢失。用 Stream.multi 先监听再补快照；
-  /// **distinct 置于合并流之外**——快照与后续事件一并去重（只对底层流做
-  /// distinct 会漏掉快照与首条同 id 事件的重复下发）。
-  Stream<String?> get authStateStream => Stream<String?>.multi((controller) {
-        final sub = _client.auth.onAuthStateChange
-            .map((data) => data.session?.user.id)
-            .listen(controller.add);
-        controller.add(currentUserId);
-        controller.onCancel = sub.cancel;
-      }).distinct();
+  /// - 单例缓存（late final）：getter 多次访问返回**同一流实例**——多组件/
+  ///   多订阅者可同时监听（broadcast），不会因每次新建流而相互独立/冲突；
+  /// - 先订阅底层流、再补发快照：supabase 的 onAuthStateChange 是 broadcast
+  ///   流，新订阅者不会立即收到当前状态；「读快照 → 订阅」窗口内到达的
+  ///   登录/登出事件会被 async* 生成器永久丢失；
+  /// - **distinct 置于合并流之外**：快照与后续事件一并去重（只对底层流做
+  ///   distinct 会漏掉快照与首条同 id 事件的重复下发）；
+  /// - onError/onDone 转发：底层认证流错误/关闭时上层可见，不静默丢弃。
+  late final Stream<String?> authStateStream = Stream<String?>.multi(
+    (controller) {
+      final sub = _client.auth.onAuthStateChange
+          .map((data) => data.session?.user.id)
+          .listen(
+        controller.add,
+        onError: controller.addError,
+        onDone: controller.close,
+      );
+      controller.add(currentUserId);
+      controller.onCancel = sub.cancel;
+    },
+    isBroadcast: true,
+  ).distinct();
 
   /// 当前登录用户 id（未登录为 null）。
   String? get currentUserId => _client.auth.currentUser?.id;
@@ -70,7 +80,9 @@ class SupabaseAuthService {
         token: trimmedToken,
         type: OtpType.email,
       );
-      final userId = response.user?.id;
+      // OTP 一次性凭证已被消费：response.user 缺失时从当前会话兜底取值
+      //（防"服务端已登录但 user 为空"被误判为失败，用户重试必然失败）。
+      final userId = response.user?.id ?? _client.auth.currentUser?.id;
       if (userId == null) {
         return const AppFailure('登录成功但未取得用户信息');
       }
@@ -92,9 +104,10 @@ class SupabaseAuthService {
     // 非 AuthException 重新抛出保留堆栈（与 sendMagicLink 一致）。
   }
 
-  /// 极简邮箱形态校验（supabase 服务端仍会最终校验）：单个 @、本地部分/域名
-  /// 非空且无空格、域名含点。
-  static final _emailRe = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
+  /// 极简邮箱形态校验（supabase 服务端仍会最终校验）：
+  /// 单个 @、本地部分/域名非空且无空格、域名含点、排除首尾点与连续点。
+  static final _emailRe =
+      RegExp(r'^[^@\s.](?:[^@\s]*[^@\s.])?@[^@\s.](?:[^@\s]*[^@\s.])?\.[^@\s.]+$');
 
   bool _looksLikeEmail(String value) => _emailRe.hasMatch(value);
 }

@@ -32,7 +32,7 @@ SyncBackend createSupabaseSyncBackend({required CloudSyncEngine engine}) {
   if (!_isValidSupabaseUrl(url)) {
     return const NoopSyncBackend();
   }
-  return SupabaseSyncBackend(engine: engine);
+  return SupabaseSyncBackend._(engine: engine);
 }
 
 /// URL 合法性校验（与 [_SupabaseSyncBackend._validatedUrl] 共用同一判定）。
@@ -47,7 +47,13 @@ bool _isValidSupabaseUrl(String raw) {
 }
 
 /// Supabase 同步后端。
+///
+/// 构造私有：非法配置（URL 非空但非法）必须在进入方法前被拦截——工厂
+/// [createSupabaseSyncBackend] 已做 URL 前置校验并降级 Noop；绕过工厂直接
+/// 构造会使 isConfigured 放行非法 URL，首次访问 _lazyClient 时同步抛
+/// ArgumentError 破坏 AppResult 契约。
 class SupabaseSyncBackend implements SyncBackend {
+  SupabaseSyncBackend._({required this.engine});
   SupabaseSyncBackend({required this.engine});
 
   final CloudSyncEngine engine;
@@ -92,10 +98,12 @@ class SupabaseSyncBackend implements SyncBackend {
   @override
   Stream<String?> get authStateStream {
     if (!isConfigured) {
-      // Stream.multi：每个监听者订阅时立即重放 null（broadcast 不重放已发射
-      // 事件，Stream.value(...).asBroadcastStream 会让晚订阅者静默收不到快照）。
+      // Stream.multi（isBroadcast: true）：每个监听者订阅时立即重放 null
+      // （broadcast 不重放已发射事件、getter 每次新建流会让晚订阅者静默
+      // 收不到快照）。
       return Stream<String?>.multi(
         (controller) => controller.add(null),
+        isBroadcast: true,
       );
     }
     return _lazyAuth.authStateStream;
@@ -145,8 +153,11 @@ class SupabaseSyncBackend implements SyncBackend {
     if (session == null) {
       return const AppFailure('请先登录后再同步');
     }
-    final expired = session.expiresAt != null &&
-        DateTime.fromMillisecondsSinceEpoch(session.expiresAt! * 1000)
+    final expiresAt = session.expiresAt;
+    // expiresAt 缺失时无法确认 token 有效性：按需刷新兜底（防已过期/未知
+    // 状态的 token 直接交给引擎读写）。
+    final expired = expiresAt == null ||
+        DateTime.fromMillisecondsSinceEpoch(expiresAt * 1000)
             .isBefore(DateTime.now());
     if (expired) {
       try {
@@ -154,12 +165,21 @@ class SupabaseSyncBackend implements SyncBackend {
         if (refreshed.session == null) {
           return const AppFailure('登录已过期，请重新登录');
         }
-      } on AuthException {
-        // 会话被服务端撤销/无效：提示重登（与网络类瞬时错误区分）。
-        return const AppFailure('登录已过期，请重新登录');
+      } on AuthException catch (e) {
+        // 区分"会话失效"与"网络瞬时故障"：刷新失败时网络错误也可能被包装成
+        // AuthException（如 "Failed to fetch"）——按消息特征判定，避免一律
+        // 误报"登录已过期"诱导用户重复登录。
+        final msg = e.message.toLowerCase();
+        if (msg.contains('expired') ||
+            msg.contains('invalid') ||
+            msg.contains('refresh_token')) {
+          return const AppFailure('登录已过期，请重新登录');
+        }
+        return const AppFailure('网络不可用，请稍后重试');
+      } catch (_) {
+        // 兜底：任何异常都转为 AppResult（遵守 SyncBackend 契约）。
+        return const AppFailure('网络不可用，请稍后重试');
       }
-      // 网络不可用等瞬时错误：让 AuthException 之外的异常上抛，由上层兜底
-      // 提示"网络不可用"——不误报为"登录已过期"。
     }
     // 刷新（或校验）后重新获取 userId：并发登出/换号（await 挂起点交错）
     // 时不得用刷新前的旧 userId 同步（防按已登出/已切换身份写入数据）。

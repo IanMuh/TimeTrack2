@@ -70,13 +70,14 @@ void main() {
       }
     });
 
-    test('markSuccess 单调性：乱序完成不覆盖游标、不改目标', () async {
+    test('markSuccess 单调性：乱序完成不覆盖游标/目标，且仍清错误', () async {
       final db = AppDatabase(NativeDatabase.memory());
       try {
         final store = SyncStatusStore(database: db);
         final t0 = DateTime(2026, 8, 11, 10);
         final t1 = t0.add(const Duration(minutes: 5));
         await store.markSuccess(syncedAt: t1, target: SyncTarget.supabase);
+        await store.markFailure('先前失败'); // 先设错误，验证乱序分支清错误
 
         // 乱序完成的旧同步（syncedAt 早于现有游标）→ 不覆盖游标/目标
         await store.markSuccess(syncedAt: t0, target: 'other-target');
@@ -89,7 +90,71 @@ void main() {
         expect(status.lastTarget, SyncTarget.supabase,
             reason: '乱序完成不得把目标覆盖为旧同步的目标（与游标指向的'
                 '最近成功点保持一致）');
-        expect(status.lastError, isNull);
+        expect(status.lastError, isNull,
+            reason: '乱序完成分支仍应清错误');
+      } finally {
+        await db.close();
+      }
+    });
+
+    test('markSuccess 并发交错：最终游标为较晚时间戳（事务原子性）', () async {
+      final db = AppDatabase(NativeDatabase.memory());
+      try {
+        final store = SyncStatusStore(database: db);
+        final t0 = DateTime(2026, 8, 11, 10);
+        final t1 = t0.add(const Duration(minutes: 5));
+        // 并发同时触发 t1/t0 两次 markSuccess：断言最终游标仍为 t1
+        //（读-改-写在同一 transaction 内，drift 串行化事务保证原子性）。
+        await Future.wait([
+          store.markSuccess(syncedAt: t1, target: SyncTarget.supabase),
+          store.markSuccess(syncedAt: t0, target: SyncTarget.supabase),
+        ]);
+        final status = (await store.read()).requireValue();
+        expect(
+          status.lastSuccessfulSyncAt!.isAtSameMomentAs(t1),
+          isTrue,
+          reason: '并发完成后游标必须为较晚时间戳（事务原子性）',
+        );
+      } finally {
+        await db.close();
+      }
+    });
+
+    test('空值防护：markFailure 空串 / markSuccess 空 target 显式失败', () async {
+      final db = AppDatabase(NativeDatabase.memory());
+      try {
+        final store = SyncStatusStore(database: db);
+        expect((await store.markFailure('')).isSuccess, isFalse,
+            reason: '空失败原因拒绝（防静默清掉已有错误）');
+        expect((await store.markFailure('   ')).isSuccess, isFalse);
+        expect(
+          (await store.markSuccess(
+            syncedAt: DateTime(2026, 8, 11, 10),
+            target: '  ',
+          ))
+              .isSuccess,
+          isFalse,
+          reason: '空 target 拒绝',
+        );
+      } finally {
+        await db.close();
+      }
+    });
+
+    test('markSuccess 遇损坏游标显式失败（不静默重置）', () async {
+      final db = AppDatabase(NativeDatabase.memory());
+      try {
+        final store = SyncStatusStore(database: db);
+        await db.into(db.appMetadata).insert(AppMetadataCompanion.insert(
+          key: AppMetadataKeys.lastSyncAt,
+          value: 'not-a-date',
+        ));
+        final result = await store.markSuccess(
+          syncedAt: DateTime(2026, 8, 11, 10),
+          target: SyncTarget.supabase,
+        );
+        expect(result.isSuccess, isFalse,
+            reason: '损坏游标下 markSuccess 显式失败，不静默重置');
       } finally {
         await db.close();
       }
@@ -136,10 +201,12 @@ void main() {
           reason: '未配置场景登出返回失败（与其余方法一致，防误判登出成功）');
       // 登录态流：订阅即收到 null（未登录）——确定性等待（不依赖固定延时）。
       await expectLater(backend.authStateStream, emits(null));
-      // 多订阅者可用：**同一流实例**可被多个订阅者同时监听并各自收到 null。
+      // 多订阅者**并发**监听同一流实例：均立即收到 null（broadcast 契约）。
       final stream = backend.authStateStream;
-      await expectLater(stream, emits(null));
-      await expectLater(stream, emits(null));
+      await Future.wait([
+        expectLater(stream, emits(null)),
+        expectLater(stream, emits(null)),
+      ]);
     });
 
     test('SyncReport 携带目标/全量标记/行数', () {

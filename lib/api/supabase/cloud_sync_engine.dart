@@ -82,7 +82,9 @@ class CloudSyncEngine {
     }
     _inFlight = true;
     try {
-      final statusResult = await statusStore.read();
+      // 游标按 userId 分区：共享设备切换用户后不得复用上一用户游标
+      //（否则增量窗口晚于新用户远端最新更新，拉取/推送永久漏行）。
+      final statusResult = await statusStore.read(userId: userId);
       if (statusResult case AppFailure<SyncStatus> failure) {
         return AppFailure('读取同步状态失败：${failure.message}');
       }
@@ -146,21 +148,14 @@ class CloudSyncEngine {
       maxSeen = _laterOf(maxSeen, logsPull.maxSeen);
       // profile_settings 单例行（每用户至多一行；分页逻辑与其余表一致）。
       // 拉取归属校验：本地 id=1 单例行若属于**其他用户**（共享设备上前一登录
-      // 用户遗留），不得被当前用户远端配置覆盖（防跨用户串写，与推送侧对称）。
+      // 用户遗留），不得被当前用户远端配置覆盖（防跨用户串写，与推送侧对称）；
+      // 跳过行不计入 count/maxSeen——防游标推进吞掉当前用户远端配置的增量窗口。
       final settingsPull =
           await _pullTable(
             table: RemoteTables.profileSettings,
             userId: userId,
             since: since,
             apply: (row) async {
-              final localRow = await (database.select(database.profileSettings)
-                    ..where((t) => t.id.equals(1)))
-                  .getSingleOrNull();
-              if (localRow != null &&
-                  localRow.userId != null &&
-                  localRow.userId != userId) {
-                return const AppSuccess(null); // 归属他人：跳过
-              }
               final applied = await settings.applyIfRemoteNewer(
                 ProfileSettings.fromMap(row),
               );
@@ -169,55 +164,83 @@ class CloudSyncEngine {
               }
               return const AppSuccess(null);
             },
+            skipWhen: (row) async {
+              final localRow = await (database.select(database.profileSettings)
+                    ..where((t) => t.id.equals(1)))
+                  .getSingleOrNull();
+              return localRow != null &&
+                  localRow.userId != null &&
+                  localRow.userId != userId;
+            },
           );
       pulledRows += settingsPull.count;
       maxSeen = _laterOf(maxSeen, settingsPull.maxSeen);
 
       // ---- 推送（后推）----
-      pushedRows += await _pushTable(
+      // 只推送属于当前用户（含未归属 null）的行：共享设备上前一用户遗留的
+      // 本地行（userId != 当前用户）不改归属、不推送（网关按当前用户查不到、
+      // RLS 也会拒绝——防跨用户数据污染，与 profile_settings 推送归属校验对称）。
+      // 累加实际推送行的最大 updated_at（pushedMax）供游标推进覆盖。
+      DateTime? pushedMax;
+      var activitiesPush = await _pushTable(
         userId: userId,
         since: since,
         table: RemoteTables.activities,
         localRows: (await activities.activitiesSince(since ?? DateTime(0)))
             .requireValue()
+            .where((a) => a.userId == null || a.userId == userId)
             .map((a) => _withUserId(a, userId).toMap())
             .toList(),
       );
-      pushedRows += await _pushTable(
+      pushedRows += activitiesPush.count;
+      pushedMax = _laterOf(pushedMax, activitiesPush.maxUpdatedAt);
+      var categoriesPush = await _pushTable(
         userId: userId,
         since: since,
         table: RemoteTables.categories,
         localRows: (await categories.categoriesSince(since ?? DateTime(0)))
             .requireValue()
+            .where((c) => c.userId == null || c.userId == userId)
             .map((c) => _withUserId(c, userId).toMap())
             .toList(),
       );
-      pushedRows += await _pushTable(
+      pushedRows += categoriesPush.count;
+      pushedMax = _laterOf(pushedMax, categoriesPush.maxUpdatedAt);
+      var linksPush = await _pushTable(
         userId: userId,
         since: since,
         table: RemoteTables.links,
         localRows: (await categories.linksSince(since ?? DateTime(0)))
             .requireValue()
+            .where((l) => l.userId == null || l.userId == userId)
             .map((l) => _withUserId(l, userId).toMap())
             .toList(),
       );
-      pushedRows += await _pushTable(
+      pushedRows += linksPush.count;
+      pushedMax = _laterOf(pushedMax, linksPush.maxUpdatedAt);
+      var entriesPush = await _pushTable(
         userId: userId,
         since: since,
         table: RemoteTables.timeEntries,
         localRows: (await timeEntries.entriesSince(since ?? DateTime(0)))
+            .where((e) => e.userId == null || e.userId == userId)
             .map((e) => _withUserId(e, userId).toMap())
             .toList(),
       );
-      pushedRows += await _pushTable(
+      pushedRows += entriesPush.count;
+      pushedMax = _laterOf(pushedMax, entriesPush.maxUpdatedAt);
+      var logsPush = await _pushTable(
         userId: userId,
         since: since,
         table: RemoteTables.actionLogs,
         localRows: (await actionLogs.logsSince(since ?? DateTime(0)))
             .requireValue()
+            .where((l) => l.userId == null || l.userId == userId)
             .map((l) => _withUserId(l, userId).toMap())
             .toList(),
       );
+      pushedRows += logsPush.count;
+      pushedMax = _laterOf(pushedMax, logsPush.maxUpdatedAt);
       // profile_settings：仅当本地已有记录、且属于当前用户（或从未归属任何用户）
       // 才推送——防把其他用户遗留的单例配置串写进当前用户远端行。
       // 同时按 since 过滤：本地配置更新早于游标（上轮已同步）则不重复推送。
@@ -229,7 +252,7 @@ class CloudSyncEngine {
         final localSettings =
             (await settings.settings()).requireValue();
         if (since == null || localSettings.updatedAt.isAfter(since)) {
-          pushedRows += await _pushTable(
+          final settingsPush = await _pushTable(
             userId: userId,
             since: since,
             table: RemoteTables.profileSettings,
@@ -238,15 +261,21 @@ class CloudSyncEngine {
             ],
             idKey: 'user_id',
           );
+          pushedRows += settingsPush.count;
+          pushedMax = _laterOf(pushedMax, settingsPush.maxUpdatedAt);
         }
       }
 
-      // 全部成功 → 推进游标（本次实际处理的最大行 updated_at；无拉取时保持
-      // 原游标）+ 清错误 + 记目标。
-      final effectiveCursor = maxSeen ?? since ?? DateTime.now();
+      // 全部成功 → 推进游标 + 清错误 + 记目标。
+      // 游标须覆盖本轮**实际处理**的最大行 updated_at（拉取 maxSeen 与
+      // 推送 pushedMax 取大）：防同步期间新建/更新的本地行（updated_at 晚于
+      // 游标）未被覆盖而下一轮永久漏推；无拉取无推送时保持原游标。
+      final effectiveCursor =
+          _laterOf(_laterOf(maxSeen, pushedMax), since) ?? DateTime.now();
       final markResult = await statusStore.markSuccess(
         syncedAt: effectiveCursor,
         target: SyncTarget.supabase,
+        userId: userId,
       );
       if (markResult case AppFailure<void> failure) {
         return AppFailure('保存同步游标失败：${failure.message}');
@@ -279,11 +308,14 @@ class CloudSyncEngine {
   ///
   /// 返回应用行数与**本轮所见最大 updated_at**（游标推进基准——防拉取后、
   /// 游标写入前远端插入的行被永久漏同步）。
+  /// [skipWhen]：返回 true 时跳过该行——**不计入 count/maxSeen**（防归属
+  /// 冲突等跳过场景下游标推进吞掉增量窗口）。
   Future<({int count, DateTime? maxSeen})> _pullTable({
     required String table,
     required String userId,
     required DateTime? since,
     required Future<AppResult<void>> Function(Map<String, Object?> row) apply,
+    Future<bool> Function(Map<String, Object?> row)? skipWhen,
   }) async {
     var page = 0;
     var count = 0;
@@ -297,6 +329,9 @@ class CloudSyncEngine {
         page: page,
       );
       for (final row in result.rows) {
+        if (skipWhen != null && await skipWhen(row)) {
+          continue; // 跳过：不计 count，也不推进 maxSeen。
+        }
         final applied = await apply(row);
         if (applied case AppFailure<void> failure) {
           throw StateError('拉取表 $table 失败：${failure.message}');
@@ -317,11 +352,13 @@ class CloudSyncEngine {
     return a.isAfter(b) ? a : b;
   }
 
-  /// 推送单表：批量查远端 updated_at 过滤更旧行 → 批量 upsert；返回推送行数。
+  /// 推送单表：批量查远端 updated_at 过滤更旧行 → 批量 upsert。
   ///
+  /// 返回推送行数与**实际推送行的最大 updated_at**（游标推进基准——防同步
+  /// 期间新建/更新的本地行因游标未覆盖而永久漏推）。
   /// [idKey] 为行身份字段（默认 `id`；profile_settings 用 `user_id`——配置表
   /// 无 id 键，云端主键即 user_id）。
-  Future<int> _pushTable({
+  Future<({int count, DateTime? maxUpdatedAt})> _pushTable({
     required String table,
     required String userId,
     required DateTime? since,
@@ -329,6 +366,7 @@ class CloudSyncEngine {
     String idKey = 'id',
   }) async {
     var pushed = 0;
+    DateTime? maxUpdatedAt;
     for (var start = 0; start < localRows.length; start += pushBatchSize) {
       final batch = localRows.sublist(
         start,
@@ -352,13 +390,14 @@ class CloudSyncEngine {
         // 让 LWW upsert 决胜而不是静默丢弃本地更新。
         if (remoteAt != null && remoteAt.isAfter(localUpdatedAt)) continue;
         toPush.add(row);
+        maxUpdatedAt = _laterOf(maxUpdatedAt, localUpdatedAt);
       }
       if (toPush.isNotEmpty) {
         await gateway.upsertRows(table: table, userId: userId, rows: toPush);
       }
       pushed += toPush.length;
     }
-    return pushed;
+    return (count: pushed, maxUpdatedAt: maxUpdatedAt);
   }
 
   /// 补填 user_id：**仅**对 userId == null（未登录时创建）的行归属当前用户。

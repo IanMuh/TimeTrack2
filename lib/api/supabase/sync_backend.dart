@@ -90,12 +90,14 @@ class NoopSyncBackend implements SyncBackend {
 
   @override
   Stream<String?> get authStateStream =>
-      // Stream.multi：每个监听者订阅时立即收到 null（未登录）。不用
+      // Stream.multi（isBroadcast: true）：每个监听者订阅时立即收到 null
+      // （未登录），且同一流实例可被多订阅者监听（broadcast 契约）。不用
       // Stream.value(...).asBroadcastStream——broadcast 不重放已发射事件、
-      // getter 每次新建流，晚订阅者会静默收不到初始快照（与接口契约
-      // "订阅即回放当前用户 id" 一致，也与 supabase_sync_backend 的
-      // 未配置分支实现保持一致）。
-      Stream<String?>.multi((controller) => controller.add(null));
+      // getter 每次新建流，晚订阅者会静默收不到初始快照。
+      Stream<String?>.multi(
+        (controller) => controller.add(null),
+        isBroadcast: true,
+      );
 
   @override
   String? get currentUserId => null;
