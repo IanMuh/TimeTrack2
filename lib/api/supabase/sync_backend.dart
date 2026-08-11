@@ -7,8 +7,9 @@
 ///   应用完全本地可用）；测试用 mock backend 可继承本接口替换编排层；
 /// - 同步报告 [SyncReport]：拉/推行数、是否全量、目标标识，供 UI/日志展示。
 ///
-/// 登录态流契约：[authStateStream] **必须支持多订阅（broadcast）**，且订阅时
-/// 立即发出当前用户 id（未登录为 null）——单订阅/延迟发射会使 UI 误判登录态。
+/// 登录态流契约：[authStateStream] **必须支持多订阅（broadcast）**，订阅时
+/// 立即发出当前用户 id（未登录为 null），之后转发认证事件；多次访问 getter
+/// 应返回**同一流实例**（所有订阅者共享同一事件源，防各自新建流丢事件）。
 library;
 
 import 'dart:async';
@@ -83,21 +84,18 @@ class SyncReport {
 /// 保证应用在无云配置时完全可用（老项目语义）；同时作为测试的占位实现。
 /// 登录态流为**广播流且立即回放 null**（符合接口契约：订阅即收到未登录状态）。
 class NoopSyncBackend implements SyncBackend {
-  const NoopSyncBackend();
+  NoopSyncBackend();
 
   @override
   bool get isConfigured => false;
 
+  /// 未配置：状态恒为 null。单例广播流（late final 缓存同一实例，符合
+  /// "多次访问返回同一流实例"契约）。
   @override
-  Stream<String?> get authStateStream =>
-      // Stream.multi（isBroadcast: true）：每个监听者订阅时立即收到 null
-      // （未登录），且同一流实例可被多订阅者监听（broadcast 契约）。不用
-      // Stream.value(...).asBroadcastStream——broadcast 不重放已发射事件、
-      // getter 每次新建流，晚订阅者会静默收不到初始快照。
-      Stream<String?>.multi(
-        (controller) => controller.add(null),
-        isBroadcast: true,
-      );
+  late final Stream<String?> authStateStream = Stream<String?>.multi(
+    (controller) => controller.add(null),
+    isBroadcast: true,
+  );
 
   @override
   String? get currentUserId => null;

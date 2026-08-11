@@ -35,8 +35,10 @@ class SupabaseRemoteTables with RepositoryMappings implements RemoteTableGateway
     'profile_settings',
   };
 
-  /// 拉取分页大小上限（PostgREST 单页 max-rows 由服务端配置，默认 1000）。
-  static const _remoteMaxPageSize = 1000;
+  /// 拉取分页大小上限：**max(服务端 db-max-rows 1000) - 1**——hasMore 需探测
+  /// pageSize+1 行，pageSize=1000 时服务端截断会恒返回 1000 行导致 hasMore 恒
+  /// false 静默漏数据；上限 999 保证 +1 探测行总能被返回。
+  static const _remoteMaxPageSize = 999;
 
   /// `id in (...)` 分批大小（防 URL 过长）。
   static const _idBatchSize = 50;
@@ -93,7 +95,9 @@ class SupabaseRemoteTables with RepositoryMappings implements RemoteTableGateway
     final rows = await _withRetry(
       () async => (await paged).cast<Map<String, Object?>>(),
     );
-    final hasMore = rows.length > effectivePageSize;
+    // hasMore 用 >= 判定：返回行数达到请求页大小时认为可能还有下一页
+    //（末页恰满时多一次空页请求以结束，符合 RemoteRowsPage 契约）。
+    final hasMore = rows.length >= effectivePageSize;
     final pageRows = hasMore
         ? rows.sublist(0, effectivePageSize)
         : rows;

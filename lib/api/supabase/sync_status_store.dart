@@ -78,7 +78,11 @@ class SyncStatusStore with RepositoryMappings {
         final statusKeys = {
           _statusKey(AppMetadataKeys.lastSyncAt, userId):
               AppMetadataKeys.lastSyncAt,
-          AppMetadataKeys.lastSyncError: AppMetadataKeys.lastSyncError,
+          // lastError 与游标/目标一样按 userId 分区：共享设备上用户 B 不得
+          // 读到用户 A 的失败原因（信息串扰），也不得被 A 的 markSuccess
+          // 清掉（"错误反映最近一次失败"不变量在共享设备场景成立）。
+          _statusKey(AppMetadataKeys.lastSyncError, userId):
+              AppMetadataKeys.lastSyncError,
           _statusKey(AppMetadataKeys.lastSyncTarget, userId):
               AppMetadataKeys.lastSyncTarget,
         };
@@ -96,6 +100,16 @@ class SyncStatusStore with RepositoryMappings {
               final parsed = DateTime.tryParse(row.value);
               if (parsed == null || !parsed.isUtc) {
                 return AppFailure('同步游标数据损坏，无法解析：${row.value}');
+              }
+              // 未来时间游标（旧版本写入/远端时钟偏差）显式失败：上层据此
+              // 提示需重置，防以其为增量起点导致同步永久停滞（与 markSuccess
+              // 的守卫对称）。
+              if (parsed.isAfter(
+                DateTime.now().toUtc().add(const Duration(minutes: 5)),
+              )) {
+                return AppFailure(
+                  '同步游标时间不合理（晚于当前时间），需重置：${row.value}',
+                );
               }
               lastSyncAt = parsed.toLocal();
               break;
@@ -118,11 +132,12 @@ class SyncStatusStore with RepositoryMappings {
     }
   }
 
-  /// 记录一次成功的同步（推进分区游标 + 清错误 + 记目标）。
+  /// 记录一次成功的同步（推进分区游标 + 记目标；**仅真正推进时清错误**）。
   ///
-  /// 单调性保护：若现有游标**不早于** [syncedAt]（乱序/重复完成），不覆盖
-  /// 游标与 lastTarget（防并发完成时后结束的旧同步回退游标、且目标与游标
-  /// 指向的最近成功点不一致），只清错误。
+  /// 单调性保护：若现有游标**不早于** [syncedAt]（乱序/相等/重复完成），不覆盖
+  /// 游标与 lastTarget（防并发完成时后结束的旧同步回退游标、且目标与游标指向
+  /// 的最近成功点不一致）；乱序/相等分支**保留 lastError**——本次成功并未晚于
+  /// 失败时刻（游标未推进），清空会抹掉真实失败记录（"错误反映最近一次失败"）。
   Future<AppResult<void>> markSuccess({
     required DateTime syncedAt,
     required String target,
@@ -169,10 +184,21 @@ class SyncStatusStore with RepositoryMappings {
             // 失败记录（"错误反映最近一次失败"语义；正常推进分支才清错误）。
             return const AppSuccess(null);
           }
+          if (syncedAt.toUtc().isAtSameMomentAs(existingAt)) {
+            // **相等时间戳**（无新行空跑同步的确定性路径）：游标无需覆盖，
+            // 但更新 lastTarget——"最近一次成功同步的目标"应反映本次成功
+            //（防连续空跑后 lastTarget 停留在上次目标）；**保留 lastError**
+            //（游标未推进，本次成功并未晚于失败时刻，清空会抹掉真实失败）。
+            await database.batch((batch) {
+              batch.insert(database.appMetadata, AppMetadataCompanion.insert(
+                key: _statusKey(AppMetadataKeys.lastSyncTarget, userId),
+                value: trimmedTarget,
+              ), mode: InsertMode.insertOrReplace);
+            });
+            return const AppSuccess(null);
+          }
         }
-        // 相等时间戳（无新行空跑同步的确定性路径）：游标无需覆盖，但须更新
-        // lastTarget——"最近一次成功同步的目标"应反映本次成功（防连续空跑后
-        // lastTarget 停留在上次目标）。
+        // 游标真正推进：写入新游标/目标，并清该用户分区的错误。
         await database.batch((batch) {
           batch.insert(database.appMetadata, AppMetadataCompanion.insert(
             key: cursorKey,
@@ -183,7 +209,7 @@ class SyncStatusStore with RepositoryMappings {
             value: trimmedTarget,
           ), mode: InsertMode.insertOrReplace);
           batch.insert(database.appMetadata, AppMetadataCompanion.insert(
-            key: AppMetadataKeys.lastSyncError,
+            key: _statusKey(AppMetadataKeys.lastSyncError, userId),
             value: '',
           ), mode: InsertMode.insertOrReplace);
         });
@@ -209,7 +235,8 @@ class SyncStatusStore with RepositoryMappings {
   ///
   /// [message] 必须非空（trim 后）：空串会静默清掉已有错误，破坏
   /// "失败不清游标/成功后清错误"的状态不变量。
-  Future<AppResult<void>> markFailure(String message) async {
+  /// lastError 与游标一样按 userId 分区（共享设备上互不串扰）。
+  Future<AppResult<void>> markFailure(String message, {String? userId}) async {
     final trimmed = message.trim();
     if (trimmed.isEmpty) {
       return const AppFailure('失败原因不能为空');
@@ -217,7 +244,7 @@ class SyncStatusStore with RepositoryMappings {
     try {
       await database.into(database.appMetadata).insert(
             AppMetadataCompanion.insert(
-              key: AppMetadataKeys.lastSyncError,
+              key: _statusKey(AppMetadataKeys.lastSyncError, userId),
               value: trimmed,
             ),
             mode: InsertMode.insertOrReplace,

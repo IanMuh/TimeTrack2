@@ -271,11 +271,16 @@ class CloudSyncEngine {
       // 游标）未被覆盖而下一轮永久漏推。
       // 空全量同步（since=null 且本轮无拉取无推送）用**同步开始时刻**兜底：
       // 同步期间新建行的 updated_at 必然晚于该值（不会漏），同时清除上次
-      // 失败遗留的 lastError、结束"永远全量重扫"状态——不用结束时刻墙钟
-      //（会吞掉同步期间新建的行）。注：wasFullSync=false 时 since 必非 null，
+      // 失败遗留的 lastError、结束"永远全量重扫"状态。
+      // **上限截断**：maxSeen 来自远端行时间戳（另一设备时钟），远端时钟快于
+      // 本机 >5 分钟时 future 游标会被 markSuccess 拒绝（每轮全量重拉+永久
+      // 失败），或 5 分钟内被写入 future 游标导致本地新行永久漏推——截断到
+      // startedAt 防未来游标毒化。注：wasFullSync=false 时 since 必非 null，
       // wasFullSync=true 时 startedAt 非 null——effectiveCursor 恒非 null。
-      final effectiveCursor = _laterOf(maxSeen, pushedMax) ??
-          (wasFullSync ? startedAt : since);
+      final processedMax = _laterOf(maxSeen, pushedMax);
+      final effectiveCursor = processedMax != null && processedMax.isAfter(startedAt)
+          ? startedAt
+          : (processedMax ?? (wasFullSync ? startedAt : since));
       final markResult = await statusStore.markSuccess(
         syncedAt: effectiveCursor,
         target: SyncTarget.supabase,
@@ -294,7 +299,7 @@ class CloudSyncEngine {
       // 任何未预期异常：记失败（不清游标），返回可读原因。
       // markFailure 自身失败不得掩盖原始同步异常（防 catch 内二次抛错）。
       try {
-        await statusStore.markFailure('同步失败：$e');
+        await statusStore.markFailure('同步失败：$e', userId: userId);
       } catch (_) {
         // 状态写入失败：不影响原始错误返回。
       }

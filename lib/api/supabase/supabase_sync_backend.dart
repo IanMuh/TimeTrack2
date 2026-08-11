@@ -24,13 +24,13 @@ import 'sync_backend.dart';
 /// 到 [SupabaseSyncBackend]，会在首次访问 _lazyClient 时同步抛 ArgumentError，
 /// 破坏 SyncBackend 的 AppResult 错误契约——故非法直接降级离线。
 SyncBackend createSupabaseSyncBackend({required CloudSyncEngine engine}) {
-  if (!AppBuildConfig.isSupabaseConfigured()) return const NoopSyncBackend();
+  if (!AppBuildConfig.isSupabaseConfigured()) return NoopSyncBackend();
   final url = AppBuildConfig.getString(
     AppBuildConfig.supabaseUrlKey,
     defaultValue: '',
   );
   if (!_isValidSupabaseUrl(url)) {
-    return const NoopSyncBackend();
+    return NoopSyncBackend();
   }
   return SupabaseSyncBackend._(engine: engine);
 }
@@ -94,17 +94,15 @@ class SupabaseSyncBackend implements SyncBackend {
   @override
   bool get isConfigured => AppBuildConfig.isSupabaseConfigured();
 
+  /// 未配置时的登录态流（单例广播，订阅即回放 null——符合接口契约）。
+  late final Stream<String?> _noopAuthState = Stream<String?>.multi(
+    (controller) => controller.add(null),
+    isBroadcast: true,
+  );
+
   @override
   Stream<String?> get authStateStream {
-    if (!isConfigured) {
-      // Stream.multi（isBroadcast: true）：每个监听者订阅时立即重放 null
-      // （broadcast 不重放已发射事件、getter 每次新建流会让晚订阅者静默
-      // 收不到快照）。
-      return Stream<String?>.multi(
-        (controller) => controller.add(null),
-        isBroadcast: true,
-      );
-    }
+    if (!isConfigured) return _noopAuthState;
     return _lazyAuth.authStateStream;
   }
 

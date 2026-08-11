@@ -26,7 +26,8 @@ void main() {
       try {
         final store = SyncStatusStore(database: db);
         await store.markFailure('先前的失败');
-        final syncedAt = DateTime(2026, 8, 11, 10, 30);
+        // 相对当前时间构造（防 markSuccess 的"不晚于 now+5min"校验误判）。
+        final syncedAt = DateTime.now().toUtc().subtract(const Duration(minutes: 30));
         await store.markSuccess(syncedAt: syncedAt, target: SyncTarget.supabase);
         final status = (await store.read()).requireValue();
         expect(
@@ -36,14 +37,14 @@ void main() {
         expect(status.lastError, isNull, reason: '成功后清错误');
         expect(status.lastTarget, SyncTarget.supabase);
 
-        // 再次 markSuccess 覆盖（幂等）
+        // 更晚时间戳再次 markSuccess：游标真正推进则覆盖（幂等覆盖旧游标）
         final later = syncedAt.add(const Duration(minutes: 5));
         await store.markSuccess(syncedAt: later, target: SyncTarget.supabase);
         final again = (await store.read()).requireValue();
         expect(
           again.lastSuccessfulSyncAt!.isAtSameMomentAs(later),
           isTrue,
-          reason: '重复 markSuccess 覆盖旧游标',
+          reason: '更晚 syncedAt 推进游标（覆盖旧游标）',
         );
       } finally {
         await db.close();
@@ -241,7 +242,7 @@ void main() {
 
   group('SyncBackend / NoopSyncBackend', () {
     test('NoopSyncBackend：未配置时全离线语义', () async {
-      const backend = NoopSyncBackend();
+      final backend = NoopSyncBackend();
       expect(backend.isConfigured, isFalse);
       expect(backend.currentUserId, isNull);
       expect(

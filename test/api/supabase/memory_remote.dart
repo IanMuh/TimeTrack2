@@ -24,10 +24,16 @@ class MemoryRemote implements RemoteTableGateway {
   bool allowUnownedRows = true;
 
   void seed(String table, Map<String, Object?> row) {
-    assert(row['updated_at'] is String, 'seed 行必须携带 updated_at');
+    if (row['updated_at'] is! String) {
+      throw ArgumentError('seed 行必须携带 updated_at（行内容：$row）');
+    }
     // 行身份：常规表用 id；profile_settings 无 id 键（云端主键 user_id）。
-    final id = (row['id'] ?? row['user_id'])! as String;
-    tables.putIfAbsent(table, () => {})[id] = row;
+    final id = row['id'] ?? row['user_id'];
+    if (id == null) {
+      throw ArgumentError('seed: 行必须携带 id 或 user_id（行内容：$row）');
+    }
+    // 浅拷贝（防测试 seed 后复用/修改原 Map 无提示改变 mock 状态）。
+    tables.putIfAbsent(table, () => {})[id as String] = Map.of(row);
   }
 
   /// 记录在远端存在但未在本地 mock 中的行（fetchRemoteUpdatedAt 用）。
@@ -69,6 +75,9 @@ class MemoryRemote implements RemoteTableGateway {
     }
     if (pageSize > 1000) {
       throw ArgumentError.value(pageSize, 'pageSize', '不能超过 1000');
+    }
+    if (page < 0) {
+      throw ArgumentError.value(page, 'page', '不能为负数');
     }
     callLog.add('pull:$table');
     pullLog.add((table: table, since: since, page: page));
@@ -122,12 +131,15 @@ class MemoryRemote implements RemoteTableGateway {
     final result = <String, DateTime>{};
     for (final id in ids) {
       // 按 idKey 匹配行 + 按 userId 过滤（与真网关 eq('user_id') + inFilter
-      // 一致；防跨用户数据存在时误报本用户不存在的行）。
+      // 一致；防跨用户数据存在时误报本用户不存在的行）。与 fetchRowsSince 的
+      // 过滤规则完全对齐（含 allowUnownedRows 严格模式）。
       final row = tables[table]?.values
           .where((r) => r[idKey] == id)
           .where((r) {
             final rowUser = r['user_id'];
-            return rowUser is! String || rowUser == userId;
+            if (rowUser is String && rowUser != userId) return false;
+            if (rowUser is! String && !allowUnownedRows) return false;
+            return true;
           })
           .firstOrNull;
       if (row != null && row['updated_at'] is String) {
@@ -147,15 +159,19 @@ class MemoryRemote implements RemoteTableGateway {
     _maybeThrow();
     final target = tables.putIfAbsent(table, () => {});
     for (final row in rows) {
-      // 与真网关一致：强制注入 user_id；**debug 下强制要求 updated_at 存在**
-      //（真网关不会补齐——静默补会让"调用方漏传 updated_at"的 bug 在测试
-      // 通过而在真实链路才暴露）。业务表强制要求 id。
-      assert(row.containsKey('updated_at'),
-          'upsertRows: 行必须携带 updated_at（真实网关不会补齐）');
+      // 与真网关一致：强制注入 user_id；**显式要求 updated_at 存在**（真网关
+      // 不会补齐——静默补会让"调用方漏传 updated_at"的 bug 在测试通过而在
+      // 真实链路才暴露；assert 在 release 下剥离，用显式抛错）。
+      if (row['updated_at'] is! String) {
+        throw ArgumentError('upsertRows: 行必须携带 updated_at（行内容：$row）');
+      }
       final owned = {...row, 'user_id': userId};
       // 行身份：常规表用 id；profile_settings 无 id 键（云端主键 user_id）。
-      final id = (owned['id'] ?? owned['user_id'])! as String;
-      target[id] = owned;
+      final id = owned['id'] ?? owned['user_id'];
+      if (id == null) {
+        throw ArgumentError('upsertRows: 行必须携带 id 或 user_id（行内容：$row）');
+      }
+      target[id as String] = owned;
     }
   }
 

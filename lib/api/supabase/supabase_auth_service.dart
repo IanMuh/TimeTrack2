@@ -7,7 +7,9 @@
 library;
 
 import 'dart:async';
+import 'dart:io';
 
+import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../utils/result.dart';
@@ -60,7 +62,9 @@ class SupabaseAuthService {
   /// 发送邮箱 OTP（验证码/魔法链接，由服务端配置决定）。
   Future<AppResult<void>> sendMagicLink(String email) async {
     try {
-      final trimmed = email.trim();
+      // GoTrue 默认小写规范化存储邮箱：统一 trim + toLowerCase（防发码/校验
+      // 大小写不一致导致 OTP 记录匹配失败）。
+      final trimmed = email.trim().toLowerCase();
       if (trimmed.isEmpty || !_looksLikeEmail(trimmed)) {
         return const AppFailure('邮箱地址非法');
       }
@@ -69,9 +73,14 @@ class SupabaseAuthService {
     } on AuthException {
       // 远端错误细节不向用户透出（防泄露服务端内部信息）。
       return const AppFailure('发送验证码失败，请稍后重试');
+    } on SocketException {
+      return const AppFailure('网络不可用，请稍后重试');
+    } on TimeoutException {
+      return const AppFailure('网络不可用，请稍后重试');
+    } on http.ClientException {
+      return const AppFailure('网络不可用，请稍后重试');
     }
-    // 非 AuthException（编程/网络/平台异常）：重新抛出保留原始堆栈，由上层
-    // 统一处理——不包装成无 cause 的新异常，也不吞成通用提示掩盖真实 bug。
+    // 其余非预期异常（编程错误）：重新抛出保留原始堆栈，由上层统一处理。
   }
 
   /// 校验邮箱 OTP 验证码并登录；成功返回用户 id。
