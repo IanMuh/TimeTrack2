@@ -2,7 +2,10 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
+import 'package:flutter/services.dart'
+    show MissingPluginException, PlatformException;
 import 'package:intl/intl.dart';
+import 'package:path/path.dart' as p;
 
 import '../../utils/result.dart';
 import '../sync/sync_bundle_codec.dart';
@@ -89,12 +92,21 @@ class FileInteropService {
         ],
       );
       return location?.path;
-    } on UnsupportedError {
-      // 平台不支持保存对话框：降级选目录，文件名拼接。
-      final dir = await getDirectoryPath();
-      if (dir == null) return null;
-      return '${dir.replaceAll('\\', '/')}/$suggestedName';
+    } on UnsupportedError catch (_) {
+      return _fallbackDirectoryPath(suggestedName);
+    } on MissingPluginException catch (_) {
+      // 平台未注册 file_selector 原生实现（method channel 抛此异常）。
+      return _fallbackDirectoryPath(suggestedName);
+    } on PlatformException catch (_) {
+      return _fallbackDirectoryPath(suggestedName);
     }
+  }
+
+  /// 降级选目录 + p.join 规范化路径（防双斜杠/UNC 脆弱拼接）。
+  Future<String?> _fallbackDirectoryPath(String suggestedName) async {
+    final dir = await getDirectoryPath();
+    if (dir == null) return null;
+    return p.join(dir, suggestedName);
   }
 
   Future<XFile?> _openFile() {

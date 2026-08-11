@@ -655,22 +655,22 @@ class TimeEntryRepository with RepositoryMappings {
   /// - 活动缺失/已删时回退到未分配活动（外键约束在 foreign_keys=ON 下会因
   ///   悬挂引用使整包合并失败——回退避免单条脏数据阻塞合并）。
   Future<void> saveMergedEntry(TimeEntry entry) async {
-    var activityId = entry.activityId;
-    var normalized = await _activityRepo.entryWithActivitySnapshot(
-      entry,
+    // 直接按活动行存在性判定（快照字段不可靠：远端条目几乎都带快照，
+    // "快照为空"既不等于活动缺失，也不该触发回退）。
+    final activity = await _activityRepo.activityById(
+      entry.activityId,
       executor: database,
     );
-    if (normalized.activityNameSnapshot.isEmpty &&
-        normalized.activityColorSnapshot == null) {
-      // 活动缺失/已删：快照未回填 → 回退未分配活动（防 FK 悬挂）。
+    var normalized = entry;
+    if (activity == null || activity.isDeleted) {
+      // 活动缺失/已删：回退未分配活动（防 FK 悬挂使整包合并失败）。
       final unassigned = await _activityRepo.ensureUnassignedActivity();
-      activityId = unassigned.id;
-      normalized = entry.copyWith(activityId: activityId);
-      normalized = await _activityRepo.entryWithActivitySnapshot(
-        normalized,
-        executor: database,
-      );
+      normalized = entry.copyWith(activityId: unassigned.id);
     }
+    normalized = await _activityRepo.entryWithActivitySnapshot(
+      normalized,
+      executor: database,
+    );
     final rows = _entryRowsForStorage(normalized);
     for (final row in rows) {
       final query = database.select(database.timeEntries)

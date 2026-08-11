@@ -119,6 +119,7 @@ void main() {
         '{"schema_version": 0, "exported_at": "2026-01-01T00:00:00Z", "source_device_id": "d"}',
         '{"schema_version": 3, "exported_at": "2026-01-01T00:00:00Z", "source_device_id": "d"}',
         '{"schema_version": "x", "exported_at": "2026-01-01T00:00:00Z", "source_device_id": "d"}',
+        '{"schema_version": 1.0, "exported_at": "2026-01-01T00:00:00Z", "source_device_id": "d"}', // double 拒绝（防 1.5→1 截断）
         '{"exported_at": "2026-01-01T00:00:00Z", "source_device_id": "d"}', // 缺 version
       ]) {
         expect(() => codec.decode(bad), throwsFormatException,
@@ -137,6 +138,37 @@ void main() {
         () => codec.decode('{"schema_version": 2, "source_device_id": "d"}'),
         throwsFormatException, // 缺 exported_at
       );
+    });
+  });
+
+  group('SyncBundleRepository mergeBundle 防御', () {
+    test('schema 版本非法 → 拒绝且不写库', () async {
+      final h = Harness2();
+      try {
+        final result = await h.syncBundle.mergeBundle(SyncBundle(
+          schemaVersion: 0,
+          exportedAt: DateTime.now(),
+          sourceDeviceId: 'd',
+          activities: [
+            Activity(
+              id: 'x1',
+              name: '不应写入',
+              color: 0,
+              isFavorite: false,
+              updatedAt: DateTime.now(),
+            ),
+          ],
+        ));
+        expect(result.isSuccess, isFalse);
+        expect(
+          result.when(onSuccess: (_) => '', onFailure: (m) => m),
+          contains('版本'),
+        );
+        final list = (await h.activities.activities()).requireValue();
+        expect(list, isEmpty, reason: '非法 schema 不写任何数据');
+      } finally {
+        await h.close();
+      }
     });
   });
 
@@ -207,14 +239,15 @@ void main() {
 
       // 墓碑 LWW 双向：B 本地存活行 updatedAt 更新 → A 旧墓碑不删除 B 的行
       final aliveInB = await seedActivity(deviceB, 'B 存活');
-      await deviceB.activities.updateActivity(
+      final updatedInB = (await deviceB.activities.updateActivity(
         activity: aliveInB,
         name: 'B 存活(新)',
         color: 0xff123456,
-      );
-      final oldTombstone = aliveInB.copyWith(
-        deletedAt: aliveInB.updatedAt.subtract(const Duration(hours: 1)),
-        updatedAt: aliveInB.updatedAt.subtract(const Duration(hours: 1)),
+      ))
+          .requireValue();
+      final oldTombstone = updatedInB.copyWith(
+        deletedAt: updatedInB.updatedAt.subtract(const Duration(hours: 1)),
+        updatedAt: updatedInB.updatedAt.subtract(const Duration(hours: 1)),
       );
       await deviceB.syncBundle.mergeBundle(SyncBundle(
         schemaVersion: 2,
@@ -262,11 +295,31 @@ void main() {
       expect(day1.single.endAt!.isAtSameMomentAs(DateTime(2026, 8, 12, 0, 0)), isTrue);
       expect(day2.single.startAt.isAtSameMomentAs(DateTime(2026, 8, 12, 0, 0)), isTrue);
 
-      // 重复合并（同包再合并一次）不产生重复段
-      final before = (await deviceB.entries.allEntries()).length;
-      await deviceB.syncBundle.mergeBundle(bundleA);
-      final after = (await deviceB.entries.allEntries()).length;
-      expect(after, before, reason: '确定性段 id 使重复合并不残留重复段');
+      // A 端用父条目 id（首段）延长 endAt 并推进 updatedAt 后重新导出 → B 再合并：
+      // 确定性段 id 使新段覆盖旧段而非叠加（段总数保持 2）。
+      final parent = bundleA.timeEntries.first; // 首段保留父条目原 id
+      final extended = parent.copyWith(
+        endAt: DateTime(2026, 8, 12, 2, 0), // 延长到 02:00
+        updatedAt: parent.updatedAt.add(const Duration(hours: 2)),
+      );
+      await deviceA.syncBundle.mergeBundle(SyncBundle(
+        schemaVersion: 2,
+        exportedAt: DateTime.now(),
+        sourceDeviceId: 'devA',
+        timeEntries: [extended],
+      ));
+      final bundleA2 = await deviceA.syncBundle.exportBundle(sourceDeviceId: 'devA');
+      await deviceB.syncBundle.mergeBundle(bundleA2);
+      final after = (await deviceB.entries.allEntries()).toList();
+      // 新段覆盖旧段：8/11 一段、8/12 一段（00:00-02:00），共 2 段不叠加
+      final day1b = after.where((e) => e.startAt.day == 11).toList();
+      final day2b = after.where((e) => e.startAt.day == 12).toList();
+      expect(day1b.length, 1, reason: '修改后 8/11 段不叠加');
+      expect(day2b.length, 1, reason: '修改后 8/12 段不叠加（00:00-02:00 覆盖旧段）');
+      expect(
+        day2b.single.endAt!.isAtSameMomentAs(DateTime(2026, 8, 12, 2, 0)),
+        isTrue,
+      );
     });
 
     test('profile_settings 单例行 LWW 合并', () async {

@@ -358,6 +358,13 @@ class ActivityRepository with RepositoryMappings {
         );
   }
 
+  /// 公开按 id 查询活动（供同步/合并判断活动存在性，可传 executor 供事务内使用）。
+  Future<Activity?> activityById(
+    String id, {
+    AppDatabase? executor,
+  }) =>
+      _activityById(id, executor: executor);
+
   /// 内部按 id 查询（可传 executor 供事务内使用）。
   Future<Activity?> _activityById(
     String id, {
