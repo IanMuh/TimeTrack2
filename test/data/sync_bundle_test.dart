@@ -145,7 +145,7 @@ void main() {
     test('远端条目带快照但活动缺失 → 整包成功且回退未分配', () async {
       final h = Harness2();
       try {
-        final now = DateTime.now();
+        final now = DateTime(2026, 8, 11, 9); // 固定白天时刻（防跨零点切段偶发）
         final bundle = SyncBundle(
           schemaVersion: 2,
           exportedAt: now,
@@ -171,8 +171,46 @@ void main() {
         final entries = await h.entries.allEntries();
         expect(entries.single.activityId, unassigned.id,
             reason: '活动缺失的条目回退到未分配活动');
-        expect(entries.single.activityNameSnapshot, isNotEmpty,
-            reason: '回退后仍带未分配活动的快照');
+        expect(entries.single.activityNameSnapshot, unassigned.name,
+            reason: '回退后快照刷新为未分配活动的名称');
+        expect(entries.single.activityColorSnapshot, unassigned.color,
+            reason: '回退后颜色快照刷新为未分配活动的颜色');
+      } finally {
+        await h.close();
+      }
+    });
+
+    test('远端条目引用已软删活动 → 同样回退未分配且整包成功', () async {
+      final h = Harness2();
+      try {
+        // 本地存在但已软删的活动
+        final activity = await seedActivity(h, '已删活动');
+        await h.activities.deleteActivity(activity);
+        final now = DateTime(2026, 8, 11, 9);
+        final bundle = SyncBundle(
+          schemaVersion: 2,
+          exportedAt: now,
+          sourceDeviceId: 'devX',
+          timeEntries: [
+            TimeEntry(
+              id: 'orphan-deleted',
+              activityId: activity.id,
+              activityNameSnapshot: '已删活动',
+              activityColorSnapshot: 0xff000000,
+              startAt: now,
+              endAt: now.add(const Duration(hours: 1)),
+              deviceId: 'devX',
+              updatedAt: now,
+            ),
+          ],
+        );
+        final result = await h.syncBundle.mergeBundle(bundle);
+        expect(result.isSuccess, isTrue,
+            reason: '引用已软删活动的条目不应使整包合并失败');
+        final unassigned = (await h.activities.unassignedActivity()).requireValue();
+        final entries = await h.entries.allEntries();
+        expect(entries.single.activityId, unassigned.id,
+            reason: '已软删活动 → 回退未分配');
       } finally {
         await h.close();
       }
