@@ -23,7 +23,10 @@ abstract final class SyncTarget {
 
 /// 云同步后端接口。
 abstract interface class SyncBackend {
-  /// 是否已配置（SUPABASE_URL + ANON_KEY 注入且认证会话可用）。
+  /// 是否已注入云配置（SUPABASE_URL + ANON_KEY）。
+  ///
+  /// 注意：**仅表示配置是否注入**，不代表认证会话可用——会话有效性请通过
+  /// [authStateStream] / [currentUserId] 判断（登录/登出/过期不影响本值）。
   bool get isConfigured;
 
   /// 登录态流（用户 id；null = 未登录）。
@@ -87,7 +90,12 @@ class NoopSyncBackend implements SyncBackend {
 
   @override
   Stream<String?> get authStateStream =>
-      Stream<String?>.value(null).asBroadcastStream();
+      // Stream.multi：每个监听者订阅时立即收到 null（未登录）。不用
+      // Stream.value(...).asBroadcastStream——broadcast 不重放已发射事件、
+      // getter 每次新建流，晚订阅者会静默收不到初始快照（与接口契约
+      // "订阅即回放当前用户 id" 一致，也与 supabase_sync_backend 的
+      // 未配置分支实现保持一致）。
+      Stream<String?>.multi((controller) => controller.add(null));
 
   @override
   String? get currentUserId => null;
@@ -110,7 +118,7 @@ class NoopSyncBackend implements SyncBackend {
   @override
   Future<AppResult<void>> signOut() async {
     // 未配置场景无会话可登出：与其余方法一致返回失败，防调用方误判云端登出
-    // 成功而继续执行本地状态清理。
+    // 成功而继续执行本地状态清理（本文件契约：失败语义由编排层统一处理）。
     return const AppFailure('云同步未配置（缺少 SUPABASE_URL/ANON_KEY）');
   }
 }

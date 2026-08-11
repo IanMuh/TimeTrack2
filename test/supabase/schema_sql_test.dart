@@ -7,9 +7,22 @@ import 'package:flutter_test/flutter_test.dart';
 ///
 /// 断言用不区分大小写的正则 + 空白归一化（防格式化工具调空白/大小写误报）。
 void main() {
-  final raw = File('supabase/schema.sql').readAsStringSync();
-  // 空白归一化（空白细节不参与语义锁定），断言正则大小写不敏感。
-  final schema = raw.replaceAll(RegExp(r'\s+'), ' ');
+  final schemaFile = File('supabase/schema.sql');
+  late final String raw;
+  late final String schema;
+
+  setUpAll(() {
+    // 请在项目根目录运行测试（路径依赖当前工作目录）。
+    raw = schemaFile.readAsStringSync();
+    // 剥离 -- 行注释与 /* ... */ 块注释：防"真实 DDL 被删、关键字残留在注释里"
+    // 时断言假阳性。
+    final withoutLineComments =
+        raw.replaceAll(RegExp(r'--[^\n]*'), '');
+    final withoutBlockComments = withoutLineComments
+        .replaceAll(RegExp(r'/\*[\s\S]*?\*/'), '');
+    // 空白归一化（空白细节不参与语义锁定），断言正则大小写不敏感。
+    schema = withoutBlockComments.replaceAll(RegExp(r'\s+'), ' ');
+  });
 
   /// 正则匹配（大小写不敏感）。
   bool has(String pattern) =>
@@ -61,13 +74,13 @@ void main() {
     });
 
     test('子孙 updated_at 用 greatest(自身, 父行) 保持 LWW 传播（限定函数体）', () {
-      // $$ ... $$ 为 plpgsql 函数体分隔符：把断言限定在
-      // soft_delete_activity_category_children 函数体内（防全局出现即通过）。
+      // 通用美元引用定界符（$function$ / $$ 等）成对圈定函数体：
+      // 把断言限定在 soft_delete_activity_category_children 函数体内。
       expect(
         has(r'FUNCTION SOFT_DELETE_ACTIVITY_CATEGORY_CHILDREN\(\)'
-            r'[\s\S]*?\$\$[\s\S]*?'
+            r'[\s\S]*?\$[A-Za-z0-9_]*\$[\s\S]*?'
             r'WHEN UPDATED_AT > PARENT_TS THEN UPDATED_AT'
-            r'[\s\S]*?ELSE PARENT_TS[\s\S]*?\$\$'),
+            r'[\s\S]*?ELSE PARENT_TS[\s\S]*?\$[A-Za-z0-9_]*\$'),
         isTrue,
         reason: '递归删除函数内必须保留 LWW（greatest）传播',
       );
@@ -107,9 +120,9 @@ void main() {
         'profile_settings',
       ]) {
         expect(
-          has("CREATE POLICY ${table}_ALL_OWN ON $table .*"
-              r'USING \(USER_ID = AUTH\.UID\(\)\) .*'
-              r'WITH CHECK \(USER_ID = AUTH\.UID\(\)\)'),
+          has("CREATE POLICY ${table}_ALL_OWN ON $table [^;]*"
+              r'USING \(USER_ID = AUTH\.UID\(\)\) [^;]*'
+              r'WITH CHECK \(USER_ID = AUTH\.UID\(\)\)[^;]*'),
           isTrue,
           reason: '$table 策略未绑定 auth.uid()',
         );
@@ -126,14 +139,23 @@ void main() {
       ]) {
         expect(has("FUNCTION $fn\\("), isTrue, reason: '缺少函数 $fn');
       }
-      // 调用点：assert_ref_exists 被至少两个校验函数使用（PERFORM ...）
-      expect(
-        RegExp(r'PERFORM ASSERT_REF_EXISTS', caseSensitive: false)
-            .allMatches(schema)
-            .length,
-        greaterThanOrEqualTo(3),
-        reason: 'assert_ref_exists 必须被校验函数实际调用',
-      );
+      // 调用点：assert_ref_exists 必须被**每个校验函数体**实际调用（PERFORM ...
+      // 限定在各自函数体内，防"某函数丢调用、另一函数重复调用"总数仍达标）。
+      // 注：函数名部分用普通字符串插值（$fn），其余用 raw string（\$ 为字面 $）。
+      for (final fn in [
+        'VALIDATE_TIME_ENTRY_REF',
+        'VALIDATE_LINK_REF',
+        'VALIDATE_CATEGORY_PARENT_REF',
+      ]) {
+        expect(
+          has('FUNCTION $fn\\(\\)' // 插值函数名 + 正则转义括号
+              r'[\s\S]*?\$[A-Za-z0-9_]*\$[\s\S]*?'
+              'PERFORM ASSERT_REF_EXISTS'
+              r'[\s\S]*?\$[A-Za-z0-9_]*\$'),
+          isTrue,
+          reason: '$fn 必须实际调用 assert_ref_exists',
+        );
+      }
       // 校验触发器挂载到表
       expect(
         has(r'CREATE TRIGGER TRG_TIME_ENTRIES_REF_CHECK .*'

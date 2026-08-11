@@ -16,12 +16,34 @@ import 'cloud_sync_engine.dart';
 import 'supabase_auth_service.dart';
 import 'sync_backend.dart';
 
-/// 构建 Supabase 后端：未配置时返回 [NoopSyncBackend]（应用离线可用）。
+/// 构建 Supabase 后端：未配置或 URL 非法时返回 [NoopSyncBackend]（应用离线）。
 ///
 /// [engine] 由调用方（阶段 3 编排）注入（真引擎 + mock 网关等组合由测试构造）。
+///
+/// URL 完整性校验前移到工厂：非空但非法的 URL（not-a-url / ftp:// 等）若放行
+/// 到 [SupabaseSyncBackend]，会在首次访问 _lazyClient 时同步抛 ArgumentError，
+/// 破坏 SyncBackend 的 AppResult 错误契约——故非法直接降级离线。
 SyncBackend createSupabaseSyncBackend({required CloudSyncEngine engine}) {
   if (!AppBuildConfig.isSupabaseConfigured()) return const NoopSyncBackend();
+  final url = AppBuildConfig.getString(
+    AppBuildConfig.supabaseUrlKey,
+    defaultValue: '',
+  );
+  if (!_isValidSupabaseUrl(url)) {
+    return const NoopSyncBackend();
+  }
   return SupabaseSyncBackend(engine: engine);
+}
+
+/// URL 合法性校验（与 [_SupabaseSyncBackend._validatedUrl] 共用同一判定）。
+bool _isValidSupabaseUrl(String raw) {
+  final trimmed = raw.trim();
+  final uri = Uri.tryParse(trimmed);
+  return trimmed.isNotEmpty &&
+      uri != null &&
+      uri.isAbsolute &&
+      (uri.scheme == 'http' || uri.scheme == 'https') &&
+      uri.host.isNotEmpty;
 }
 
 /// Supabase 同步后端。
@@ -44,17 +66,13 @@ class SupabaseSyncBackend implements SyncBackend {
 
   /// 校验注入的 SUPABASE_URL：非空 + 可解析 + http(s)；非法时给可读错误
   /// （SupabaseClient 构造/首请求会抛底层异常，定位困难——这里前置拦截）。
+  /// 工厂已用 [_isValidSupabaseUrl] 前置降级，此处保留为 double-check。
   String _validatedUrl() {
     final raw = AppBuildConfig.getString(
       AppBuildConfig.supabaseUrlKey,
       defaultValue: '',
     ).trim();
-    final uri = Uri.tryParse(raw);
-    if (raw.isEmpty ||
-        uri == null ||
-        !uri.isAbsolute ||
-        (uri.scheme != 'http' && uri.scheme != 'https') ||
-        uri.host.isEmpty) {
+    if (!_isValidSupabaseUrl(raw)) {
       throw ArgumentError('SUPABASE_URL 配置非法：$raw');
     }
     return raw;
@@ -122,7 +140,7 @@ class SupabaseSyncBackend implements SyncBackend {
       return const AppFailure('请先登录后再同步');
     }
     // currentUser 非空 ≠ token 有效：JWT 过期但 refresh token 仍有效的会话
-    // 应先尝试刷新；刷新失败（服务端已撤销/网络不可用）才提示重登。
+    // 应先尝试刷新；刷新失败才提示重登。
     final session = _lazyClient.auth.currentSession;
     if (session == null) {
       return const AppFailure('请先登录后再同步');
@@ -132,12 +150,23 @@ class SupabaseSyncBackend implements SyncBackend {
             .isBefore(DateTime.now());
     if (expired) {
       try {
-        await _lazyClient.auth.refreshSession();
-      } on Object {
-        // 刷新失败：会话已失效，提示重登。
+        final refreshed = await _lazyClient.auth.refreshSession();
+        if (refreshed.session == null) {
+          return const AppFailure('登录已过期，请重新登录');
+        }
+      } on AuthException {
+        // 会话被服务端撤销/无效：提示重登（与网络类瞬时错误区分）。
         return const AppFailure('登录已过期，请重新登录');
       }
+      // 网络不可用等瞬时错误：让 AuthException 之外的异常上抛，由上层兜底
+      // 提示"网络不可用"——不误报为"登录已过期"。
     }
-    return engine.syncNow(userId: userId);
+    // 刷新（或校验）后重新获取 userId：并发登出/换号（await 挂起点交错）
+    // 时不得用刷新前的旧 userId 同步（防按已登出/已切换身份写入数据）。
+    final effectiveUserId = currentUserId;
+    if (effectiveUserId == null || _lazyClient.auth.currentSession == null) {
+      return const AppFailure('请先登录后再同步');
+    }
+    return engine.syncNow(userId: effectiveUserId);
   }
 }

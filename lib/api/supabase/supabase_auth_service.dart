@@ -23,16 +23,16 @@ class SupabaseAuthService {
   ///
   /// 先订阅底层流、再补发快照：supabase 的 onAuthStateChange 是 broadcast 流，
   /// 新订阅者不会立即收到当前状态；且「读快照 → 订阅」窗口内到达的登录/登出
-  /// 事件会被 async* 生成器永久丢失——故用 Stream.multi 先监听再补快照，
-  /// 快照与首条事件重复时由 distinct 去重；onCancel 取消底层订阅。
+  /// 事件会被 async* 生成器永久丢失。用 Stream.multi 先监听再补快照；
+  /// **distinct 置于合并流之外**——快照与后续事件一并去重（只对底层流做
+  /// distinct 会漏掉快照与首条同 id 事件的重复下发）。
   Stream<String?> get authStateStream => Stream<String?>.multi((controller) {
         final sub = _client.auth.onAuthStateChange
             .map((data) => data.session?.user.id)
-            .distinct()
             .listen(controller.add);
         controller.add(currentUserId);
         controller.onCancel = sub.cancel;
-      });
+      }).distinct();
 
   /// 当前登录用户 id（未登录为 null）。
   String? get currentUserId => _client.auth.currentUser?.id;

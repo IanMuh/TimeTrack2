@@ -2,6 +2,7 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timetrack2/api/supabase/sync_backend.dart';
 import 'package:timetrack2/api/supabase/sync_status_store.dart';
+import 'package:timetrack2/constants/storage_keys.dart';
 import 'package:timetrack2/data/database/app_database.dart';
 
 void main() {
@@ -49,26 +50,27 @@ void main() {
       }
     });
 
-    test('markFailure 只记错误、不清游标', () async {
+    test('markFailure 只记错误、不清游标（精确值）', () async {
       final db = AppDatabase(NativeDatabase.memory());
       try {
         final store = SyncStatusStore(database: db);
-        await store.markSuccess(
-          syncedAt: DateTime(2026, 8, 11, 10),
-          target: SyncTarget.supabase,
-        );
+        final syncedAt = DateTime(2026, 8, 11, 10);
+        await store.markSuccess(syncedAt: syncedAt, target: SyncTarget.supabase);
         await store.markFailure('同步失败：网络中断');
         final status = (await store.read()).requireValue();
         expect(status.lastError, '同步失败：网络中断');
-        expect(status.lastSuccessfulSyncAt, isNotNull,
-            reason: '失败不清游标');
+        expect(
+          status.lastSuccessfulSyncAt!.isAtSameMomentAs(syncedAt),
+          isTrue,
+          reason: '失败不清游标（游标值必须保持不变，非仅非空）',
+        );
         expect(status.lastTarget, SyncTarget.supabase);
       } finally {
         await db.close();
       }
     });
 
-    test('markSuccess 单调性：旧游标不覆盖新游标（防并发回退）', () async {
+    test('markSuccess 单调性：乱序完成不覆盖游标、不改目标', () async {
       final db = AppDatabase(NativeDatabase.memory());
       try {
         final store = SyncStatusStore(database: db);
@@ -76,17 +78,18 @@ void main() {
         final t1 = t0.add(const Duration(minutes: 5));
         await store.markSuccess(syncedAt: t1, target: SyncTarget.supabase);
 
-        // 乱序完成的旧同步（syncedAt 早于现有游标）→ 不覆盖游标
-        await store.markSuccess(syncedAt: t0, target: SyncTarget.supabase);
+        // 乱序完成的旧同步（syncedAt 早于现有游标）→ 不覆盖游标/目标
+        await store.markSuccess(syncedAt: t0, target: 'other-target');
         var status = (await store.read()).requireValue();
         expect(
           status.lastSuccessfulSyncAt!.isAtSameMomentAs(t1),
           isTrue,
           reason: '旧 syncedAt 不得回退已推进的游标',
         );
-        // 仍清错误/记目标（乱序完成也视为一次成功）
+        expect(status.lastTarget, SyncTarget.supabase,
+            reason: '乱序完成不得把目标覆盖为旧同步的目标（与游标指向的'
+                '最近成功点保持一致）');
         expect(status.lastError, isNull);
-        expect(status.lastTarget, SyncTarget.supabase);
       } finally {
         await db.close();
       }
@@ -96,16 +99,17 @@ void main() {
       final db = AppDatabase(NativeDatabase.memory());
       try {
         final store = SyncStatusStore(database: db);
+        // 键名用常量（防键名变更后测试失真），断言语义不绑定具体文案。
         await db.into(db.appMetadata).insert(AppMetadataCompanion.insert(
-          key: 'last_sync_at',
+          key: AppMetadataKeys.lastSyncAt,
           value: 'not-a-date',
         ));
         final result = await store.read();
-        expect(result.isSuccess, isFalse);
+        expect(result.isSuccess, isFalse, reason: '损坏游标应显式失败');
         expect(
           result.when(onSuccess: (_) => '', onFailure: (m) => m),
-          contains('损坏'),
-          reason: '损坏游标应显式报错，不得当"从未同步"触发全量',
+          contains('not-a-date'),
+          reason: '失败信息应包含损坏的原值',
         );
       } finally {
         await db.close();
@@ -132,8 +136,10 @@ void main() {
           reason: '未配置场景登出返回失败（与其余方法一致，防误判登出成功）');
       // 登录态流：订阅即收到 null（未登录）——确定性等待（不依赖固定延时）。
       await expectLater(backend.authStateStream, emits(null));
-      // 多订阅者可用（broadcast 契约）：各订阅者都立即收到 null。
-      await expectLater(backend.authStateStream, emits(null));
+      // 多订阅者可用：**同一流实例**可被多个订阅者同时监听并各自收到 null。
+      final stream = backend.authStateStream;
+      await expectLater(stream, emits(null));
+      await expectLater(stream, emits(null));
     });
 
     test('SyncReport 携带目标/全量标记/行数', () {

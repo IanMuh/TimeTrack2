@@ -14,10 +14,11 @@ import 'dart:math';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../data/repositories/repository_mappings.dart';
 import 'remote_tables.dart';
 
 /// Supabase 表网关实现。
-class SupabaseRemoteTables implements RemoteTableGateway {
+class SupabaseRemoteTables with RepositoryMappings implements RemoteTableGateway {
   SupabaseRemoteTables({SupabaseClient? client})
       : _client = client ?? Supabase.instance.client;
 
@@ -69,7 +70,11 @@ class SupabaseRemoteTables implements RemoteTableGateway {
     // 前者返回 PostgrestFilterBuilder，后者返回 PostgrestTransformBuilder。
     final builder = _client.from(table).select().eq('user_id', userId);
     final filtered = since != null
-        ? builder.gte('updated_at', since.toUtc().toIso8601String())
+        // since 用固定 6 位微秒 UTC ISO8601（utcString 单一转换点）：
+        // Dart toIso8601String 在微秒为 0 时省略小数位，与云端恒定
+        // 6 位微秒值做字典序 gte 比较时 'Z' > '.' 会把同一秒的远端行
+        // 全部排除（漏同步）——项目不变量"字典序=时间序"。
+        ? builder.gte('updated_at', utcString(since))
         : builder;
     // 次级排序键（唯一列）保证偏移分页跨请求稳定：多条行 updated_at 相同时
     // 页边界不丢/重行。常规表用 id；profile_settings 无 id 列，用 user_id。
@@ -95,6 +100,9 @@ class SupabaseRemoteTables implements RemoteTableGateway {
     String idKey = 'id',
   }) async {
     _assertAllowedTable(table);
+    // 与 fetchRowsSince/upsertRows 的表级判定对齐：profile_settings 无 id 列，
+    // 漏传 idKey 时自动回退 user_id（防 PGRST204 报错或空结果静默漏同步）。
+    final effectiveIdKey = table == 'profile_settings' ? 'user_id' : idKey;
     final result = <String, DateTime>{};
     for (var start = 0; start < ids.length; start += _idBatchSize) {
       final end = start + _idBatchSize < ids.length
@@ -102,16 +110,16 @@ class SupabaseRemoteTables implements RemoteTableGateway {
           : ids.length;
       final chunk = ids.sublist(start, end);
       final rows = await _withRetry(() async {
-        // idKey 为行身份列（默认 id；profile_settings 无 id 列，用 user_id）。
+        // effectiveIdKey 为行身份列（默认 id；profile_settings 自动用 user_id）。
         final response = await _client
             .from(table)
-            .select('$idKey,updated_at')
+            .select('$effectiveIdKey,updated_at')
             .eq('user_id', userId)
-            .inFilter(idKey, chunk);
+            .inFilter(effectiveIdKey, chunk);
         return response.cast<Map<String, Object?>>();
       });
       for (final row in rows) {
-        final id = row[idKey];
+        final id = row[effectiveIdKey];
         final updatedAt = row['updated_at'];
         if (id is String && updatedAt is String) {
           final parsed = DateTime.tryParse(updatedAt);
@@ -183,14 +191,14 @@ class SupabaseRemoteTables implements RemoteTableGateway {
   }
 
   /// 判定错误码是否不可重试：HTTP 4xx、PostgREST 错误码（PGRST*）、
-  /// PG SQLSTATE。SQLSTATE 类码通常**以数字开头**（23505、22P02、42P01），
-  /// 格式为 5 位字母数字——用宽松字符集匹配而非"2 字母+3 数字"。
-  /// 注意：SQLSTATE 中少数瞬时类（如 40001 序列化失败、40P01 死锁、
-  /// 57P01/57P03 停机、08006 连接失败）本应可重试，但 PostgREST 通常已把
-  /// 网络层错误转成 HTTP 5xx/连接异常走其它分支——此处对 SQLSTATE 一律
-  /// 视为不可重试（保守：避免对永久性错误空等 3 次退避）。
+  /// PG SQLSTATE。缺失 code 视为协议/解析失败：与"协议失败不重试"契约一致
+  /// （网络瞬时错误已由 SocketException/ClientException/TimeoutException 分支
+  /// 处理），避免对永久性错误空等退避。
+  /// SQLSTATE 类码通常**以数字开头**（23505、22P02、42P01），格式为 5 位
+  /// 字母数字。多数 SQLSTATE 是永久性错误（保守不重试）；瞬时类（40001/
+  /// 40P01/57P01/08006 等）PostgREST 通常已转成 HTTP 5xx/连接异常走其它分支。
   static bool _isNonRetryableCode(String? code) {
-    if (code == null) return false;
+    if (code == null) return true;
     final statusCode = int.tryParse(code);
     if (statusCode != null && statusCode >= 400 && statusCode < 500) {
       return true;

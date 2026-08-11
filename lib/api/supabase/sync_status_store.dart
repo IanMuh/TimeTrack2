@@ -12,6 +12,7 @@ import 'package:drift/drift.dart';
 
 import '../../constants/storage_keys.dart';
 import '../../data/database/app_database.dart';
+import '../../data/repositories/repository_mappings.dart';
 import '../../utils/result.dart';
 
 /// 云同步状态（本地持久化视图）。
@@ -56,7 +57,7 @@ class SyncStatus {
 }
 
 /// 同步状态读写（app_metadata key-value）。
-class SyncStatusStore {
+class SyncStatusStore with RepositoryMappings {
   SyncStatusStore({required this.database});
 
   final AppDatabase database;
@@ -87,10 +88,13 @@ class SyncStatusStore {
                 return AppFailure('同步游标数据损坏，无法解析：${row.value}');
               }
               lastSyncAt = parsed;
+              break;
             case AppMetadataKeys.lastSyncError:
               lastError = row.value.isEmpty ? null : row.value;
+              break;
             case AppMetadataKeys.lastSyncTarget:
               lastTarget = row.value.isEmpty ? null : row.value;
+              break;
           }
         }
         return AppSuccess(SyncStatus(
@@ -107,7 +111,8 @@ class SyncStatusStore {
   /// 记录一次成功的同步（推进游标 + 清错误 + 记目标）。
   ///
   /// 单调性保护：若现有游标**不早于** [syncedAt]（乱序/重复完成），不覆盖
-  /// ——防并发完成时后结束的旧同步回退已推进的游标。
+  /// 游标与 lastTarget（防并发完成时后结束的旧同步回退游标、且目标与游标
+  /// 指向的最近成功点不一致），只清错误。
   Future<AppResult<void>> markSuccess({
     required DateTime syncedAt,
     required String target,
@@ -117,27 +122,27 @@ class SyncStatusStore {
         final existing = await (database.select(database.appMetadata)
               ..where((t) => t.key.equals(AppMetadataKeys.lastSyncAt)))
             .getSingleOrNull();
-        final existingAt = existing == null
-            ? null
-            : DateTime.tryParse(existing.value);
-        if (existingAt != null && !syncedAt.toUtc().isAfter(existingAt)) {
-          // 游标未前进（乱序/重复完成）：不覆盖游标（防回退），只清错误 + 记目标。
-          await database.batch((batch) {
-            batch.insert(database.appMetadata, AppMetadataCompanion.insert(
-              key: AppMetadataKeys.lastSyncTarget,
-              value: target,
-            ), mode: InsertMode.insertOrReplace);
-            batch.insert(database.appMetadata, AppMetadataCompanion.insert(
-              key: AppMetadataKeys.lastSyncError,
-              value: '',
-            ), mode: InsertMode.insertOrReplace);
-          });
-          return const AppSuccess(null);
+        if (existing != null) {
+          final existingAt = DateTime.tryParse(existing.value);
+          if (existingAt == null) {
+            // 与 read() 一致：损坏游标显式失败，不静默重置（防回退实际成功点）。
+            return AppFailure('同步游标数据损坏，无法解析：${existing.value}');
+          }
+          if (!syncedAt.toUtc().isAfter(existingAt)) {
+            // 游标未前进（乱序/重复完成）：不覆盖游标/目标，只清错误。
+            await database.batch((batch) {
+              batch.insert(database.appMetadata, AppMetadataCompanion.insert(
+                key: AppMetadataKeys.lastSyncError,
+                value: '',
+              ), mode: InsertMode.insertOrReplace);
+            });
+            return const AppSuccess(null);
+          }
         }
         await database.batch((batch) {
           batch.insert(database.appMetadata, AppMetadataCompanion.insert(
             key: AppMetadataKeys.lastSyncAt,
-            value: syncedAt.toUtc().toIso8601String(),
+            value: utcString(syncedAt),
           ), mode: InsertMode.insertOrReplace);
           batch.insert(database.appMetadata, AppMetadataCompanion.insert(
             key: AppMetadataKeys.lastSyncTarget,

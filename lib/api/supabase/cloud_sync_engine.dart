@@ -145,12 +145,22 @@ class CloudSyncEngine {
       pulledRows += logsPull.count;
       maxSeen = _laterOf(maxSeen, logsPull.maxSeen);
       // profile_settings 单例行（每用户至多一行；分页逻辑与其余表一致）。
+      // 拉取归属校验：本地 id=1 单例行若属于**其他用户**（共享设备上前一登录
+      // 用户遗留），不得被当前用户远端配置覆盖（防跨用户串写，与推送侧对称）。
       final settingsPull =
           await _pullTable(
             table: RemoteTables.profileSettings,
             userId: userId,
             since: since,
             apply: (row) async {
+              final localRow = await (database.select(database.profileSettings)
+                    ..where((t) => t.id.equals(1)))
+                  .getSingleOrNull();
+              if (localRow != null &&
+                  localRow.userId != null &&
+                  localRow.userId != userId) {
+                return const AppSuccess(null); // 归属他人：跳过
+              }
               final applied = await settings.applyIfRemoteNewer(
                 ProfileSettings.fromMap(row),
               );
@@ -249,7 +259,12 @@ class CloudSyncEngine {
       ));
     } catch (e) {
       // 任何未预期异常：记失败（不清游标），返回可读原因。
-      await statusStore.markFailure('同步失败：$e');
+      // markFailure 自身失败不得掩盖原始同步异常（防 catch 内二次抛错）。
+      try {
+        await statusStore.markFailure('同步失败：$e');
+      } catch (_) {
+        // 状态写入失败：不影响原始错误返回。
+      }
       return AppFailure('同步失败：$e');
     } finally {
       _inFlight = false;
@@ -332,10 +347,10 @@ class CloudSyncEngine {
       for (final row in batch) {
         final localUpdatedAt = DateTime.parse(row['updated_at']! as String);
         final remoteAt = remoteUpdatedAt[row[idKey]];
-        // 远端**不早于**本地即跳过（含相等时间戳——先拉后推中本轮刚拉取的
-        // 行保留远端 updatedAt，相等即已是最新，无需重复写回；LWW upsert
-        // 幂等，不丢数据）。
-        if (remoteAt != null && !remoteAt.isBefore(localUpdatedAt)) continue;
+        // 远端**严格更新**（updated_at 更晚）才跳过；相等时间戳照常写回——
+        // "相等"不保证内容一致（远端时间戳可能被截断/同精度修改），
+        // 让 LWW upsert 决胜而不是静默丢弃本地更新。
+        if (remoteAt != null && remoteAt.isAfter(localUpdatedAt)) continue;
         toPush.add(row);
       }
       if (toPush.isNotEmpty) {
@@ -346,20 +361,25 @@ class CloudSyncEngine {
     return pushed;
   }
 
-  /// 补填 user_id（本地未登录时创建的行推送前归属当前用户）。
+  /// 补填 user_id：**仅**对 userId == null（未登录时创建）的行归属当前用户。
+  ///
+  /// 归属他人的遗留行（共享设备上前一登录用户留下的本地行）**不改归属**——
+  /// 推送时行身份仍指向他人 userId，网关 eq(user_id, 当前用户) 查不到该行、
+  /// RLS 也会拒绝写入（防跨用户数据污染）；本地该行由用户显式处理（后续
+  /// 阶段提供多用户数据隔离/清除入口）。
   T _withUserId<T>(T model, String userId) {
     return switch (model) {
-      final Activity a when a.userId != userId =>
+      final Activity a when a.userId == null =>
         a.copyWith(userId: userId) as T,
-      final ActivityCategory c when c.userId != userId =>
+      final ActivityCategory c when c.userId == null =>
         c.copyWith(userId: userId) as T,
-      final ActivityCategoryLink l when l.userId != userId =>
+      final ActivityCategoryLink l when l.userId == null =>
         l.copyWith(userId: userId) as T,
-      final TimeEntry e when e.userId != userId =>
+      final TimeEntry e when e.userId == null =>
         e.copyWith(userId: userId) as T,
-      final ActionLog l when l.userId != userId =>
+      final ActionLog l when l.userId == null =>
         l.copyWith(userId: userId) as T,
-      final ProfileSettings s when s.userId != userId =>
+      final ProfileSettings s when s.userId == null =>
         s.copyWith(userId: userId) as T,
       _ => model,
     };

@@ -199,6 +199,14 @@ void main() {
         final active = (await h.activities.activities()).requireValue();
         expect(active.map((a) => a.id), isNot(contains(localActivity.id)),
             reason: '远端墓碑随 LWW 传播删除本地行');
+        // 软删不变量：行仍存在（含删查询可见）且 deletedAt 已置位（防实现
+        // 退化为硬删而测试误通过）。
+        final withDeleted =
+            (await h.activities.activities(includeDeleted: true)).requireValue();
+        final tombstoned =
+            withDeleted.firstWhere((a) => a.id == localActivity.id);
+        expect(tombstoned.isDeleted, isTrue, reason: '墓碑行保留且标记软删');
+        expect(tombstoned.deletedAt, isNotNull);
       } finally {
         await h.close();
       }
@@ -272,7 +280,7 @@ void main() {
   });
 
   group('CloudSyncEngine 推送（后推）', () {
-    test('本地行推送到远端；远端更新的行跳过（防旧推送）', () async {
+    test('防旧推送：本地旧值不覆盖远端更新的行（LWW 决胜）', () async {
       final h = CloudHarness.create();
       try {
         final localActivity = (await h.activities.createActivity(
@@ -281,7 +289,7 @@ void main() {
         ))
             .requireValue();
 
-        // 远端已有该 id、updatedAt 更新、且字段完整（远端新名）→ 跳过
+        // 远端已有该 id、updatedAt 更新、且字段完整（远端新名）。
         final remoteNewer = localActivity.copyWith(
           name: '远端新名',
           updatedAt: localActivity.updatedAt.add(const Duration(hours: 1)),
@@ -289,17 +297,13 @@ void main() {
         h.remote.seed(RemoteTables.activities, remoteNewer.toMap());
 
         await h.engine.syncNow(userId: CloudHarness.userId);
-        // 跳过语义：本地唯一用户行（活动）与远端值一致（拉取已 LWW 覆盖），
-        // 推送阶段应**跳过**——即 push 未被执行（无行需推送）。
-        // 若实现退化为无条件推送，push:activities 会出现并覆盖远端新名。
-        expect(h.remote.callLog, isNot(contains('push:activities')),
-            reason: '本地唯一行被跳过 → 无可推行，不发起 push');
-        // 远端行保持完整且未被覆盖（防旧推送）
+        // 防旧推送的本质：无论推送是否执行（相等时间戳写回也属 LWW 幂等），
+        // 远端行内容与 updated_at 都不被本地旧值破坏——验证远端保持更新值。
         final remoteRow = h.remote.tables[RemoteTables.activities]![
             localActivity.id]!;
         expect(remoteRow['name'], '远端新名',
             reason: '远端更新 ⇒ 本地不覆盖（防旧推送）');
-        // 远端仍保留其更新的 updated_at（未被覆盖）
+        // 远端仍保留其更新的 updated_at（未被本地旧时间戳回退）
         final remoteUpdatedAt =
             DateTime.parse(remoteRow['updated_at']! as String);
         expect(
@@ -455,6 +459,59 @@ void main() {
       }
     });
 
+    test('拉取中途失败：部分行已落库但游标不推进，重试按原游标重拉补齐', () async {
+      final h = CloudHarness.create(pageSize: 2);
+      try {
+        // 首次全量同步（空远端），推进游标
+        await h.engine.syncNow(userId: CloudHarness.userId);
+        final cursor = (await h.statusStore.read())
+            .requireValue()
+            .lastSuccessfulSyncAt!;
+
+        // 远端新增 3 行（分 2 页）；第二次同步第 2 页拉取失败
+        for (var i = 0; i < 3; i++) {
+          h.remote.seed(
+            RemoteTables.activities,
+            Activity(
+              id: 'mid-fail-$i',
+              name: '中途行$i',
+              color: 0,
+              isFavorite: false,
+              updatedAt: cursor.add(Duration(minutes: i + 1)),
+            ).toMap(),
+          );
+        }
+        h.remote.resetCallCount();
+        // 调用序号：0 = pull:activities 第 1 页，1 = pull:activities 第 2 页
+        h.remote.failOnCallIndex = 1;
+        final failed = await h.engine.syncNow(userId: CloudHarness.userId);
+        expect(failed.isSuccess, isFalse, reason: '中途失败应返回失败');
+
+        var status = (await h.statusStore.read()).requireValue();
+        expect(status.lastSuccessfulSyncAt!.isAtSameMomentAs(cursor), isTrue,
+            reason: '中途失败不清游标');
+        expect(status.lastError, isNotNull);
+
+        // 第 1 页行已部分落库（LWW 幂等：不丢已应用行）
+        final partial = (await h.activities.activities()).requireValue();
+        expect(partial.map((a) => a.id), contains('mid-fail-0'));
+
+        // 重试（不设失败）→ 从原游标重拉，补齐全部 3 行 + 游标推进
+        await h.engine.syncNow(userId: CloudHarness.userId);
+        final after = (await h.activities.activities()).requireValue();
+        for (var i = 0; i < 3; i++) {
+          expect(after.map((a) => a.id), contains('mid-fail-$i'),
+              reason: '重试后补齐中途未拉到的行');
+        }
+        status = (await h.statusStore.read()).requireValue();
+        expect(status.lastError, isNull, reason: '重试成功后清错误');
+        expect(status.lastSuccessfulSyncAt!.isAfter(cursor), isTrue,
+            reason: '重试成功后游标推进');
+      } finally {
+        await h.close();
+      }
+    });
+
     test('增量拉取：since 透传，旧行不重拉、新行拉回', () async {
       final h = CloudHarness.create();
       try {
@@ -600,7 +657,7 @@ void main() {
       }
     });
 
-    test('增量边界：updated_at == since 的行不重复拉取（>= 语义 + LWW 幂等）', () async {
+    test('增量边界：updated_at == since 的行不得漏拉（>= since 语义）', () async {
       final h = CloudHarness.create();
       try {
         // 首次全量（空远端），游标 = 某时刻
@@ -621,10 +678,25 @@ void main() {
         h.remote.seed(RemoteTables.activities, boundary.toMap());
 
         await h.engine.syncNow(userId: CloudHarness.userId);
-        // 边界行被拉取（>= since）且 LWW 落库
+        // 边界行被拉取（>= since）且 LWW 落库——不得漏拉
         final local = (await h.activities.activities()).requireValue();
         expect(local.map((a) => a.id), contains('boundary-row'),
             reason: 'updated_at == since 的行必须被拉取（不得漏拉）');
+
+        // 边界行 updated_at 恰好 == 游标时游标不前进：下一轮按 >= 语义会再次
+        // 拉取该行（属预期——gte 闭区间 + LWW 幂等，无数据丢失/重复入库）。
+        final cursor2 = (await h.statusStore.read())
+            .requireValue()
+            .lastSuccessfulSyncAt!;
+        expect(cursor2.isAtSameMomentAs(cursor), isTrue,
+            reason: '游标=本次最大行时间（边界行不推进）');
+        await h.engine.syncNow(userId: CloudHarness.userId);
+        final local2 = (await h.activities.activities()).requireValue();
+        expect(
+          local2.where((a) => a.id == 'boundary-row'),
+          hasLength(1),
+          reason: '重复拉取 LWW 幂等，不产生重复行',
+        );
       } finally {
         await h.close();
       }

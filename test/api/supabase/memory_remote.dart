@@ -26,13 +26,22 @@ class MemoryRemote implements RemoteTableGateway {
   }
 
   /// 记录在远端存在但未在本地 mock 中的行（fetchRemoteUpdatedAt 用）。
-  void seedRemoteOnly(String table, String id, DateTime updatedAt) {
-    tables
-        .putIfAbsent(table, () => {})[id] = {
-      'id': id,
+  /// [idKey] 与 fetchRemoteUpdatedAt 的 idKey 对齐（profile_settings 用 user_id）。
+  void seedRemoteOnly(String table, String id, DateTime updatedAt,
+      {String idKey = 'id'}) {
+    tables.putIfAbsent(table, () => {})[id] = {
+      idKey: id,
       'updated_at': updatedAt.toUtc().toIso8601String(),
     };
   }
+
+  /// 注入条件失败：设非 null 时，**指定调用序号**（从 0 计）的网关调用抛该异常
+  /// （模拟"拉取中途/推送阶段失败"；序号按 callLog 计数）。
+  Object? failOnCallIndex;
+  int _callCount = 0;
+
+  /// 重置调用计数（配合 [failOnCallIndex] 使用：先 reset 再设目标序号）。
+  void resetCallCount() => _callCount = 0;
 
   @override
   Future<RemoteRowsPage> fetchRowsSince({
@@ -49,15 +58,23 @@ class MemoryRemote implements RemoteTableGateway {
     _maybeThrow();
     final rows = (tables[table]?.values ?? const <Map<String, Object?>>[])
         .where((row) {
+      // 与真网关 .eq('user_id', userId) 过滤一致：仅返回归属当前用户的行。
+      final rowUser = row['user_id'];
+      if (rowUser is String && rowUser != userId) return false;
       final updatedAt = DateTime.parse(row['updated_at']! as String);
       if (since == null) return true;
       return !updatedAt.isBefore(since);
     }).toList()
       ..sort((a, b) {
-        // 按 instant 比较（防混入不同时区格式时字典序失真）
+        // 按 instant 比较（防混入不同时区格式时字典序失真）；
+        // 次级唯一键（与真网关 order('updated_at').order(tieBreakKey) 一致）。
         final aAt = DateTime.parse(a['updated_at']! as String);
         final bAt = DateTime.parse(b['updated_at']! as String);
-        return aAt.compareTo(bAt);
+        final byAt = aAt.compareTo(bAt);
+        if (byAt != 0) return byAt;
+        final aId = (a['id'] ?? a['user_id'])! as String;
+        final bId = (b['id'] ?? b['user_id'])! as String;
+        return aId.compareTo(bId);
       });
     final start = page * pageSize;
     if (start >= rows.length) {
@@ -117,18 +134,26 @@ class MemoryRemote implements RemoteTableGateway {
       nextError = null;
       throw error;
     }
+    final indexError = failOnCallIndex;
+    final isTarget = indexError != null && _callCount == indexError;
+    _callCount += 1;
+    if (isTarget) {
+      failOnCallIndex = null; // 单次生效
+      throw Exception('mock 条件失败（调用序号 ${_callCount - 1}）');
+    }
   }
 }
 
-/// 校验推送顺序（先拉后推）：至少一次拉取，且首个拉取早于首个推送。
+/// 校验推送顺序（先拉后推）：**所有**拉取早于首个推送。
 void expectPullBeforePush(List<String> log) {
-  var firstPull = -1;
   var firstPush = -1;
+  var lastPull = -1;
   for (var i = 0; i < log.length; i++) {
-    if (log[i].startsWith('pull:') && firstPull == -1) firstPull = i;
+    if (log[i].startsWith('pull:')) lastPull = i;
     if (log[i].startsWith('push:') && firstPush == -1) firstPush = i;
   }
   if (firstPush == -1) return; // 无推送
-  expect(firstPull, isNot(-1), reason: '推送之前必须存在拉取：$log');
-  expect(firstPull, lessThan(firstPush), reason: '推送应发生在所有拉取之后：$log');
+  expect(lastPull, isNot(-1), reason: '推送之前必须存在拉取：$log');
+  expect(lastPull, lessThan(firstPush),
+      reason: '所有拉取必须早于首个推送：$log');
 }
