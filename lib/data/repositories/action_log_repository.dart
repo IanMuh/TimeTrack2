@@ -72,6 +72,31 @@ class ActionLogRepository with RepositoryMappings {
     }
   }
 
+  /// 增量查询日志（云同步拉取用）：`updated_at >= since`（含已删除行）。
+  Future<AppResult<List<ActionLog>>> logsSince(DateTime since) async {
+    try {
+      final query = database.select(database.actionLogs)
+        ..where((t) => t.updatedAt.isBiggerOrEqualValue(utcString(since)))
+        ..orderBy([(t) => OrderingTerm.asc(t.updatedAt)]);
+      final rows = await query.get();
+      return AppSuccess(rows.map(actionLogFromRow).toList());
+    } catch (e) {
+      return AppFailure('增量查询操作日志失败：$e');
+    }
+  }
+
+  /// 全量日志（含已删除，bundle 导出用）。
+  Future<AppResult<List<ActionLog>>> allLogs() async {
+    try {
+      final query = database.select(database.actionLogs)
+        ..orderBy([(t) => OrderingTerm.asc(t.updatedAt)]);
+      final rows = await query.get();
+      return AppSuccess(rows.map(actionLogFromRow).toList());
+    } catch (e) {
+      return AppFailure('查询全部操作日志失败：$e');
+    }
+  }
+
   /// 指定活动/条目最近一条日志（时间线上下文定位）。
   Future<AppResult<ActionLog?>> latestFor({
     String? activityId,

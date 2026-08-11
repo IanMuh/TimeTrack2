@@ -50,6 +50,19 @@ class ActivityRepository with RepositoryMappings {
     }
   }
 
+  /// 增量查询（云同步拉取用）：`updated_at >= since`（含已删除行）。
+  Future<AppResult<List<Activity>>> activitiesSince(DateTime since) async {
+    try {
+      final query = database.select(database.activities)
+        ..where((t) => t.updatedAt.isBiggerOrEqualValue(utcString(since)))
+        ..orderBy([(t) => OrderingTerm.asc(t.updatedAt)]);
+      final rows = await query.get();
+      return AppSuccess(rows.map(activityFromRow).toList());
+    } catch (e) {
+      return AppFailure('增量查询活动失败：$e');
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // 写操作
   // ---------------------------------------------------------------------------

@@ -78,6 +78,23 @@ class TimeEntryRepository with RepositoryMappings {
     return row == null ? null : timeEntryFromRow(row);
   }
 
+  /// 全量条目（含已删除，bundle 导出用；updated_at 升序）。
+  Future<List<TimeEntry>> allEntries() async {
+    final query = database.select(database.timeEntries)
+      ..orderBy([(t) => OrderingTerm.asc(t.updatedAt)]);
+    final rows = await query.get();
+    return rows.map(timeEntryFromRow).toList();
+  }
+
+  /// 增量查询（云同步拉取用）：`updated_at >= since`（含已删除行）。
+  Future<List<TimeEntry>> entriesSince(DateTime since) async {
+    final query = database.select(database.timeEntries)
+      ..where((t) => t.updatedAt.isBiggerOrEqualValue(utcString(since)))
+      ..orderBy([(t) => OrderingTerm.asc(t.updatedAt)]);
+    final rows = await query.get();
+    return rows.map(timeEntryFromRow).toList();
+  }
+
   // ---------------------------------------------------------------------------
   // 命令：switch / stop
   // ---------------------------------------------------------------------------
@@ -419,6 +436,62 @@ class TimeEntryRepository with RepositoryMappings {
       );
       await _saveEntryRows(database, nextRunning);
     });
+  }
+
+  /// 合并后归一化：LAN/文件 merge 后恢复运行条目唯一性。
+  ///
+  /// 场景：不同设备各有运行中条目（LWW 合并后可能并存多个运行段）——
+  /// 保留 startAt 最晚者为运行条目，其余运行段按时间切段（早于保留者→落 endAt，
+  /// 晚于→软删）。老项目 normalizeRunningEntriesAfterMerge 语义。
+  Future<void> normalizeRunningEntriesAfterMerge() async {
+    final query = database.select(database.timeEntries)
+      ..where((t) => t.endAt.isNull() & t.deletedAt.isNull())
+      ..orderBy([(t) => OrderingTerm.desc(t.startAt)]);
+    final runningRows = await query.get();
+    if (runningRows.length <= 1) return;
+
+    final keep = timeEntryFromRow(runningRows.first);
+    final now = _now();
+    await database.transaction(() async {
+      for (final row in runningRows.skip(1)) {
+        final entry = timeEntryFromRow(row);
+        final normalized = entry.startAt.isBefore(keep.startAt)
+            ? entry.copyWith(endAt: keep.startAt, updatedAt: now)
+            : entry.copyWith(deletedAt: now, updatedAt: now);
+        await _saveEntryRows(database, normalized);
+      }
+    });
+  }
+
+  /// 合并后归一化：已结束跨日条目按本地日重新切段（合并可能带入跨日未切段行）。
+  Future<void> normalizeStoredCrossDayEntries() async {
+    final query = database.select(database.timeEntries)
+      ..where((t) => t.deletedAt.isNull() & t.endAt.isNotNull());
+    final rows = await query.get();
+    for (final row in rows) {
+      final entry = timeEntryFromRow(row);
+      if (_splitClosedEntryByLocalDay(entry, entry.updatedAt).length <= 1) {
+        continue;
+      }
+      await _saveEntry(entry);
+    }
+  }
+
+  /// 合并后归一化：缺快照的条目回填活动名/色（老数据/文件互通缺字段时）。
+  Future<void> backfillMissingEntrySnapshots() async {
+    final query = database.select(database.timeEntries)
+      ..where((t) => t.activityName.equals('') | t.activityColor.isNull());
+    final rows = await query.get();
+    for (final row in rows) {
+      final entry = timeEntryFromRow(row);
+      final withSnapshot =
+          await _activityRepo.entryWithActivitySnapshot(entry, executor: database);
+      if (withSnapshot.activityNameSnapshot == entry.activityNameSnapshot &&
+          withSnapshot.activityColorSnapshot == entry.activityColorSnapshot) {
+        continue;
+      }
+      await _saveEntry(withSnapshot);
+    }
   }
 
   /// 相邻未分配条目合并：startAt <= 前一条 endAt（连续）即合并，

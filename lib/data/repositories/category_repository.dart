@@ -82,6 +82,32 @@ class CategoryRepository with RepositoryMappings {
     }
   }
 
+  /// 增量查询分类（云同步拉取用）：`updated_at >= since`（含已删除行）。
+  Future<AppResult<List<ActivityCategory>>> categoriesSince(DateTime since) async {
+    try {
+      final query = database.select(database.activityCategories)
+        ..where((t) => t.updatedAt.isBiggerOrEqualValue(utcString(since)))
+        ..orderBy([(t) => OrderingTerm.asc(t.updatedAt)]);
+      final rows = await query.get();
+      return AppSuccess(rows.map(categoryFromRow).toList());
+    } catch (e) {
+      return AppFailure('增量查询分类失败：$e');
+    }
+  }
+
+  /// 增量查询分类关联（云同步拉取用）：`updated_at >= since`（含已删除行）。
+  Future<AppResult<List<ActivityCategoryLink>>> linksSince(DateTime since) async {
+    try {
+      final query = database.select(database.activityCategoryLinks)
+        ..where((t) => t.updatedAt.isBiggerOrEqualValue(utcString(since)))
+        ..orderBy([(t) => OrderingTerm.asc(t.updatedAt)]);
+      final rows = await query.get();
+      return AppSuccess(rows.map(linkFromRow).toList());
+    } catch (e) {
+      return AppFailure('增量查询分类关联失败：$e');
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // 写操作
   // ---------------------------------------------------------------------------
