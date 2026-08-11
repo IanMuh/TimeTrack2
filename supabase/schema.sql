@@ -174,7 +174,10 @@ BEGIN
   IF NEW.deleted_at IS NULL THEN
     RETURN NEW;
   END IF;
-  parent_ts := NEW.updated_at;
+  -- 删除时间服务端强制推进（max(客户端时间, 服务端 now)）：客户端若沿用旧
+  -- updated_at 软删（未递增/回填），子孙墓碑时间过旧会被远端较新存活行
+  -- 按 LWW 判胜"复活"；推进后删除事件不早于服务端当前时刻，删除永远赢。
+  parent_ts := greatest(NEW.updated_at, now_utc_iso());
   -- 递归收集子孙（WITH RECURSIVE 穿透已删节点，UNION 防环）。
   FOR descendant IN
     WITH RECURSIVE tree AS (
@@ -207,6 +210,14 @@ FOR EACH ROW
 WHEN (NEW.deleted_at IS NOT NULL AND OLD.deleted_at IS NULL)
 EXECUTE FUNCTION soft_delete_activity_category_children();
 
+-- INSERT 路径级联：云同步场景下客户端可能直接 INSERT deleted_at 已非空的行
+--（新设备首次同步已删除的分类）——级联逻辑对 INSERT 同样生效。
+CREATE TRIGGER trg_activity_category_soft_delete_insert
+AFTER INSERT ON activity_categories
+FOR EACH ROW
+WHEN (NEW.deleted_at IS NOT NULL)
+EXECUTE FUNCTION soft_delete_activity_category_children();
+
 -- 关联表级联软删（分类被删时其 links 一并软删，same updated_at 传播）
 CREATE OR REPLACE FUNCTION soft_delete_category_links()
 RETURNS trigger AS $$
@@ -215,10 +226,11 @@ BEGIN
     RETURN NEW;
   END IF;
   UPDATE activity_category_links
-    SET deleted_at = NEW.updated_at,
+    SET deleted_at = greatest(NEW.updated_at, now_utc_iso()),
         updated_at = CASE
-          WHEN updated_at > NEW.updated_at THEN updated_at
-          ELSE NEW.updated_at
+          WHEN updated_at > greatest(NEW.updated_at, now_utc_iso())
+            THEN updated_at
+          ELSE greatest(NEW.updated_at, now_utc_iso())
         END
     WHERE category_id = NEW.id AND deleted_at IS NULL;
   RETURN NEW;
@@ -229,6 +241,13 @@ CREATE TRIGGER trg_activity_category_links_soft_delete
 AFTER UPDATE OF deleted_at ON activity_categories
 FOR EACH ROW
 WHEN (NEW.deleted_at IS NOT NULL AND OLD.deleted_at IS NULL)
+EXECUTE FUNCTION soft_delete_category_links();
+
+-- INSERT 路径级联（云同步场景下客户端可能直接 INSERT deleted_at 已非空的分类）
+CREATE TRIGGER trg_activity_category_links_soft_delete_insert
+AFTER INSERT ON activity_categories
+FOR EACH ROW
+WHEN (NEW.deleted_at IS NOT NULL)
 EXECUTE FUNCTION soft_delete_category_links();
 
 -- =============================================================
@@ -308,22 +327,49 @@ ALTER TABLE time_entries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE action_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE profile_settings ENABLE ROW LEVEL SECURITY;
 
--- 策略：用户只能读写自己的行（写入强制 user_id = auth.uid()，防越权写他人数据）
-CREATE POLICY activities_all_own ON activities
-  USING (user_id = auth.uid())
+-- 策略：用户只能读写自己的行（写入强制 user_id = auth.uid()，防越权写他人数据）。
+-- 按命令类型拆分 SELECT/INSERT/UPDATE（**不建 FOR DELETE 策略**）：禁止客户端
+-- 物理 DELETE——软删体系要求删除走 UPDATE deleted_at（级联触发器只挂 UPDATE/
+-- INSERT 路径；物理删除会绕过级联并产生悬挂引用，破坏"删除永远赢"）。
+CREATE POLICY activities_select_own ON activities
+  FOR SELECT TO authenticated USING (user_id = auth.uid());
+CREATE POLICY activities_insert_own ON activities
+  FOR INSERT TO authenticated WITH CHECK (user_id = auth.uid());
+CREATE POLICY activities_update_own ON activities
+  FOR UPDATE TO authenticated USING (user_id = auth.uid())
   WITH CHECK (user_id = auth.uid());
-CREATE POLICY activity_categories_all_own ON activity_categories
-  USING (user_id = auth.uid())
+CREATE POLICY activity_categories_select_own ON activity_categories
+  FOR SELECT TO authenticated USING (user_id = auth.uid());
+CREATE POLICY activity_categories_insert_own ON activity_categories
+  FOR INSERT TO authenticated WITH CHECK (user_id = auth.uid());
+CREATE POLICY activity_categories_update_own ON activity_categories
+  FOR UPDATE TO authenticated USING (user_id = auth.uid())
   WITH CHECK (user_id = auth.uid());
-CREATE POLICY activity_category_links_all_own ON activity_category_links
-  USING (user_id = auth.uid())
+CREATE POLICY activity_category_links_select_own ON activity_category_links
+  FOR SELECT TO authenticated USING (user_id = auth.uid());
+CREATE POLICY activity_category_links_insert_own ON activity_category_links
+  FOR INSERT TO authenticated WITH CHECK (user_id = auth.uid());
+CREATE POLICY activity_category_links_update_own ON activity_category_links
+  FOR UPDATE TO authenticated USING (user_id = auth.uid())
   WITH CHECK (user_id = auth.uid());
-CREATE POLICY time_entries_all_own ON time_entries
-  USING (user_id = auth.uid())
+CREATE POLICY time_entries_select_own ON time_entries
+  FOR SELECT TO authenticated USING (user_id = auth.uid());
+CREATE POLICY time_entries_insert_own ON time_entries
+  FOR INSERT TO authenticated WITH CHECK (user_id = auth.uid());
+CREATE POLICY time_entries_update_own ON time_entries
+  FOR UPDATE TO authenticated USING (user_id = auth.uid())
   WITH CHECK (user_id = auth.uid());
-CREATE POLICY action_logs_all_own ON action_logs
-  USING (user_id = auth.uid())
+CREATE POLICY action_logs_select_own ON action_logs
+  FOR SELECT TO authenticated USING (user_id = auth.uid());
+CREATE POLICY action_logs_insert_own ON action_logs
+  FOR INSERT TO authenticated WITH CHECK (user_id = auth.uid());
+CREATE POLICY action_logs_update_own ON action_logs
+  FOR UPDATE TO authenticated USING (user_id = auth.uid())
   WITH CHECK (user_id = auth.uid());
-CREATE POLICY profile_settings_all_own ON profile_settings
-  USING (user_id = auth.uid())
+CREATE POLICY profile_settings_select_own ON profile_settings
+  FOR SELECT TO authenticated USING (user_id = auth.uid());
+CREATE POLICY profile_settings_insert_own ON profile_settings
+  FOR INSERT TO authenticated WITH CHECK (user_id = auth.uid());
+CREATE POLICY profile_settings_update_own ON profile_settings
+  FOR UPDATE TO authenticated USING (user_id = auth.uid())
   WITH CHECK (user_id = auth.uid());

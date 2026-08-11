@@ -120,28 +120,38 @@ void main() {
       }
     });
 
-    test('空值防护：markFailure 空串 / markSuccess 空 target 显式失败', () async {
+    test('空值防护：markFailure 空串 / markSuccess 空 target 显式失败且保留既有状态', () async {
       final db = AppDatabase(NativeDatabase.memory());
       try {
         final store = SyncStatusStore(database: db);
+        final syncedAt = DateTime(2026, 8, 11, 10);
+        await store.markSuccess(syncedAt: syncedAt, target: SyncTarget.supabase);
+        await store.markFailure('真实错误');
+
         expect((await store.markFailure('')).isSuccess, isFalse,
             reason: '空失败原因拒绝（防静默清掉已有错误）');
         expect((await store.markFailure('   ')).isSuccess, isFalse);
         expect(
           (await store.markSuccess(
-            syncedAt: DateTime(2026, 8, 11, 10),
+            syncedAt: DateTime(2026, 8, 11, 10, 30),
             target: '  ',
           ))
               .isSuccess,
           isFalse,
           reason: '空 target 拒绝',
         );
+
+        // 拒绝调用不得产生副作用：错误/游标/目标均保持原值。
+        final status = (await store.read()).requireValue();
+        expect(status.lastError, '真实错误');
+        expect(status.lastSuccessfulSyncAt!.isAtSameMomentAs(syncedAt), isTrue);
+        expect(status.lastTarget, SyncTarget.supabase);
       } finally {
         await db.close();
       }
     });
 
-    test('markSuccess 遇损坏游标显式失败（不静默重置）', () async {
+    test('markSuccess 遇损坏游标显式失败（不静默重置且无部分写入）', () async {
       final db = AppDatabase(NativeDatabase.memory());
       try {
         final store = SyncStatusStore(database: db);
@@ -155,6 +165,52 @@ void main() {
         );
         expect(result.isSuccess, isFalse,
             reason: '损坏游标下 markSuccess 显式失败，不静默重置');
+
+        // 失败路径不得产生部分写入：损坏值保持原样，目标/错误键不被触碰。
+        final rows = await db.select(db.appMetadata).get();
+        expect(
+          rows.where((r) => r.key == AppMetadataKeys.lastSyncAt).single.value,
+          'not-a-date',
+        );
+        expect(
+          rows.any((r) => r.key == AppMetadataKeys.lastSyncTarget),
+          isFalse,
+        );
+        expect(
+          rows.any((r) => r.key == AppMetadataKeys.lastSyncError),
+          isFalse,
+        );
+      } finally {
+        await db.close();
+      }
+    });
+
+    test('游标按 userId 分区：不同用户互不影响，null 回落全局键', () async {
+      final db = AppDatabase(NativeDatabase.memory());
+      try {
+        final store = SyncStatusStore(database: db);
+        final tA = DateTime(2026, 8, 11, 10);
+        final tB = tA.add(const Duration(minutes: 5));
+        await store.markSuccess(syncedAt: tA, target: SyncTarget.supabase,
+            userId: 'user-A');
+        await store.markSuccess(syncedAt: tB, target: SyncTarget.supabase,
+            userId: 'user-B');
+
+        // A/B 各自读到自己游标
+        final aStatus =
+            (await store.read(userId: 'user-A')).requireValue();
+        expect(aStatus.lastSuccessfulSyncAt!.isAtSameMomentAs(tA), isTrue);
+        final bStatus =
+            (await store.read(userId: 'user-B')).requireValue();
+        expect(bStatus.lastSuccessfulSyncAt!.isAtSameMomentAs(tB), isTrue);
+        // null（默认/未登录）不受分区影响
+        final global = (await store.read()).requireValue();
+        expect(global.lastSuccessfulSyncAt, isNull);
+        // B 的写入不覆盖 A（分区隔离）
+        final aAfter =
+            (await store.read(userId: 'user-A')).requireValue();
+        expect(aAfter.lastSuccessfulSyncAt!.isAtSameMomentAs(tA), isTrue,
+            reason: '用户 B 的同步不得推进用户 A 的游标');
       } finally {
         await db.close();
       }

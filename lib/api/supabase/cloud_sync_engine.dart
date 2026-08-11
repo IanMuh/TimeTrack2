@@ -269,16 +269,21 @@ class CloudSyncEngine {
       // 全部成功 → 推进游标 + 清错误 + 记目标。
       // 游标须覆盖本轮**实际处理**的最大行 updated_at（拉取 maxSeen 与
       // 推送 pushedMax 取大）：防同步期间新建/更新的本地行（updated_at 晚于
-      // 游标）未被覆盖而下一轮永久漏推；无拉取无推送时保持原游标。
-      final effectiveCursor =
-          _laterOf(_laterOf(maxSeen, pushedMax), since) ?? DateTime.now();
-      final markResult = await statusStore.markSuccess(
-        syncedAt: effectiveCursor,
-        target: SyncTarget.supabase,
-        userId: userId,
-      );
-      if (markResult case AppFailure<void> failure) {
-        return AppFailure('保存同步游标失败：${failure.message}');
+      // 游标）未被覆盖而下一轮永久漏推。
+      // 空全量同步（since=null 且本轮无拉取无推送）**不推进游标**：保持 null
+      // 让下轮按全量重跑（LWW 幂等安全）——用结束时刻墙钟兜底会让同步期间
+      // 新建的本地行（updated_at 早于该墙钟）永久漏推（action_logs 等追加型
+      // 数据直接丢失）。
+      final effectiveCursor = _laterOf(maxSeen, pushedMax) ?? since;
+      if (effectiveCursor != null) {
+        final markResult = await statusStore.markSuccess(
+          syncedAt: effectiveCursor,
+          target: SyncTarget.supabase,
+          userId: userId,
+        );
+        if (markResult case AppFailure<void> failure) {
+          return AppFailure('保存同步游标失败：${failure.message}');
+        }
       }
       return AppSuccess(SyncReport(
         target: SyncTarget.supabase,

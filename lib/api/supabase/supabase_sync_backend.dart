@@ -54,7 +54,6 @@ bool _isValidSupabaseUrl(String raw) {
 /// ArgumentError 破坏 AppResult 契约。
 class SupabaseSyncBackend implements SyncBackend {
   SupabaseSyncBackend._({required this.engine});
-  SupabaseSyncBackend({required this.engine});
 
   final CloudSyncEngine engine;
 
@@ -187,6 +186,11 @@ class SupabaseSyncBackend implements SyncBackend {
     if (effectiveUserId == null || _lazyClient.auth.currentSession == null) {
       return const AppFailure('请先登录后再同步');
     }
-    return engine.syncNow(userId: effectiveUserId);
+    try {
+      // await 同时捕获同步抛错与异步 error（遵守"任何异常都转 AppResult"契约）。
+      return await engine.syncNow(userId: effectiveUserId);
+    } catch (e) {
+      return AppFailure('同步失败：$e');
+    }
   }
 }

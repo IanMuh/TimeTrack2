@@ -26,11 +26,14 @@ class MemoryRemote implements RemoteTableGateway {
   }
 
   /// 记录在远端存在但未在本地 mock 中的行（fetchRemoteUpdatedAt 用）。
-  /// [idKey] 与 fetchRemoteUpdatedAt 的 idKey 对齐（profile_settings 用 user_id）。
+  /// [idKey] 与 fetchRemoteUpdatedAt 的 idKey 对齐（profile_settings 用 user_id）；
+  /// 需显式传 [userId] 归属（否则该行会因 fetchRowsSince 的缺失 user_id 放行
+  /// 规则被当作完整远端行拉取，产生脏数据）。
   void seedRemoteOnly(String table, String id, DateTime updatedAt,
-      {String idKey = 'id'}) {
+      {String idKey = 'id', String? userId}) {
     tables.putIfAbsent(table, () => {})[id] = {
       idKey: id,
+      'user_id': ?userId,
       'updated_at': updatedAt.toUtc().toIso8601String(),
     };
   }
@@ -102,10 +105,14 @@ class MemoryRemote implements RemoteTableGateway {
     _maybeThrow();
     final result = <String, DateTime>{};
     for (final id in ids) {
-      // 按 idKey 匹配行（与真网关 select(idKey,updated_at) + inFilter 一致；
-      // 存储键为 id ?? user_id，但查询键按 idKey 比较）。
+      // 按 idKey 匹配行 + 按 userId 过滤（与真网关 eq('user_id') + inFilter
+      // 一致；防跨用户数据存在时误报本用户不存在的行）。
       final row = tables[table]?.values
           .where((r) => r[idKey] == id)
+          .where((r) {
+            final rowUser = r['user_id'];
+            return rowUser is! String || rowUser == userId;
+          })
           .firstOrNull;
       if (row != null && row['updated_at'] is String) {
         result[id] = DateTime.parse(row['updated_at']! as String).toUtc();
@@ -124,8 +131,14 @@ class MemoryRemote implements RemoteTableGateway {
     _maybeThrow();
     final target = tables.putIfAbsent(table, () => {});
     for (final row in rows) {
-      // 模拟真网关"强制归属当前用户"：注入 user_id（防测试存下无主行）。
-      final owned = {...row, 'user_id': userId};
+      // 模拟真网关"强制归属当前用户"：注入 user_id（防测试存下无主行）；
+      // updated_at 缺失时补齐（防后续强制解包抛 null-check 异常）。
+      final owned = {
+        ...row,
+        'user_id': userId,
+        if (!row.containsKey('updated_at'))
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
+      };
       // 行身份：常规表用 id；profile_settings 无 id 键（云端主键 user_id）。
       final id = (owned['id'] ?? owned['user_id'])! as String;
       target[id] = owned;
@@ -136,6 +149,7 @@ class MemoryRemote implements RemoteTableGateway {
     final error = nextError;
     if (error != null) {
       nextError = null;
+      failOnCallIndex = null; // 互斥：nextError 触发时清除条件失败钩子
       _callCount += 1; // 与 callLog 计数对齐（防 failOnCallIndex 相对偏移）
       throw error;
     }

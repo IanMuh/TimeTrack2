@@ -132,6 +132,14 @@ class SyncStatusStore with RepositoryMappings {
     if (trimmedTarget.isEmpty) {
       return const AppFailure('同步目标不能为空');
     }
+    // 合理性校验：syncedAt 不得晚于当前时间 + 容差（5 分钟）——远端时钟偏差/
+    // 脏数据产生未来时间戳会推高游标，使后续所有真实同步被判"未推进"而永久
+    // 漏同步（read() 一直返回未来游标，且无恢复路径）。
+    if (syncedAt.toUtc().isAfter(DateTime.now().toUtc().add(
+          const Duration(minutes: 5),
+        ))) {
+      return AppFailure('同步游标时间不合理（晚于当前时间）：$syncedAt');
+    }
     try {
       return await database.transaction(() async {
         final cursorKey = _statusKey(AppMetadataKeys.lastSyncAt, userId);
@@ -146,8 +154,10 @@ class SyncStatusStore with RepositoryMappings {
             // 与 read() 一致：损坏游标显式失败，不静默重置（防回退实际成功点）。
             return AppFailure('同步游标数据损坏，无法解析：${existing.value}');
           }
-          if (!syncedAt.toUtc().isAfter(existingAt)) {
-            // 游标未前进（乱序/重复完成）：不覆盖游标/目标，只清错误。
+          if (syncedAt.toUtc().isBefore(existingAt)) {
+            // **乱序完成**（旧 syncedAt 早于现有游标）：不覆盖游标/目标
+            //（防并发完成时后结束的旧同步回退游标、且目标与游标指向的
+            // 最近成功点不一致），只清错误。
             await database.batch((batch) {
               batch.insert(database.appMetadata, AppMetadataCompanion.insert(
                 key: AppMetadataKeys.lastSyncError,
@@ -157,6 +167,9 @@ class SyncStatusStore with RepositoryMappings {
             return const AppSuccess(null);
           }
         }
+        // 相等时间戳（无新行空跑同步的确定性路径）：游标无需覆盖，但须更新
+        // lastTarget——"最近一次成功同步的目标"应反映本次成功（防连续空跑后
+        // lastTarget 停留在上次目标）。
         await database.batch((batch) {
           batch.insert(database.appMetadata, AppMetadataCompanion.insert(
             key: cursorKey,
@@ -179,9 +192,14 @@ class SyncStatusStore with RepositoryMappings {
   }
 
   /// 生成分区键：userId 非 null 时 `base:<userId>`，否则原键。
+  /// trim + 限制长度防键名膨胀/重复分区（共享设备游标隔离失效）。
   static String _statusKey(String base, String? userId) {
-    if (userId == null || userId.isEmpty) return base;
-    return '$base:$userId';
+    final normalized = userId?.trim();
+    if (normalized == null || normalized.isEmpty) return base;
+    if (normalized.length > 128) {
+      throw ArgumentError('userId 过长，无法生成游标分区键');
+    }
+    return '$base:$normalized';
   }
 
   /// 记录一次失败（只记错误，**不清游标**）。

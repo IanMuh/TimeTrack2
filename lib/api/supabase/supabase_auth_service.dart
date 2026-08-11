@@ -22,15 +22,21 @@ class SupabaseAuthService {
   /// 登录态流（当前用户 id；null = 未登录）。
   ///
   /// - 单例缓存（late final）：getter 多次访问返回**同一流实例**——多组件/
-  ///   多订阅者可同时监听（broadcast），不会因每次新建流而相互独立/冲突；
-  /// - 先订阅底层流、再补发快照：supabase 的 onAuthStateChange 是 broadcast
-  ///   流，新订阅者不会立即收到当前状态；「读快照 → 订阅」窗口内到达的
-  ///   登录/登出事件会被 async* 生成器永久丢失；
+  ///   多订阅者可同时监听（broadcast）；
+  /// - **每个新订阅者立即收到当前快照**：`Stream.multi` 的 onListen 回调
+  ///   对**每个订阅者**各执行一次（首个位置参数），在此补发当前登录态
+  ///   （未登录为 null）——broadcast 不重放已发射事件，不补发则晚订阅者
+  ///   一直收不到快照直到下一次认证事件；
+  /// - 先订阅底层流：supabase 的 onAuthStateChange 是 broadcast 流，「读快照
+  ///   → 订阅」窗口内到达的登录/登出事件会被 async* 生成器永久丢失；
   /// - **distinct 置于合并流之外**：快照与后续事件一并去重（只对底层流做
   ///   distinct 会漏掉快照与首条同 id 事件的重复下发）；
   /// - onError/onDone 转发：底层认证流错误/关闭时上层可见，不静默丢弃。
   late final Stream<String?> authStateStream = Stream<String?>.multi(
     (controller) {
+      // onListen（**每个订阅者**各执行一次）：订阅底层认证流转发事件 +
+      // 补发当前登录态快照（未登录为 null）——broadcast 不重放已发射事件，
+      // 不补发则晚订阅者一直收不到快照直到下一次认证事件。
       final sub = _client.auth.onAuthStateChange
           .map((data) => data.session?.user.id)
           .listen(
@@ -80,9 +86,19 @@ class SupabaseAuthService {
         token: trimmedToken,
         type: OtpType.email,
       );
-      // OTP 一次性凭证已被消费：response.user 缺失时从当前会话兜底取值
-      //（防"服务端已登录但 user 为空"被误判为失败，用户重试必然失败）。
-      final userId = response.user?.id ?? _client.auth.currentUser?.id;
+      var userId = response.user?.id;
+      if (userId == null) {
+        // OTP 一次性凭证已被消费：response.user 缺失时从当前会话兜底取值
+        //（防"服务端已登录但 user 为空"被误判为失败，用户重试必然失败）。
+        // 兜底前校验当前会话用户与本次 OTP 邮箱一致——防此前已登录账号 A、
+        // 本次用邮箱 B 登录而会话尚未切换时，把 A 的 id 误当 B 的登录结果
+        // （身份错配）。
+        final current = _client.auth.currentUser;
+        if (current != null &&
+            current.email?.toLowerCase() == trimmedEmail.toLowerCase()) {
+          userId = current.id;
+        }
+      }
       if (userId == null) {
         return const AppFailure('登录成功但未取得用户信息');
       }

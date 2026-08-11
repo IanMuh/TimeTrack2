@@ -1,3 +1,4 @@
+import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timetrack2/api/supabase/cloud_sync_engine.dart';
@@ -411,6 +412,18 @@ void main() {
     test('成功后推进游标并清错误；失败不清游标且记录错误', () async {
       final h = CloudHarness.create();
       try {
+        // 首轮 seed 远端行：空全量同步不推进游标（防墙钟竞态漏推），
+        // 有实际拉取才建立游标。
+        h.remote.seed(
+          RemoteTables.activities,
+          Activity(
+            id: 'first-seed',
+            name: '初始行',
+            color: 0,
+            isFavorite: false,
+            updatedAt: DateTime(2026, 8, 11, 10),
+          ).toMap(),
+        );
         // 成功一次 → 游标推进
         await h.engine.syncNow(userId: CloudHarness.userId);
         var status = (await h.statusStore.read(userId: CloudHarness.userId)).requireValue();
@@ -462,7 +475,19 @@ void main() {
     test('拉取中途失败：部分行已落库但游标不推进，重试按原游标重拉补齐', () async {
       final h = CloudHarness.create(pageSize: 2);
       try {
-        // 首次全量同步（空远端），推进游标
+        // 首轮 seed 远端行：空全量同步不推进游标（防墙钟竞态漏推），
+        // 有实际拉取才建立游标。
+        h.remote.seed(
+          RemoteTables.activities,
+          Activity(
+            id: 'base-seed',
+            name: '基准行',
+            color: 0,
+            isFavorite: false,
+            updatedAt: DateTime(2026, 8, 11, 10),
+          ).toMap(),
+        );
+        // 首次全量同步（1 行），推进游标
         await h.engine.syncNow(userId: CloudHarness.userId);
         final cursor = (await h.statusStore.read(userId: CloudHarness.userId))
             .requireValue()
@@ -515,7 +540,18 @@ void main() {
     test('增量拉取：since 透传，旧行不重拉、新行拉回', () async {
       final h = CloudHarness.create();
       try {
-        // 首次全量同步（空远端），推进游标
+        // 首轮 seed 远端行：空全量同步不推进游标（防墙钟竞态漏推）。
+        h.remote.seed(
+          RemoteTables.activities,
+          Activity(
+            id: 'incr-base',
+            name: '基准行',
+            color: 0,
+            isFavorite: false,
+            updatedAt: DateTime(2026, 8, 11, 10),
+          ).toMap(),
+        );
+        // 首次全量同步（1 行），推进游标
         await h.engine.syncNow(userId: CloudHarness.userId);
         final cursor = (await h.statusStore.read(userId: CloudHarness.userId))
             .requireValue()
@@ -660,7 +696,18 @@ void main() {
     test('增量边界：updated_at == since 的行不得漏拉（>= since 语义）', () async {
       final h = CloudHarness.create();
       try {
-        // 首次全量（空远端），游标 = 某时刻
+        // 首轮 seed 远端行：空全量同步不推进游标（防墙钟竞态漏推）。
+        h.remote.seed(
+          RemoteTables.activities,
+          Activity(
+            id: 'boundary-base',
+            name: '基准行',
+            color: 0,
+            isFavorite: false,
+            updatedAt: DateTime(2026, 8, 11, 10),
+          ).toMap(),
+        );
+        // 首次全量（1 行），游标 = 该行时刻
         await h.engine.syncNow(userId: CloudHarness.userId);
         final cursor = (await h.statusStore.read(userId: CloudHarness.userId))
             .requireValue()
@@ -697,6 +744,71 @@ void main() {
           hasLength(1),
           reason: '重复拉取 LWW 幂等，不产生重复行',
         );
+      } finally {
+        await h.close();
+      }
+    });
+  });
+
+  group('CloudSyncEngine 跨用户隔离', () {
+    test('远端其他用户的行不拉回本地', () async {
+      final h = CloudHarness.create();
+      try {
+        final otherRow = Activity(
+          id: 'other-user-row',
+          name: '他人活动',
+          color: 0,
+          isFavorite: false,
+          userId: 'other-user',
+          updatedAt: DateTime(2026, 8, 11, 10),
+        );
+        h.remote.seed(RemoteTables.activities, otherRow.toMap());
+
+        await h.engine.syncNow(userId: CloudHarness.userId);
+        final local = (await h.activities.activities()).requireValue();
+        expect(local.map((a) => a.id), isNot(contains('other-user-row')),
+            reason: '远端其他用户的行不得拉回本地（user_id 过滤）');
+      } finally {
+        await h.close();
+      }
+    });
+
+    test('本地其他用户的遗留行不推送、不改归属', () async {
+      final h = CloudHarness.create();
+      try {
+        // 直接插入带其他用户归属的遗留行（共享设备上前一登录用户的数据）。
+        final otherRow = Activity(
+          id: 'legacy-other',
+          name: '遗留他人行',
+          color: 0,
+          isFavorite: false,
+          userId: 'other-user',
+          updatedAt: DateTime(2026, 8, 11, 10),
+        );
+        await h.db.into(h.db.activities).insert(
+              ActivitiesCompanion.insert(
+                id: otherRow.id,
+                userId: const Value('other-user'),
+                name: otherRow.name,
+                color: otherRow.color,
+                isFavorite: const Value(false),
+                updatedAt: otherRow.updatedAt.toUtc().toIso8601String(),
+              ),
+            );
+
+        await h.engine.syncNow(userId: CloudHarness.userId);
+        // 远端不得出现该行（归属过滤 + RLS 语义）
+        expect(
+          h.remote.tables[RemoteTables.activities]?.containsKey('legacy-other') ??
+              false,
+          isFalse,
+          reason: '本地他人遗留行不得被推送（防跨用户数据污染）',
+        );
+        // 本地该行归属不被改写
+        final localRow = await (h.db.select(h.db.activities)
+              ..where((t) => t.id.equals('legacy-other')))
+            .getSingle();
+        expect(localRow.userId, 'other-user', reason: '_withUserId 不改写他人归属');
       } finally {
         await h.close();
       }

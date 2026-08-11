@@ -13,11 +13,13 @@ void main() {
 
   setUpAll(() {
     // 请在项目根目录运行测试（路径依赖当前工作目录）。
+    expect(schemaFile.existsSync(), isTrue,
+        reason: '未找到 supabase/schema.sql——请在项目根目录运行测试');
     raw = schemaFile.readAsStringSync();
-    // 剥离 -- 行注释与 /* ... */ 块注释：防"真实 DDL 被删、关键字残留在注释里"
-    // 时断言假阳性。
+    // 仅剥离**行首**注释（`--` 起始的行）：函数体内的 `--`（如字符串/文本
+    // 常量）是 SQL 语法的一部分，不能剥离；本文件注释均为行首整行。
     final withoutLineComments =
-        raw.replaceAll(RegExp(r'--[^\n]*'), '');
+        raw.replaceAll(RegExp(r'^--[^\n]*', multiLine: true), '');
     final withoutBlockComments = withoutLineComments
         .replaceAll(RegExp(r'/\*[\s\S]*?\*/'), '');
     // 空白归一化（空白细节不参与语义锁定），断言正则大小写不敏感。
@@ -38,8 +40,11 @@ void main() {
         'action_logs',
         'profile_settings',
       ]) {
-        expect(has('CREATE TABLE IF NOT EXISTS $table( |\\))'), isTrue,
-            reason: '缺少表 $table');
+        expect(
+          has('CREATE TABLE IF NOT EXISTS $table'
+              r'( |\))'),
+          isTrue,
+          reason: '缺少表 $table');
       }
     });
 
@@ -107,27 +112,44 @@ void main() {
         isTrue,
         reason: '递归软删函数必须被触发器挂载',
       );
-      expect(has(r'WITH RECURSIVE TREE AS'), isTrue,
-          reason: '递归 CTE 穿透已删节点');
-      // UNION 限定在 CTE 递归分支附近（配合 WITH RECURSIVE ... UNION 片段）
-      expect(has(r'WITH RECURSIVE TREE AS \( [^;]*UNION( ALL)? '), isTrue,
-          reason: '递归分支 UNION 去重防环');
-      expect(has(r'WHERE PARENT_ID = NEW\.ID'), isTrue);
+      // 递归逻辑限定在目标函数体内（负向前瞻拒绝跨定界符）：
+      // WITH RECURSIVE + CTE 种子（WHERE PARENT_ID = NEW.ID）+ 递归分支 UNION。
+      // 注意顺序：种子 SELECT 的 WHERE 在 UNION **之前**。
+      const withinFunction = r'(?:(?!\$[A-Za-z0-9_]*\$)[\s\S])*?';
+      expect(
+        has(
+          r'FUNCTION SOFT_DELETE_ACTIVITY_CATEGORY_CHILDREN\(\)'
+          r'[\s\S]*?\$[A-Za-z0-9_]*\$' '$withinFunction'
+          r'WITH RECURSIVE TREE AS \( ' '$withinFunction'
+          r'WHERE PARENT_ID = NEW\.ID' '$withinFunction'
+          r'UNION( ALL)? ' '$withinFunction'
+          r'\$[A-Za-z0-9_]*\$',
+        ),
+        isTrue,
+        reason: '递归删除函数体内必须保留 WITH RECURSIVE 递归 CTE'
+            '（种子 WHERE PARENT_ID = NEW.ID + UNION 防环）',
+      );
     });
 
     test('子孙 updated_at 用 greatest(自身, 父行) 保持 LWW 传播（限定函数体）', () {
       // 通用美元引用定界符（$function$ / $$ 等）成对圈定函数体，并用
       // 负向前瞻 `(?:(?!\$[A-Za-z0-9_]*\$)[\s\S])*?` 拒绝跨过定界符——
       // 防目标文本在函数体之外（如其他函数）时仍匹配成功。
+      // 同时接受两种等价写法：CASE WHEN ... THEN ... ELSE ... 或 GREATEST(...)。
+      const within = r'(?:(?!\$[A-Za-z0-9_]*\$)[\s\S])*?';
+      final lwwPattern =
+          r'(?:WHEN UPDATED_AT > PARENT_TS THEN UPDATED_AT' '$within'
+          r'ELSE PARENT_TS'
+              r'|GREATEST\(UPDATED_AT, PARENT_TS\)'
+              r'|GREATEST\(PARENT_TS, UPDATED_AT\)'
+              r')';
       expect(
-        has(r'FUNCTION SOFT_DELETE_ACTIVITY_CATEGORY_CHILDREN\(\)'
-            r'[\s\S]*?\$[A-Za-z0-9_]*\$'
-            r'(?:(?!\$[A-Za-z0-9_]*\$)[\s\S])*?'
-            r'WHEN UPDATED_AT > PARENT_TS THEN UPDATED_AT'
-            r'(?:(?!\$[A-Za-z0-9_]*\$)[\s\S])*?'
-            r'ELSE PARENT_TS'
-            r'(?:(?!\$[A-Za-z0-9_]*\$)[\s\S])*?'
-            r'\$[A-Za-z0-9_]*\$'),
+        has(
+          r'FUNCTION SOFT_DELETE_ACTIVITY_CATEGORY_CHILDREN\(\)'
+          r'[\s\S]*?\$[A-Za-z0-9_]*\$' '$within'
+          '$lwwPattern' '$within'
+          r'\$[A-Za-z0-9_]*\$',
+        ),
         isTrue,
         reason: '递归删除函数内必须保留 LWW（greatest）传播',
       );
@@ -157,7 +179,9 @@ void main() {
       }
     });
 
-    test('6 表逐一有策略且绑定 auth.uid()（USING + WITH CHECK）', () {
+    test('6 表逐一有 SELECT/INSERT/UPDATE 策略且绑定 auth.uid()', () {
+      // 按命令类型拆分（FOR SELECT/INSERT/UPDATE）；**不建 FOR DELETE**——
+      // 物理删除会绕过级联软删产生悬挂引用，破坏"删除永远赢"。
       for (final table in [
         'activities',
         'activity_categories',
@@ -166,12 +190,36 @@ void main() {
         'action_logs',
         'profile_settings',
       ]) {
+        // SELECT：USING 绑定
         expect(
-          has("CREATE POLICY ${table}_ALL_OWN ON $table [^;]*"
+          has("CREATE POLICY ${table}_SELECT_OWN ON $table [^;]*"
+              "FOR SELECT TO AUTHENTICATED [^;]*"
+              r'USING \(USER_ID = AUTH\.UID\(\)\)[^;]*'),
+          isTrue,
+          reason: '$table 缺 SELECT 策略（USING 绑定 auth.uid()）',
+        );
+        // INSERT：WITH CHECK 绑定
+        expect(
+          has("CREATE POLICY ${table}_INSERT_OWN ON $table [^;]*"
+              "FOR INSERT TO AUTHENTICATED [^;]*"
+              r'WITH CHECK \(USER_ID = AUTH\.UID\(\)\)[^;]*'),
+          isTrue,
+          reason: '$table 缺 INSERT 策略（WITH CHECK 绑定 auth.uid()）',
+        );
+        // UPDATE：USING + WITH CHECK 绑定
+        expect(
+          has("CREATE POLICY ${table}_UPDATE_OWN ON $table [^;]*"
+              "FOR UPDATE TO AUTHENTICATED [^;]*"
               r'USING \(USER_ID = AUTH\.UID\(\)\) [^;]*'
               r'WITH CHECK \(USER_ID = AUTH\.UID\(\)\)[^;]*'),
           isTrue,
-          reason: '$table 策略未绑定 auth.uid()',
+          reason: '$table 缺 UPDATE 策略（USING + WITH CHECK 绑定）',
+        );
+        // 禁止 FOR DELETE 策略（防物理删除绕过软删体系）
+        expect(
+          has("CREATE POLICY ${table}_DELETE_OWN ON $table"),
+          isFalse,
+          reason: '$table 不应有 DELETE 策略（软删体系禁物理删除）',
         );
       }
     });

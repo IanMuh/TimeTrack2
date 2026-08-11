@@ -104,10 +104,15 @@ class SupabaseRemoteTables with RepositoryMappings implements RemoteTableGateway
     // 与 fetchRowsSince/upsertRows 的表级判定对齐：profile_settings 无 id 列，
     // 漏传 idKey 时自动回退 user_id（防 PGRST204 报错或空结果静默漏同步）。
     final effectiveIdKey = table == 'profile_settings' ? 'user_id' : idKey;
-    // 列名白名单（纵深防御）：idKey 直接拼入 select/inFilter 列名，必须限定
-    // 为合法身份列——业务表仅 id、profile_settings 仅 user_id（防列名注入）。
-    if (effectiveIdKey != 'id' && effectiveIdKey != 'user_id') {
-      throw ArgumentError.value(idKey, 'idKey', '必须为 id 或 user_id');
+    // 列名白名单按表收紧（纵深防御 + fail-fast）：业务表仅 id、
+    // profile_settings 仅 user_id——防误用 idKey 导致空查询被误判
+    // "远端无此行"而推旧覆盖新。
+    if (table == 'profile_settings') {
+      if (effectiveIdKey != 'user_id') {
+        throw ArgumentError.value(idKey, 'idKey', 'profile_settings 仅允许 user_id');
+      }
+    } else if (effectiveIdKey != 'id') {
+      throw ArgumentError.value(idKey, 'idKey', '业务表仅允许 id');
     }
     final result = <String, DateTime>{};
     for (var start = 0; start < ids.length; start += _idBatchSize) {
@@ -130,11 +135,11 @@ class SupabaseRemoteTables with RepositoryMappings implements RemoteTableGateway
         if (id is String && updatedAt is String) {
           final parsed = DateTime.tryParse(updatedAt);
           if (parsed == null) {
-            // 脏数据解析失败：不静默跳过（防下游误判"远端无此行"推旧覆盖新）。
-            stderr.writeln(
-              '[supabase-sync] $table 行 $id 的 updated_at 无法解析：$updatedAt',
+            // fail-stop：脏数据不可静默跳过——否则调用方误判"远端无此行"
+            // 而推本地旧行覆盖远端新数据（LWW 数据静默丢失）。
+            throw FormatException(
+              '[$table] 行 $id 的 updated_at 无法解析：$updatedAt',
             );
-            continue;
           }
           // 返回 UTC（与网关其余路径 UTC 语义一致；toLocal 会让返回值随
           // 机器时区偏移，下游与 UTC 值比较时产生整段偏差）。
@@ -211,13 +216,12 @@ class SupabaseRemoteTables with RepositoryMappings implements RemoteTableGateway
     }
   }
 
-  /// 判定错误码是否不可重试：HTTP 4xx、PostgREST 错误码（PGRST*）、
-  /// PG SQLSTATE。缺失 code 视为协议/解析失败：与"协议失败不重试"契约一致
-  /// （网络瞬时错误已由 SocketException/ClientException/TimeoutException 分支
-  /// 处理），避免对永久性错误空等退避。
-  /// SQLSTATE 类码通常**以数字开头**（23505、22P02、42P01），格式为 5 位
-  /// 字母数字。多数 SQLSTATE 是永久性错误（保守不重试）；瞬时类（40001/
-  /// 40P01/57P01/08006 等）PostgREST 通常已转成 HTTP 5xx/连接异常走其它分支。
+  /// 判定错误码是否**不可重试**：HTTP 4xx、PostgREST 错误码（PGRST*）与
+  /// **永久性 PG SQLSTATE**（23xxx 约束冲突、42xxx 语法/未定义对象、
+  /// 22xxx 数据异常等）。缺失 code 视为协议/解析失败（不重试——网络瞬时
+  /// 错误已由 SocketException/ClientException/TimeoutException 分支处理）。
+  /// 瞬时类 SQLSTATE（08xxx 连接失败、40xxx 事务回滚、53xxx 资源不足、
+  /// 57xxx 运维干预）走退避重试（稍后重试很可能成功）。
   static bool _isNonRetryableCode(String? code) {
     if (code == null) return true;
     final statusCode = int.tryParse(code);
@@ -225,6 +229,29 @@ class SupabaseRemoteTables with RepositoryMappings implements RemoteTableGateway
       return true;
     }
     if (code.startsWith('PGRST')) return true;
-    return RegExp(r'^[0-9A-Z]{5}$').hasMatch(code);
+    if (!RegExp(r'^[0-9A-Z]{5}$').hasMatch(code)) return false; // 未知格式：可重试
+    // PG SQLSTATE 前两位为类码：永久类 → 不可重试；瞬时类 → 可重试。
+    const permanentClasses = {
+      '22', // 数据异常（非法值/非法文本表示）
+      '23', // 约束冲突（唯一/外键/非空）
+      '42', // 语法错误/未定义对象/列
+      '2F', // 排序规则
+      '28', // 权限
+      '3D', // 非法目录名
+      '3F', // 非法 schema 名
+      '40', // 事务回滚——注意 40001/40P01 是瞬时类，单独处理
+      '25', // 非法事务状态
+    };
+    final cls = code.substring(0, 2);
+    if (permanentClasses.contains(cls)) {
+      // 40 类中的 40001（serialization_failure）/40P01（deadlock_detected）
+      // 是瞬时错误，应可重试。
+      if (cls == '40' &&
+          (code == '40001' || code == '40P01')) {
+        return false;
+      }
+      return true;
+    }
+    return false; // 其他（08/53/57 等瞬时类）→ 可重试
   }
 }
