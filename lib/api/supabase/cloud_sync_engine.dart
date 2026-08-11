@@ -13,6 +13,8 @@
 /// activity_category_links → time_entries → action_logs → profile_settings。
 library;
 
+import 'dart:io' show stderr;
+
 import '../../data/database/app_database.dart' hide ProfileSettings;
 import '../../data/repositories/action_log_repository.dart';
 import '../../data/repositories/activity_repository.dart';
@@ -151,19 +153,32 @@ class CloudSyncEngine {
       pulledRows += logsPull.count;
       maxSeen = _laterOf(maxSeen, logsPull.maxSeen);
       // profile_settings 单例行（每用户至多一行；分页逻辑与其余表一致）。
-      // 网关 fetchRowsSince 已按 user_id=userId 过滤：返回行必属当前用户，
-      // 直接 LWW 应用——**不做本地归属跳过**（共享设备上前一用户遗留本地
-      // 单例行时，若因本地归属他人而跳过，当前用户自己的远端配置永远拉
-      // 不下来）。
+      // 网关 fetchRowsSince 已按 user_id=userId 过滤：返回行必属当前用户。
+      // 拉取归属保护（与推送侧守卫对称）：本地 id=1 单例行若已归属**他人**且
+      // 本地 updatedAt 晚于远端（上一用户有未同步修改），不得被当前用户远端
+      // 行覆盖（防上一用户未同步修改被静默销毁）；本地归属他人但本地更旧时
+      // 照常应用（当前用户远端配置应生效）。
       final settingsPull =
           await _pullTable(
             table: RemoteTables.profileSettings,
             userId: userId,
             since: since,
             apply: (row) async {
-              final applied = await settings.applyIfRemoteNewer(
-                ProfileSettings.fromMap(row),
-              );
+              final remoteSettings = ProfileSettings.fromMap(row);
+              final localRow = await (database.select(database.profileSettings)
+                    ..where((t) => t.id.equals(1)))
+                  .getSingleOrNull();
+              if (localRow != null &&
+                  localRow.userId != null &&
+                  localRow.userId != userId) {
+                final localUpdated = DateTime.tryParse(localRow.updatedAt);
+                final remoteUpdated = remoteSettings.updatedAt;
+                if (localUpdated != null &&
+                    !localUpdated.isBefore(remoteUpdated.toUtc())) {
+                  return const AppSuccess(null); // 他人遗留 + 本地更晚：跳过
+                }
+              }
+              final applied = await settings.applyIfRemoteNewer(remoteSettings);
               if (applied case AppFailure<ProfileSettings> failure) {
                 throw StateError('拉取表 profile_settings 失败：${failure.message}');
               }
@@ -275,12 +290,20 @@ class CloudSyncEngine {
       // **上限截断**：maxSeen 来自远端行时间戳（另一设备时钟），远端时钟快于
       // 本机 >5 分钟时 future 游标会被 markSuccess 拒绝（每轮全量重拉+永久
       // 失败），或 5 分钟内被写入 future 游标导致本地新行永久漏推——截断到
-      // startedAt 防未来游标毒化。注：wasFullSync=false 时 since 必非 null，
-      // wasFullSync=true 时 startedAt 非 null——effectiveCursor 恒非 null。
+      // startedAt 防未来游标毒化。**since 晚于 startedAt（上轮写入 future
+      // 游标）同样截断**：空增量无法修复 future 游标时，startedAt..since 窗口
+      // 内新建/更新的行 updated_at < 游标会被 `>= since` 永久漏掉——本轮截断
+      // 重处理该窗口（代价仅重复 LWW，不丢数据）。
       final processedMax = _laterOf(maxSeen, pushedMax);
-      final effectiveCursor = processedMax != null && processedMax.isAfter(startedAt)
+      // since 在增量同步（wasFullSync=false）时必非 null：晚于 startedAt
+      //（上轮写入 future 游标）则截断。
+      final fallback = wasFullSync
           ? startedAt
-          : (processedMax ?? (wasFullSync ? startedAt : since));
+          : (since.isAfter(startedAt) ? startedAt : since);
+      final effectiveCursor =
+          processedMax != null && processedMax.isAfter(startedAt)
+              ? startedAt
+              : (processedMax ?? fallback);
       final markResult = await statusStore.markSuccess(
         syncedAt: effectiveCursor,
         target: SyncTarget.supabase,
@@ -298,12 +321,16 @@ class CloudSyncEngine {
     } catch (e) {
       // 任何未预期异常：记失败（不清游标），返回可读原因。
       // markFailure 自身失败不得掩盖原始同步异常（防 catch 内二次抛错）。
+      // 失败消息脱敏：原始异常可能携带网关实现细节/SQL/内部路径——只对用户
+      // 返回可读摘要，详细原因写日志（stderr）。
+      stderr.writeln('[cloud-sync] 同步失败：$e');
+      final summary = e.toString().split('\n').first;
       try {
-        await statusStore.markFailure('同步失败：$e', userId: userId);
+        await statusStore.markFailure('同步失败：$summary', userId: userId);
       } catch (_) {
         // 状态写入失败：不影响原始错误返回。
       }
-      return AppFailure('同步失败：$e');
+      return AppFailure('同步失败：$summary');
     } finally {
       _inFlight = false;
     }
@@ -339,10 +366,12 @@ class CloudSyncEngine {
       );
       for (final row in result.rows) {
         // 防御性归属校验：不信任网关过滤（RLS 误配/实现缺陷可能返回他人行）——
-        // 归属他人的行跳过，且不计 count/maxSeen（防他人软删墓碑按"删除永远赢"
-        // 删掉本地行、或游标吞掉归属冲突增量窗口）。
+        // **非 null 他人 user_id 的行跳过**（真正跨用户风险：他人软删墓碑按
+        // "删除永远赢"删掉本地行）；null=未归属遗留数据（本地登录前创建/网关
+        // 历史宽松数据）可拉取，与未归属行的本地认领语义一致——不计 count/
+        // maxSeen，防游标吞掉归属冲突增量窗口。
         final rowUser = row['user_id'];
-        if (rowUser is String && rowUser != userId) {
+        if (rowUser != null && rowUser != userId) {
           continue;
         }
         if (skipWhen != null && await skipWhen(row)) {

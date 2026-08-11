@@ -86,12 +86,13 @@ class SupabaseSyncBackend implements SyncBackend {
   SupabaseAuthService get _lazyAuth => _auth ??= SupabaseAuthService(client: _lazyClient);
 
   /// 重置懒加载的 client/auth（登出清理会话/测试重建场景用）。
-  /// 一并失效在途同步：防后续 syncNow 复用陈旧的 in-flight future
-  ///（返回上一会话旧 userId 的同步结果）。
+  /// 一并失效在途同步：置空引用 + 递增会话代数（防后续 syncNow 复用陈旧的
+  /// in-flight future、防旧同步结果被采纳）。
   void reset() {
     _client = null;
     _auth = null;
     _syncInFlight = null;
+    _epoch += 1;
   }
 
   @override
@@ -163,72 +164,87 @@ class SupabaseSyncBackend implements SyncBackend {
 
   Future<AppResult<SyncReport>>? _syncInFlight;
 
+  /// 会话代数：登出/reset 时递增，在途同步返回后校验代数未变才提交结果——
+  /// 防"已登出后旧同步仍以旧 userId 执行写库、其结果被新调用方采纳"。
+  int _epoch = 0;
+
   Future<AppResult<SyncReport>> _runSync() async {
-    final userId = currentUserId;
-    if (userId == null) {
-      return const AppFailure('请先登录后再同步');
-    }
-    // currentUser 非空 ≠ token 有效：JWT 过期但 refresh token 仍有效的会话
-    // 应先尝试刷新；刷新失败才提示重登。
-    final session = _lazyClient.auth.currentSession;
-    if (session == null) {
-      return const AppFailure('请先登录后再同步');
-    }
-    final expiresAt = session.expiresAt;
-    // expiresAt 缺失时无法确认 token 有效性：按需刷新兜底（防已过期/未知
-    // 状态的 token 直接交给引擎读写）。提前 30s 视为过期——临界过期的 token
-    // 可能在同步执行中途失效导致请求 401，提前刷新留出余量。
-    final expired = expiresAt == null ||
-        DateTime.fromMillisecondsSinceEpoch(expiresAt * 1000)
-            .isBefore(DateTime.now().add(const Duration(seconds: 30)));
-    if (expired) {
-      try {
-        final refreshed = await _lazyClient.auth.refreshSession();
-        if (refreshed.session == null) {
-          return const AppFailure('登录已过期，请重新登录');
-        }
-      } on AuthException catch (e) {
-        // 区分"会话失效"与"网络瞬时故障"：优先用结构化错误码判定（文案易变），
-        // code 缺失时再以消息特征兜底。会话失效类 code 白名单尽量全（含
-        // session_not_found/user_not_found/bad_jwt/token_expired 等常见值）。
-        final code = e.code?.toLowerCase();
-        if (code != null) {
-          if (code.contains('refresh_token') ||
-              code.contains('invalid_grant') ||
-              code.contains('expired') ||
-              code.contains('session_not_found') ||
-              code.contains('user_not_found') ||
-              code.contains('bad_jwt') ||
-              code.contains('token')) {
+    final epoch = _epoch;
+    try {
+      final userId = currentUserId;
+      if (userId == null) {
+        return const AppFailure('请先登录后再同步');
+      }
+      // currentUser 非空 ≠ token 有效：JWT 过期但 refresh token 仍有效的会话
+      // 应先尝试刷新；刷新失败才提示重登。
+      final session = _lazyClient.auth.currentSession;
+      if (session == null) {
+        return const AppFailure('请先登录后再同步');
+      }
+      final expiresAt = session.expiresAt;
+      // expiresAt 缺失时无法确认 token 有效性：按需刷新兜底（防已过期/未知
+      // 状态的 token 直接交给引擎读写）。提前 30s 视为过期——临界过期的 token
+      // 可能在同步执行中途失效导致请求 401，提前刷新留出余量。
+      final expired = expiresAt == null ||
+          DateTime.fromMillisecondsSinceEpoch(expiresAt * 1000)
+              .isBefore(DateTime.now().add(const Duration(seconds: 30)));
+      if (expired) {
+        try {
+          final refreshed = await _lazyClient.auth.refreshSession();
+          if (refreshed.session == null) {
             return const AppFailure('登录已过期，请重新登录');
           }
+        } on AuthException catch (e) {
+          // 区分"会话失效"与"网络瞬时故障"：优先用结构化错误码判定（文案易变），
+          // code 缺失时再以消息特征兜底。会话失效类 code 白名单尽量全（含
+          // session_not_found/user_not_found/bad_jwt/token_expired 等常见值）。
+          final code = e.code?.toLowerCase();
+          if (code != null) {
+            if (code.contains('refresh_token') ||
+                code.contains('invalid_grant') ||
+                code.contains('expired') ||
+                code.contains('session_not_found') ||
+                code.contains('user_not_found') ||
+                code.contains('bad_jwt') ||
+                code.contains('token')) {
+              return const AppFailure('登录已过期，请重新登录');
+            }
+            return const AppFailure('登录状态异常，请重新登录或稍后重试');
+          }
+          final msg = e.message.toLowerCase();
+          if (msg.contains('expired') ||
+              msg.contains('invalid') ||
+              msg.contains('refresh_token') ||
+              msg.contains('session_not_found') ||
+              msg.contains('user_not_found') ||
+              msg.contains('bad_jwt')) {
+            return const AppFailure('登录已过期，请重新登录');
+          }
+          return const AppFailure('登录状态异常，请重新登录或稍后重试');
+        } catch (_) {
+          // 兜底：任何异常都转为 AppResult（遵守 SyncBackend 契约）。
           return const AppFailure('网络不可用，请稍后重试');
         }
-        final msg = e.message.toLowerCase();
-        if (msg.contains('expired') ||
-            msg.contains('invalid') ||
-            msg.contains('refresh_token') ||
-            msg.contains('session_not_found') ||
-            msg.contains('user_not_found') ||
-            msg.contains('bad_jwt')) {
-          return const AppFailure('登录已过期，请重新登录');
-        }
-        return const AppFailure('网络不可用，请稍后重试');
-      } catch (_) {
-        // 兜底：任何异常都转为 AppResult（遵守 SyncBackend 契约）。
-        return const AppFailure('网络不可用，请稍后重试');
       }
-    }
-    // 刷新（或校验）后重新获取 userId：并发登出/换号（await 挂起点交错）
-    // 时不得用刷新前的旧 userId 同步（防按已登出/已切换身份写入数据）。
-    final effectiveUserId = currentUserId;
-    if (effectiveUserId == null || _lazyClient.auth.currentSession == null) {
-      return const AppFailure('请先登录后再同步');
-    }
-    try {
-      // await 同时捕获同步抛错与异步 error（遵守"任何异常都转 AppResult"契约）。
-      return await engine.syncNow(userId: effectiveUserId);
+      // 刷新（或校验）后重新获取 userId：并发登出/换号（await 挂起点交错）
+      // 时不得用刷新前的旧 userId 同步（防按已登出/已切换身份写入数据）。
+      final effectiveUserId = currentUserId;
+      if (effectiveUserId == null || _lazyClient.auth.currentSession == null) {
+        return const AppFailure('请先登录后再同步');
+      }
+      try {
+        // await 同时捕获同步抛错与异步 error（遵守"任何异常都转 AppResult"契约）。
+        final result = await engine.syncNow(userId: effectiveUserId);
+        // 会话代数校验：登出/reset 已发生（epoch 递增）→ 旧同步结果丢弃。
+        if (epoch != _epoch) {
+          return const AppFailure('会话已切换，本次同步结果已丢弃');
+        }
+        return result;
+      } catch (e) {
+        return AppFailure('同步失败：$e');
+      }
     } catch (e) {
+      // 整段 _runSync 兜底（懒初始化/客户端构造/GoTrue 读取等异常也转 AppResult）。
       return AppFailure('同步失败：$e');
     }
   }

@@ -74,8 +74,10 @@ class MemoryRemote implements RemoteTableGateway {
     if (pageSize < 1) {
       throw ArgumentError.value(pageSize, 'pageSize', '必须为正数');
     }
-    if (pageSize > 1000) {
-      throw ArgumentError.value(pageSize, 'pageSize', '不能超过 1000');
+    if (pageSize > 999) {
+      // 与真网关上限（_remoteMaxPageSize=999）对齐——mock 放行 1000 会让测试
+      // 通过而生产抛 ArgumentError（假阳性）。
+      throw ArgumentError.value(pageSize, 'pageSize', '不能超过 999');
     }
     if (page < 0) {
       throw ArgumentError.value(page, 'page', '不能为负数');
@@ -113,7 +115,10 @@ class MemoryRemote implements RemoteTableGateway {
     final end = (start + pageSize) < rows.length ? start + pageSize : rows.length;
     // hasMore 语义与真网关一致：末页恰好满页时返回 true（触发一次多余空页
     // 请求以结束），忠实模拟契约。
-    final pageRows = rows.sublist(start, end);
+    // 每行浅拷贝（真网关返回 JSON 反序列化的独立副本——防调用方原地修改
+    // mock 内部状态绕过写路径）。
+    final pageRows =
+        rows.sublist(start, end).map(Map<String, Object?>.of).toList();
     return RemoteRowsPage(
       rows: pageRows,
       hasMore: pageRows.length == pageSize,
@@ -177,6 +182,10 @@ class MemoryRemote implements RemoteTableGateway {
     _maybeThrow();
     onBeforePush?.call(table, userId);
     final target = tables.putIfAbsent(table, () => {});
+
+    // 先对全部行做完整校验（防"先写 A 再抛 B"的部分写入——真网关同 chunk
+    // 失败是整请求 4xx 不落任何行；mock 应与之对齐）。
+    final prepared = <(String, Map<String, Object?>)>[];
     for (final row in rows) {
       // 与真网关一致：强制注入 user_id；**显式要求 updated_at 存在且可解析**
       //（真网关不会补齐——静默补会让"调用方漏传 updated_at"的 bug 在测试
@@ -191,16 +200,25 @@ class MemoryRemote implements RemoteTableGateway {
       if (id == null) {
         throw ArgumentError('upsertRows: 行必须携带 id 或 user_id（行内容：$row）');
       }
-      // 写入前归属校验：若目标 id 已有行且归属他人（跨用户场景），拒绝覆盖
-      //（与 fetch 严格过滤对齐，模拟真网关 RLS 拒绝）。
+      // 归属校验（写入前统一检查，防部分写入）：
+      // - 目标行归属他人 → 拒绝覆盖（与 fetch 严格过滤对齐，模拟 RLS 拒绝）；
+      // - 严格模式下目标行为无主行（user_id 为 null）→ 拒绝认领（防任意用户
+      //   覆盖无主行，与 fetch 严格模式过滤对称）。
       final existing = target[id as String];
       final existingUser = existing?['user_id'];
-      if (existing != null && existingUser is String && existingUser != userId) {
+      final claimedConflict =
+          existing != null && existingUser is String && existingUser != userId;
+      final unownedConflict =
+          existing != null && existingUser == null && !allowUnownedRows;
+      if (claimedConflict || unownedConflict) {
         throw StateError(
-          'upsertRows: 目标行 $id 归属他人（$existingUser），拒绝覆盖',
+          'upsertRows: 目标行 $id 归属冲突（${existingUser ?? '无主'}），拒绝覆盖',
         );
       }
-      target[id] = owned;
+      prepared.add((id, owned));
+    }
+    for (final (id, owned) in prepared) {
+      target[id] = Map.of(owned); // 深拷贝（防外部改原 Map 影响 mock 状态）
       lastPushedIds.add(id);
     }
   }

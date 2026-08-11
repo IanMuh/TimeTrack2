@@ -223,11 +223,16 @@ class SyncStatusStore with RepositoryMappings {
     }
   }
 
-  /// 生成分区键：userId 非 null 时 `base:<userId>`，否则原键。
+  /// 生成分区键：userId 非 null 时 `base:<userId>`，否则原键（全局）。
   /// trim + 限制长度防键名膨胀/重复分区（共享设备游标隔离失效）。
+  /// **空/空白 userId 显式抛错**：与 null 区分（null=未登录用全局键；
+  /// 空串是调用方 bug，静默回落全局键会污染未登录状态）。
   static String _statusKey(String base, String? userId) {
-    final normalized = userId?.trim();
-    if (normalized == null || normalized.isEmpty) return base;
+    if (userId == null) return base;
+    final normalized = userId.trim();
+    if (normalized.isEmpty) {
+      throw ArgumentError('userId 不能为空字符串，需显式传 null 使用全局键');
+    }
     if (normalized.length > 128) {
       throw ArgumentError('userId 过长，无法生成游标分区键');
     }
@@ -255,6 +260,29 @@ class SyncStatusStore with RepositoryMappings {
       return const AppSuccess(null);
     } catch (e) {
       return AppFailure('保存同步失败状态失败：$e');
+    }
+  }
+
+  /// 重置该用户分区的同步状态（游标 + 目标 + 错误）。
+  ///
+  /// 供"游标损坏/未来游标需重置"场景的恢复入口：清除分区键（userId 为 null
+  /// 时清全局键），下次同步将从全量重新开始（LWW 幂等，不丢数据）。
+  Future<AppResult<void>> reset({String? userId}) async {
+    try {
+      await database.transaction(() async {
+        for (final base in [
+          AppMetadataKeys.lastSyncAt,
+          AppMetadataKeys.lastSyncTarget,
+          AppMetadataKeys.lastSyncError,
+        ]) {
+          await (database.delete(database.appMetadata)
+                ..where((t) => t.key.equals(_statusKey(base, userId))))
+              .go();
+        }
+      });
+      return const AppSuccess(null);
+    } catch (e) {
+      return AppFailure('重置同步状态失败：$e');
     }
   }
 }

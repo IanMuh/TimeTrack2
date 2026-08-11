@@ -86,6 +86,9 @@ class SyncReport {
 class NoopSyncBackend implements SyncBackend {
   NoopSyncBackend();
 
+  /// 未配置时的统一失败文案（4 处引用同一常量，防漏改导致消息不一致）。
+  static const unconfiguredError = '云同步未配置（缺少 SUPABASE_URL/ANON_KEY）';
+
   @override
   bool get isConfigured => false;
 
@@ -102,23 +105,23 @@ class NoopSyncBackend implements SyncBackend {
 
   @override
   Future<AppResult<void>> sendMagicLink(String email) async {
-    return const AppFailure('云同步未配置（缺少 SUPABASE_URL/ANON_KEY）');
+    return const AppFailure(unconfiguredError);
   }
 
   @override
   Future<AppResult<String>> verifyEmailOtp(String email, String token) async {
-    return const AppFailure('云同步未配置（缺少 SUPABASE_URL/ANON_KEY）');
+    return const AppFailure(unconfiguredError);
   }
 
   @override
   Future<AppResult<SyncReport>> syncNow() async {
-    return const AppFailure('云同步未配置（缺少 SUPABASE_URL/ANON_KEY）');
+    return const AppFailure(unconfiguredError);
   }
 
   @override
   Future<AppResult<void>> signOut() async {
     // 未配置场景无会话可登出：与其余方法一致返回失败，防调用方误判云端登出
     // 成功而继续执行本地状态清理（本文件契约：失败语义由编排层统一处理）。
-    return const AppFailure('云同步未配置（缺少 SUPABASE_URL/ANON_KEY）');
+    return const AppFailure(unconfiguredError);
   }
 }

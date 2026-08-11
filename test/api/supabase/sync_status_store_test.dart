@@ -317,6 +317,55 @@ void main() {
         await db.close();
       }
     });
+
+    test('reset：清除分区游标/目标/错误（损坏/未来游标恢复入口）', () async {
+      final db = AppDatabase(NativeDatabase.memory());
+      try {
+        final store = SyncStatusStore(database: db);
+        // 先建立状态：损坏游标 + 目标 + 错误
+        await db.into(db.appMetadata).insert(AppMetadataCompanion.insert(
+          key: AppMetadataKeys.lastSyncAt,
+          value: 'not-a-date',
+        ));
+        await db.into(db.appMetadata).insert(AppMetadataCompanion.insert(
+          key: AppMetadataKeys.lastSyncTarget,
+          value: SyncTarget.supabase,
+        ));
+        await store.markFailure('损坏前的失败');
+        // read 此时失败（损坏游标）
+        expect((await store.read()).isSuccess, isFalse);
+
+        // reset 后恢复可用（从未同步状态）
+        expect((await store.reset()).isSuccess, isTrue);
+        final status = (await store.read()).requireValue();
+        expect(status.lastSuccessfulSyncAt, isNull, reason: '游标已清除');
+        expect(status.lastTarget, isNull);
+        expect(status.lastError, isNull, reason: '错误已清除');
+
+        // reset 后可正常 markSuccess（恢复到可用状态）
+        final t = DateTime.now().toUtc().subtract(const Duration(minutes: 30));
+        expect(
+          (await store.markSuccess(
+            syncedAt: t,
+            target: SyncTarget.supabase,
+          ))
+              .isSuccess,
+          isTrue,
+        );
+        // reset 按分区：user-A 的 reset 不影响 user-B
+        await store.markSuccess(
+          syncedAt: t.add(const Duration(minutes: 1)),
+          target: SyncTarget.supabase,
+          userId: 'user-B',
+        );
+        expect((await store.reset(userId: 'user-A')).isSuccess, isTrue);
+        final bAfter = (await store.read(userId: 'user-B')).requireValue();
+        expect(bAfter.lastSuccessfulSyncAt, isNotNull,
+            reason: 'user-A 的 reset 不得清 user-B 状态');
+      } finally {
+        await db.close();
+      }
+    });
   });
 
   group('SyncBackend / NoopSyncBackend', () {

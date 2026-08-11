@@ -22,7 +22,7 @@ class CloudHarness {
   CloudHarness._(this.db, this.activities, this.categories, this.settings,
       this.actionLogs, this.entries, this.statusStore, this.remote, this.engine);
 
-  static CloudHarness create({int pageSize = 1000}) {
+  static CloudHarness create({int pageSize = 999}) {
     final db = AppDatabase(NativeDatabase.memory());
     final activities = ActivityRepository(database: db);
     final categories = CategoryRepository(database: db);
@@ -386,6 +386,60 @@ void main() {
         (await h.engine.syncNow(userId: CloudHarness.userId)).requireValue();
         expect(h.remote.lastPushedIds, isNot(contains(a.id)),
             reason: '远端严格更新 ⇒ 推送跳过（本地旧值不覆盖远端新值）');
+      } finally {
+        await h.close();
+      }
+    });
+
+    test('本地更新推送：远端内容与 updated_at 均推进为本地新值，下一轮不重复推送', () async {
+      final h = CloudHarness.create();
+      try {
+        // 首次全量同步：本地 A 推送到远端。
+        final a = (await h.activities.createActivity(
+          name: '原始名',
+          color: 0xffaabbcc,
+        ))
+            .requireValue();
+        (await h.engine.syncNow(userId: CloudHarness.userId)).requireValue();
+        final pushedBefore =
+            h.remote.tables[RemoteTables.activities]![a.id]!;
+        final remoteBefore =
+            DateTime.parse(pushedBefore['updated_at']! as String);
+
+        // 本地更新活动（改名）→ 推送后远端内容/updated_at 均为本地新值。
+        final updated = (await h.activities.updateActivity(
+          activity: a,
+          name: '新名',
+          color: 0xff112233,
+        ))
+            .requireValue();
+        (await h.engine.syncNow(userId: CloudHarness.userId)).requireValue();
+        final pushedAfter =
+            h.remote.tables[RemoteTables.activities]![a.id]!;
+        expect(pushedAfter['name'], '新名', reason: '远端内容被本地更新覆盖');
+        final remoteAfter =
+            DateTime.parse(pushedAfter['updated_at']! as String);
+        expect(remoteAfter.isAfter(remoteBefore), isTrue,
+            reason: '远端 updated_at 推进为本地新值');
+        expect(remoteAfter.isAtSameMomentAs(updated.updatedAt), isTrue);
+
+        // 下一轮：`>= since` 包含式游标 + 相等时间戳写回（已接受的设计取舍，
+        // LWW 幂等）——重复推送不改变远端值，收敛稳定。
+        final nameBefore = pushedAfter['name'];
+        final atBefore =
+            DateTime.parse(pushedAfter['updated_at']! as String);
+        h.remote.lastPushedIds.clear();
+        (await h.engine.syncNow(userId: CloudHarness.userId)).requireValue();
+        final stable =
+            h.remote.tables[RemoteTables.activities]![a.id]!;
+        expect(stable['name'], nameBefore,
+            reason: '重复推送不改变远端内容（LWW 幂等收敛）');
+        expect(
+          DateTime.parse(stable['updated_at']! as String)
+              .isAtSameMomentAs(atBefore),
+          isTrue,
+          reason: '重复推送不改变远端 updated_at',
+        );
       } finally {
         await h.close();
       }
@@ -776,10 +830,19 @@ void main() {
           reason: '拒绝消息应明确为"同步进行中"',
         );
 
-        // 游标不因并发回退：最终游标非空
-        final status = (await h.statusStore.read(userId: CloudHarness.userId)).requireValue();
+        // 游标不因并发回退：胜出调用游标 = seed 行时刻（2026-08-11 10:00，
+        // maxSeen=10:00 < startedAt 不截断），且无错误污染（被拒调用不写状态）。
+        final status = (await h.statusStore.read(userId: CloudHarness.userId))
+            .requireValue();
         expect(status.lastSuccessfulSyncAt, isNotNull,
             reason: '并发结束后游标有效');
+        expect(
+          status.lastSuccessfulSyncAt!.isAtSameMomentAs(DateTime(2026, 8, 11, 10)),
+          isTrue,
+          reason: '胜出调用游标 = 远端 seed 行时刻',
+        );
+        expect(status.lastError, isNull,
+            reason: '被拒调用不得污染 lastError');
       } finally {
         await h.close();
       }
