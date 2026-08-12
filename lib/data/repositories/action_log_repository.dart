@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'dart:io' show stderr;
 
 import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';

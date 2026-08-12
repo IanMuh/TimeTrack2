@@ -28,6 +28,12 @@ class SupabaseAuthService {
   StreamSubscription<String?>? _authSub;
   final List<StreamController<String?>> _authControllers = [];
 
+  /// 是否已 [dispose]（**r53**）：dispose 后本服务不可复用——onListen 若
+  /// 在 dispose 后重建底层订阅，会把已释放的旧 client 资源重新拉起（恰好
+  /// 复活 dispose 要消除的泄漏）；置位后新订阅者的 controller 立即关闭
+  ///（订阅者收到 onDone，不重建 [_authSub]）。
+  bool _disposed = false;
+
   /// 登录态流（当前用户 id；null = 未登录）。
   ///
   /// - 单例缓存（late final）：getter 多次访问返回**同一流实例**——多组件/
@@ -44,6 +50,12 @@ class SupabaseAuthService {
     (controller) {
       // onListen（**每个订阅者**各执行一次）：登记订阅者 + 首个订阅者创建
       // 底层订阅，补发当前登录态快照。
+      // **dispose 后强制不可用（r53）**：已 dispose 的服务不得重建底层订阅
+      //（防旧 client 资源被复活）；新订阅者的 controller 直接关闭。
+      if (_disposed) {
+        controller.close();
+        return;
+      }
       _authControllers.add(controller);
       _authSub ??= _client.auth.onAuthStateChange
           .map((data) => data.session?.user.id)
@@ -98,8 +110,10 @@ class SupabaseAuthService {
   /// SupabaseSyncBackend.reset）而无人取消监听，旧 client 及其底层资源被
   /// 持续引用，每次登录/登出循环都会累积一条旧订阅与一个旧 client（资源
   /// 持续增长）。本方法主动释放，解除"必须等监听者全部取消"的隐式依赖。
-  /// 调用后本服务不再可用（流已关闭、底层订阅已取消），调用方须丢弃引用。
+  /// 调用后本服务不再可用（流已关闭、底层订阅已取消、新订阅直接关闭——
+  /// 见 [_disposed]），调用方须丢弃引用。
   void dispose() {
+    _disposed = true;
     final sub = _authSub;
     _authSub = null;
     unawaited(sub?.cancel());

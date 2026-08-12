@@ -186,6 +186,11 @@ class SyncStatusStore with RepositoryMappings {
   /// 游标与 lastTarget（防并发完成时后结束的旧同步回退游标、且目标与游标指向
   /// 的最近成功点不一致）；乱序/相等分支**保留 lastError**——本次成功并未晚于
   /// 失败时刻（游标未推进），清空会抹掉真实失败记录（"错误反映最近一次失败"）。
+  /// **自愈回退例外（r53 注明）**：乱序分支对**容差内未来游标**（时钟偏快
+  /// 写入、随后时钟校正）放行覆盖回退——此时游标**回退而非推进**、且清空
+  /// lastError（自愈视为恢复正常：未来游标场景下同步曾因空跑"成功"而不产生
+  /// 真实失败记录；若未来游标写入后、校正前存在过真实失败，其记录会被本
+  /// 自愈清掉，属已接受的权衡——自愈优先于保留陈旧失败记录）。
   Future<AppResult<void>> markSuccess({
     required DateTime syncedAt,
     required String target,

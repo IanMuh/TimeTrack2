@@ -471,25 +471,28 @@ void main() {
       // **容差窗口边界锁定**：生产守卫是 `isAfter(now + 5min)`——+4min 应
       // 接受、恰好 +5min（isAfter 为 false）应接受、+6min 应拒绝。若实现把
       // 容差误改为 0 或 10 分钟，现有"仅 +30min 拒绝"用例无法检出。
+      // **flaky 防抖（r53）**：守卫按**每次 markSuccess 调用时刻**的 now
+      // 计算——base 只在开头捕获会让 +6min 用例在慢速 CI/时钟回拨下漂移
+      //（base+6min 不再晚于 now+5min 而误接受）；每次调用前用最新 now
+      // 构造 syncedAt，把漂移窗口缩到微秒级。
       final db = AppDatabase(NativeDatabase.memory());
       try {
         final store = SyncStatusStore(database: db);
-        final base = DateTime.now().toUtc();
         // +4min：接受（游标写入成功）
         final plus4 = await store.markSuccess(
-          syncedAt: base.add(const Duration(minutes: 4)),
+          syncedAt: DateTime.now().toUtc().add(const Duration(minutes: 4)),
           target: SyncTarget.supabase,
         );
         expect(plus4.isSuccess, isTrue, reason: '+4min（容差内）接受');
         // 恰好 +5min：isAfter(now+5min) 为 false → 接受
         final plus5 = await store.markSuccess(
-          syncedAt: base.add(const Duration(minutes: 5)),
+          syncedAt: DateTime.now().toUtc().add(const Duration(minutes: 5)),
           target: SyncTarget.supabase,
         );
         expect(plus5.isSuccess, isTrue, reason: '恰好 +5min（isAfter 边界）接受');
         // +6min：拒绝（超出容差）
         final plus6 = await store.markSuccess(
-          syncedAt: base.add(const Duration(minutes: 6)),
+          syncedAt: DateTime.now().toUtc().add(const Duration(minutes: 6)),
           target: SyncTarget.supabase,
         );
         expect(plus6.isSuccess, isFalse, reason: '+6min（超容差）拒绝');
@@ -513,6 +516,15 @@ void main() {
             .toUtc()
             .add(const Duration(minutes: 3));
         await store.markSuccess(syncedAt: skewed, target: SyncTarget.supabase);
+        // **前置条件锁定（r53）**：偏快游标确已落库且被容差接受——防未来
+        // 实现收窄写入/读取容差时后续 markSuccess(now) 平凡成功、本测试
+        // 未真正覆盖自愈分支也通过（假阳性）。
+        final seeded = (await store.read()).requireValue();
+        expect(
+          seeded.lastSuccessfulSyncAt!.isAtSameMomentAs(skewed),
+          isTrue,
+          reason: '偏快游标已写入（自愈分支前置条件）',
+        );
         // 时钟校正后：真实同步时刻（now）覆盖回退未来游标。
         final healed = await store.markSuccess(
           syncedAt: DateTime.now().toUtc(),

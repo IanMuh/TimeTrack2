@@ -437,19 +437,41 @@ void main() {
       // 软删活动本身，不清理 links）。
       expect(has(r'SOFT_DELETE_ACTIVITY_LINKS'), isTrue);
       expect(has(r'WHERE ACTIVITY_ID = NEW\.ID AND DELETED_AT IS NULL'), isTrue);
-      expect(has(r'EXECUTE FUNCTION SOFT_DELETE_ACTIVITY_LINKS\(\)'), isTrue,
-          reason: '活动 links 级联函数必须被触发器挂载（UPDATE 与 INSERT 两路径）');
+      // **双路径分别锚定（r53）**：UPDATE 路径（AFTER UPDATE OF deleted_at）
+      // 与 INSERT 路径（AFTER INSERT，云同步直插已删行）各须挂载一次——只查
+      // 出现次数 ≥1 会在未来删掉其中一个触发器时静默通过。
+      expect(
+        has(r'AFTER UPDATE OF DELETED_AT ON ACTIVITIES [\s\S]*'
+            r'EXECUTE FUNCTION SOFT_DELETE_ACTIVITY_LINKS\(\)'),
+        isTrue,
+        reason: '活动 links 级联 UPDATE 路径必须挂载',
+      );
+      expect(
+        has(r'AFTER INSERT ON ACTIVITIES [\s\S]*'
+            r'EXECUTE FUNCTION SOFT_DELETE_ACTIVITY_LINKS\(\)'),
+        isTrue,
+        reason: '活动 links 级联 INSERT 路径必须挂载',
+      );
     });
 
     test('递归软删嵌套触发守卫（r52：pg_trigger_depth）', () {
       // 深层分类树（几十~上百层）下无守卫会逐层嵌套触发、每层重扫完整子树
       //（O(n·d) 重复扫描，可能触发 stack depth limit）——顶层调用已处理整棵
       // 子树，嵌套调用（本函数级联 UPDATE 子孙再次触发）须直接返回。
+      // **范围限定（r53）**：把函数体（`$$` 定界符之间）提取后在其中断言
+      // 守卫——裸 `[\s\S]*` 贪婪匹配可跨出本函数、命中 schema 后续任意位置
+      //（未来其他函数引入同文本时会误绿）。
+      final fnMatch = RegExp(
+        r'CREATE (?:OR REPLACE )?FUNCTION SOFT_DELETE_ACTIVITY_CATEGORY_CHILDREN\(\)'
+        r'[\s\S]*?\$[A-Za-z0-9_]*\$([\s\S]*?)\$[A-Za-z0-9_]*\$',
+        caseSensitive: false,
+      ).firstMatch(schema);
+      expect(fnMatch, isNotNull, reason: '递归软删函数定义存在');
       expect(
-        has(r'FUNCTION SOFT_DELETE_ACTIVITY_CATEGORY_CHILDREN\(\) [\s\S]*'
-            r'PG_TRIGGER_DEPTH\(\) > 1'),
+        RegExp(r'PG_TRIGGER_DEPTH\(\)\s*>\s*1', caseSensitive: false)
+            .hasMatch(fnMatch!.group(1)!),
         isTrue,
-        reason: '递归软删函数必须带 pg_trigger_depth()>1 嵌套守卫',
+        reason: '递归软删函数体内必须带 pg_trigger_depth()>1 嵌套守卫',
       );
     });
 

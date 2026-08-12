@@ -13,6 +13,7 @@ import 'package:timetrack2/data/repositories/time_entry_repository.dart';
 import 'package:timetrack2/viewmodels/action_log.dart';
 import 'package:timetrack2/viewmodels/activity.dart';
 import 'package:timetrack2/viewmodels/activity_category.dart';
+import 'package:timetrack2/viewmodels/profile_settings.dart' as settings_vm;
 import 'package:timetrack2/viewmodels/time_entry.dart';
 
 import 'memory_remote.dart';
@@ -279,16 +280,18 @@ void main() {
       }
     });
 
-    test('平局复活语义（r52 文档化）：相等时间戳 + 远端存活更晚 → 删除被撤销', () async {
-      // **复活语义（deliberate LWW）**：多设备场景"本地墓碑 + 远端存活更新"
-      // 且时间戳相等时，pull 按"远端非删除 + 时间不早于本地"不应用、push 按
-      // 防旧跳过——行保持本地删除（远端存活行被本地删除**撤销**，即"复活"）。
-      // 这是行级 LWW 的有意语义（删除与存活是同权重状态、时间戳决胜；远端
-      // 存活更新更晚则远端赢、本地删除被撤销），不是缺陷——显式锁定防误改。
+    test('相等时间戳 + 远端存活 → 本地删除保留（复活需严格更晚，r52 补锁）', () async {
+      // **平局决胜语义（deliberate LWW，r53 标题修正）**：多设备场景"本地
+      // 墓碑 + 远端存活行"且时间戳**相等**时——pull 按"远端非删除 + 时间不
+      // 早于本地"不应用（删除保留）；push 按"远端严格更晚才跳过"的防旧规则
+      // **照常写回本地墓碑**（`isAfter` 对相等为 false，不跳过）——远端存活
+      // 行被本地删除**撤销**（复活语义）。这是行级 LWW 的有意行为（删除与
+      // 存活同权重、时间戳决胜；删除方须**严格更晚**才赢），不是缺陷——
+      // 显式锁定防误改。
       final h = CloudHarness.create();
       try {
         final t0 = DateTime(2026, 8, 11, 10).toUtc();
-        // 远端存活行：时间戳 t0（与本地墓碑相等）。
+        // 远端存活行：时间戳 t0（与本地墓碑相等——平局）。
         final remoteLive = Activity(
           id: 'revive-1',
           name: '远端存活',
@@ -312,8 +315,8 @@ void main() {
               mode: InsertMode.insertOrReplace,
             );
         await h.engine.syncNow(userId: CloudHarness.userId);
-        // 平局 + 远端存活：本地删除保留（远端存活行不覆盖本地墓碑；推送防旧
-        // 也不写回）——"复活"语义：删除方需严格更晚才赢。
+        // 平局 + 远端存活：本地删除保留；push 相等时间戳照常写回墓碑（防旧
+        // 仅对"远端严格更晚"生效）——"复活"语义：删除方需严格更晚才赢。
         final withDeleted =
             (await h.activities.activities(includeDeleted: true)).requireValue();
         final row = withDeleted.firstWhere((a) => a.id == 'revive-1');
@@ -905,6 +908,45 @@ void main() {
           55,
           reason: '远端更新的配置 LWW 覆盖本地',
         );
+      } finally {
+        await h.close();
+      }
+    });
+
+    test('profile_settings 归属冲突跳过（r53）：他人遗留 + 本地更晚 → 不计拉取', () async {
+      // **skipWhen 语义回归守护**：r52 把归属冲突跳过从 apply 内提前返回
+      // 移入 skipWhen（不计 count/maxSeen，防游标吞掉增量窗口）——若无
+      // 用例锁定，回归为"apply 内返回"（旧的计数/推进游标语义）时测试仍
+      // 全绿。本用例锁定：跳过行不计入 pulledRows、他人遗留配置不被覆盖。
+      final h = CloudHarness.create();
+      try {
+        // 本地：他人归属的遗留配置（save 会以 now 推进 updatedAt → 本地更晚）。
+        await h.settings.save(
+          (await h.settings.settings()).requireValue().copyWith(
+                userId: 'other-user',
+                reminderMinutes: 10,
+              ),
+        );
+        // 远端：当前用户的配置行（时间戳为过去 → 本地更晚 → 触发跳过）。
+        final remoteSettings = settings_vm.ProfileSettings(
+          userId: CloudHarness.userId,
+          reminderMinutes: 55,
+          timezone: (await h.settings.settings()).requireValue().timezone,
+          updatedAt:
+              DateTime.now().toUtc().subtract(const Duration(hours: 1)),
+        );
+        h.remote.seed(RemoteTables.profileSettings, remoteSettings.toMap());
+
+        final report =
+            (await h.engine.syncNow(userId: CloudHarness.userId)).requireValue();
+        // 跳过：本地他人遗留配置未被当前用户远端行覆盖（防上一用户未同步
+        // 修改被静默销毁）。
+        final local = (await h.settings.settings()).requireValue();
+        expect(local.userId, 'other-user', reason: '他人遗留配置未被覆盖');
+        expect(local.reminderMinutes, 10, reason: '本地更新值保留');
+        // 跳过行不计入 pulledRows（skipWhen 契约：不计 count/maxSeen）。
+        expect(report.pulledRows, 0,
+            reason: '归属冲突跳过行不计入拉取行数');
       } finally {
         await h.close();
       }

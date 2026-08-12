@@ -105,6 +105,39 @@ void main() {
       };
 
   group('authStateStream 共享订阅状态机', () {
+    test('dispose 后新订阅者收到 onDone、底层订阅不复活（r53 补锁）', () async {
+      // **dispose 回归守护**：r52 的 dispose 释放底层订阅是泄漏修复——但
+      // authStateStream 是 late final 缓存的 multi 流，dispose 后若旧引用被
+      // 重新订阅，onListen 可能基于旧 client 重建 gotrue 订阅（复活泄漏）。
+      // 本用例锁定：dispose 后新订阅者立即收到 onDone（controller 关闭、
+      // 不重建底层订阅）。
+      final service = buildService(mockAuthClient());
+      // 先建立活跃订阅（触发底层 gotrue 订阅创建）。
+      final pre = <String?>[];
+      final subPre = service.authStateStream.listen(pre.add);
+      addTearDown(subPre.cancel);
+      await pumpEventQueue();
+      expect(pre, [null], reason: 'dispose 前订阅正常收到快照');
+      service.dispose();
+
+      // dispose 后新订阅：收到 onDone 而非重新补发快照（防底层订阅复活）。
+      final done = Completer<void>();
+      final postEvents = <String?>[];
+      final subPost = service.authStateStream.listen(
+        postEvents.add,
+        onDone: () {
+          if (!done.isCompleted) done.complete();
+        },
+      );
+      addTearDown(subPost.cancel);
+      await done.future.timeout(
+        const Duration(seconds: 5),
+        onTimeout: () => throw TestFailure('dispose 后新订阅者未收到 onDone'),
+      );
+      expect(postEvents, isEmpty,
+          reason: 'dispose 后订阅不得再收到事件（服务不可复用）');
+    });
+
     test('getter 多次访问返回同一流实例（单例契约）', () {
       // **单例锁定（r47 #7）**：生产代码中不同组件跨调用订阅同一状态源——若
       // getter 每次新建 Stream.multi，各组件拿到独立数据流、事件互相丢失；

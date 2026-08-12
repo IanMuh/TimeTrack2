@@ -529,6 +529,9 @@ class MemoryRemote implements RemoteTableGateway {
     _callCount += 1;
     if (isTarget) {
       failOnCallIndex = null; // 单次生效
+      // **r53 闭环**：序号钩子命中同样清除语义钩子——防 failOnCall 残留到
+      // 后续匹配调用（如重试轮次）再次抛错（与上方两分支的互斥语义对称）。
+      failOnCall = null;
       throw Exception('mock 条件失败（调用序号 ${_callCount - 1}）');
     }
   }
