@@ -366,8 +366,14 @@ void main() {
       // 会失败（用全小写入参则归一化删除后断言仍通过、判别力丢失；sendMagicLink
       // 用例只守护自己那侧，无法覆盖本路径）。
       expect(verifyRequest, isNotNull, reason: 'verifyEmailOtp 必须发出 /verify 请求');
-      final verifyBody =
-          jsonDecode(verifyRequest!.body) as Map<String, dynamic>;
+      // **请求体类型断言（r53）**：先断言 JSON 对象再取值——若 SDK 升级后
+      // 请求体变为非 JSON 对象（空 body/数组/字符串），直接强转抛裸 TypeError、
+      // 信息不含请求路径与用例上下文（与本文件"升级失败要大声且可诊断"目标
+      // 相悖）；类型断言让失败可诊断。
+      final decoded = jsonDecode(verifyRequest!.body);
+      expect(decoded, isA<Map<String, dynamic>>(),
+          reason: 'verify 请求体必须为 JSON 对象');
+      final verifyBody = decoded as Map<String, dynamic>;
       expect(verifyBody['email'], 'new@example.com',
           reason: 'verify 请求体 email 已小写归一化');
       expect(verifyBody['token'], '123456', reason: 'verify 请求体携带原样 token');
@@ -467,7 +473,12 @@ void main() {
       expect(request.method, 'POST', reason: '发码为 POST');
       // 邮箱小写归一化由服务层完成（SDK 按小写存储邮箱）——请求体必须携带
       // 小写邮箱（防大小写不一致导致 OTP 记录匹配失败）。
-      final body = jsonDecode(request.body) as Map<String, dynamic>;
+      // **请求体类型断言（r53）**：先断言 JSON 对象再取值（防 SDK 升级后
+      // 请求体形态变化时抛裸 TypeError、难以诊断）。
+      final decoded = jsonDecode(request.body);
+      expect(decoded, isA<Map<String, dynamic>>(),
+          reason: '发码请求体必须为 JSON 对象');
+      final body = decoded as Map<String, dynamic>;
       expect(body['email'], 'user@example.com', reason: '邮箱已小写归一化');
       // **create_user 语义（r47 #6）**：锁定 shouldCreateUser: false——防误
       // 创建用户（应用只允许已存在账号登录，注册流程另有通道）。

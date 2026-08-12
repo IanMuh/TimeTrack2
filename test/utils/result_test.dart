@@ -104,7 +104,11 @@ void main() {
 
     test('toString 输出', () {
       expect(const AppSuccess<int>(1).toString(), 'AppSuccess(value: 1)');
-      expect(const AppFailure<int>('x').toString(), 'AppFailure(message: x)');
+      expect(const AppFailure<int>('x').toString(), 'AppFailure(message: x, code: null)');
+      expect(
+        const AppFailure<int>('x', code: 'unconfigured').toString(),
+        'AppFailure(message: x, code: unconfigured)',
+      );
     });
 
     test('AppFailure 非空约束：空串消息断言拒绝', () {

@@ -429,6 +429,40 @@ void main() {
       expect(has(r'EXECUTE FUNCTION SOFT_DELETE_CATEGORY_LINKS\(\)'), isTrue,
           reason: 'links 级联函数必须被触发器挂载');
     });
+
+    test('活动软删级联 links（r52，与分类级联对称）', () {
+      // 活动软删后指向它的活跃 link 行残留会：(1) 同步持续分发已失效关联；
+      // (2) 残留 link 被本地更新推送时 validate_link_ref 因活动已软删而报错、
+      // 阻塞同步——须与分类级联对称地软删活动 links（本地 deleteActivity 只
+      // 软删活动本身，不清理 links）。
+      expect(has(r'SOFT_DELETE_ACTIVITY_LINKS'), isTrue);
+      expect(has(r'WHERE ACTIVITY_ID = NEW\.ID AND DELETED_AT IS NULL'), isTrue);
+      expect(has(r'EXECUTE FUNCTION SOFT_DELETE_ACTIVITY_LINKS\(\)'), isTrue,
+          reason: '活动 links 级联函数必须被触发器挂载（UPDATE 与 INSERT 两路径）');
+    });
+
+    test('递归软删嵌套触发守卫（r52：pg_trigger_depth）', () {
+      // 深层分类树（几十~上百层）下无守卫会逐层嵌套触发、每层重扫完整子树
+      //（O(n·d) 重复扫描，可能触发 stack depth limit）——顶层调用已处理整棵
+      // 子树，嵌套调用（本函数级联 UPDATE 子孙再次触发）须直接返回。
+      expect(
+        has(r'FUNCTION SOFT_DELETE_ACTIVITY_CATEGORY_CHILDREN\(\) [\s\S]*'
+            r'PG_TRIGGER_DEPTH\(\) > 1'),
+        isTrue,
+        reason: '递归软删函数必须带 pg_trigger_depth()>1 嵌套守卫',
+      );
+    });
+
+    test('assert_ref_exists 显式归属校验（r52：user_id = auth.uid()）', () {
+      // 引用存在性校验不得只依赖 RLS 隐式过滤（SECURITY DEFINER/service_role
+      // 旁路/RLS 配置演进时跨用户引用会写入成功）——动态 SQL 须显式限定
+      // 当前用户（防跨用户引用；无 auth 上下文路径恒拒绝，属显式行为）。
+      expect(
+        has(r"WHERE ID = \$1 AND DELETED_AT IS NULL AND USER_ID = AUTH\.UID\(\)"),
+        isTrue,
+        reason: 'assert_ref_exists 动态 SQL 必须显式校验 user_id = auth.uid()',
+      );
+    });
   });
 
   group('RLS 与外键校验', () {
@@ -457,9 +491,14 @@ void main() {
         'action_logs',
         'profile_settings',
       ]) {
+        // **标识符转义（r53）**：表名/策略名经 RegExp.escape 后插入正则——
+        // 当前标识符均为字母/下划线不触发元字符，但未来引入含 `.`/`+`/`(`
+        // 等元字符的标识符时，未转义插值会静默改变断言语义（如 `.` 匹配
+        // 任意字符）。
+        final t = RegExp.escape(table);
         // SELECT：USING 绑定
         expect(
-          has("CREATE POLICY ${table}_SELECT_OWN ON $table [^;]*"
+          has("CREATE POLICY ${RegExp.escape('${table}_SELECT_OWN')} ON $t [^;]*"
               "FOR SELECT TO AUTHENTICATED [^;]*"
               r'USING \(USER_ID = AUTH\.UID\(\)\)[^;]*'),
           isTrue,
@@ -467,7 +506,7 @@ void main() {
         );
         // INSERT：WITH CHECK 绑定
         expect(
-          has("CREATE POLICY ${table}_INSERT_OWN ON $table [^;]*"
+          has("CREATE POLICY ${RegExp.escape('${table}_INSERT_OWN')} ON $t [^;]*"
               "FOR INSERT TO AUTHENTICATED [^;]*"
               r'WITH CHECK \(USER_ID = AUTH\.UID\(\)\)[^;]*'),
           isTrue,
@@ -475,7 +514,7 @@ void main() {
         );
         // UPDATE：USING + WITH CHECK 绑定
         expect(
-          has("CREATE POLICY ${table}_UPDATE_OWN ON $table [^;]*"
+          has("CREATE POLICY ${RegExp.escape('${table}_UPDATE_OWN')} ON $t [^;]*"
               "FOR UPDATE TO AUTHENTICATED [^;]*"
               r'USING \(USER_ID = AUTH\.UID\(\)\) [^;]*'
               r'WITH CHECK \(USER_ID = AUTH\.UID\(\)\)[^;]*'),
@@ -486,7 +525,7 @@ void main() {
         // 绕过软删体系（不只查固定命名 _DELETE_OWN）。
         // `\b` 词边界防 `FOR ALLOW` 类前缀被 `FOR ALL` 误匹配（假失败）。
         expect(
-          has("CREATE POLICY [^;]* ON $table [^;]*"
+          has("CREATE POLICY [^;]* ON $t [^;]*"
               r'FOR (DELETE|ALL)\b[^;]*'),
           isFalse,
           reason: '$table 不应有任何物理删除策略（软删体系禁物理删除）',

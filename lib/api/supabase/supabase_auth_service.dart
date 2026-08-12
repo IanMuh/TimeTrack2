@@ -91,10 +91,36 @@ class SupabaseAuthService {
     }
   }
 
+  /// 释放底层 gotrue 订阅并关闭所有控制器（**登出/reset 生命周期终结用**）。
+  ///
+  /// **为何需要（r52）**：[_authSub] 对 gotrue `onAuthStateChange` 的订阅在
+  /// 最后一个监听者取消前不会被释放——若服务被 reset 弃用（见
+  /// SupabaseSyncBackend.reset）而无人取消监听，旧 client 及其底层资源被
+  /// 持续引用，每次登录/登出循环都会累积一条旧订阅与一个旧 client（资源
+  /// 持续增长）。本方法主动释放，解除"必须等监听者全部取消"的隐式依赖。
+  /// 调用后本服务不再可用（流已关闭、底层订阅已取消），调用方须丢弃引用。
+  void dispose() {
+    final sub = _authSub;
+    _authSub = null;
+    unawaited(sub?.cancel());
+    final controllers = List.of(_authControllers);
+    _authControllers.clear();
+    for (final controller in controllers) {
+      if (!controller.isClosed) controller.close();
+    }
+  }
+
   /// 当前登录用户 id（未登录为 null）。
   String? get currentUserId => _client.auth.currentUser?.id;
 
   /// 发送邮箱 OTP（验证码/魔法链接，由服务端配置决定）。
+  ///
+  /// **安全说明（r53，用户枚举风险如实声明）**：`shouldCreateUser: false` 下
+  /// 服务端对已注册邮箱返回 200、未注册邮箱返回 404 → 失败映射——**成功/失败
+  /// 的二元结果本身可被攻击者用于探测邮箱是否已注册**（对候选邮箱逐个调用
+  /// 可区分注册状态）。失败文案已泛化（不泄露服务端细节），但二元结果无法
+  /// 通过文案隐藏；若产品不希望暴露注册状态，须服务端配合统一响应 + 限流
+  ///（当前接受该暴露面，应用仅面向已注册用户登录）。
   Future<AppResult<void>> sendMagicLink(String email) async {
     try {
       // GoTrue 默认小写规范化存储邮箱：统一 trim + toLowerCase（防发码/校验

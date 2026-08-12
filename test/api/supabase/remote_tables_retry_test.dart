@@ -21,11 +21,12 @@ import 'package:timetrack2/api/supabase/supabase_remote_tables.dart';
 ///   POST 路径；GET 路径存在 SDK 内层重试叠加，无法关闭，只做语义断言）；
 /// - `retryBaseDelay: Duration.zero` 注入零延迟，免真实指数退避等待。
 ///
-/// **已知依赖（测试有效性边界）**：精确计数断言（attempts == 3）依赖
-/// postgrest-dart 的**内部实现行为**（POST 请求不被 SDK 内层重试、每次 send
-/// 失败都透传到 `_withRetry`）——postgrest 是 supabase_flutter 的传递依赖
-///（pubspec.lock 2.9.1，未直接固定版本）；SDK 升级改变内部重试策略时该
-/// 断言会失败提示（而非静默通过，仍具回归价值，但需核验 SDK 版本行为）。
+/// **已知依赖（测试有效性边界，r53 更新）**：精确计数断言（attempts == 3）
+/// 依赖 postgrest-dart 的**内部实现行为**（POST 请求不被 SDK 内层重试、每次
+/// send 失败都透传到 `_withRetry`）——postgrest **已直接固定在 pubspec.yaml
+///（2.9.1，依赖 supabase_flutter → supabase 2.16.0 的精确传递版本）**；
+/// 升级 postgrest 改变内部重试策略时断言会失败提示（而非静默通过，仍具回归
+/// 价值，但需核验版本行为）。
 /// 退避**公式**（base * 2^(n-1)）由实现单一来源 [_retryBackoff] 承载，本文件
 /// 用零延迟注入覆盖语义；非零 base 的等待行为由 [_retryBackoff] 自身逻辑
 /// 保证（公式直读，无独立延迟断言）。
@@ -568,9 +569,12 @@ void main() {
   group('fetchRowsSince 入参校验（网络前 fail-fast）', () {
     test('page 负数 / pageSize 非法 → ArgumentError（不触达网络）', () async {
       // 校验发生在任何请求之前：handler 若被调用即测试失败。
+      // **统计口径（r53）**：与 buildGateway 统一——只对 `/rest/v1/` 的
+      // PostgREST 请求置 networkHit（auth 层 /auth/v1/* 请求与"入参校验不
+      // 触达网络"语义无关，混入会误报/掩盖真实回归）。
       var networkHit = false;
       final client = MockClient((request) async {
-        networkHit = true;
+        if (request.url.path.startsWith('/rest/v1/')) networkHit = true;
         return http.Response('[]', 200,
             headers: {'content-type': 'application/json'}, request: request);
       });

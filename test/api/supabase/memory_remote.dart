@@ -85,6 +85,17 @@ class MemoryRemote implements RemoteTableGateway {
   /// 变更时须与本判定同步（同 `_isSettingsTable` 内部判定点唯一）。
   static bool _isSettingsTable(String table) => table == 'profile_settings';
 
+  /// 行身份键（r53）：常规表取 `id`、profile_settings 取 `user_id`（无 id 列）——
+  /// 缺失/非 String 抛带行内容的 FormatException（防直接注入 tables 的畸形行
+  /// 在排序路径抛裸 TypeError，与本 mock fail-fast 风格一致）。
+  static String _identityKey(Map<String, Object?> row) {
+    final key = row['id'] ?? row['user_id'];
+    if (key is! String) {
+      throw FormatException('行身份键缺失或非 String（行内容：$row）');
+    }
+    return key;
+  }
+
   /// 公共行校验（seed / seedUnowned 共用，单一事实来源防两处漂移）：
   /// - `updated_at` 必须为可解析字符串（LWW 关键字段）；
   /// - 行身份非空（[id]：常规表 id；profile_settings 无 id 列则按 user_id）。
@@ -283,8 +294,14 @@ class MemoryRemote implements RemoteTableGateway {
         final bAt = DateTime.parse(b['updated_at']! as String);
         final byAt = aAt.compareTo(bAt);
         if (byAt != 0) return byAt;
-        final aId = (a['id'] ?? a['user_id'])! as String;
-        final bId = (b['id'] ?? b['user_id'])! as String;
+        // **身份键显式校验（r53）**：身份键（常规表 id / profile_settings
+        // user_id）缺失或非 String 时抛带行内容的 FormatException（与上方
+        // updated_at 的 fail-stop 一致）——直接绕过 seed/upsertRows 注入
+        // `tables` 的畸形行会产生裸 TypeError，与本 mock 的 fail-fast 风格
+        // 不符（增加测试数据构造错误的排查成本）。行已过归属过滤、user_id
+        // 为 null 时常规表仍可读 id（无主行场景）。
+        final aId = _identityKey(a);
+        final bId = _identityKey(b);
         return aId.compareTo(bId);
       });
     final start = page * pageSize;
@@ -494,11 +511,17 @@ class MemoryRemote implements RemoteTableGateway {
     if (error != null) {
       nextError = null;
       failOnCallIndex = null; // 互斥：nextError 触发时清除序号钩子
+      failOnCall = null; // **r52**：同步清除语义钩子——保持三钩子互斥
+      //（防 nextError 触发后 failOnCall 仍有效、后续匹配调用再次抛错，
+      // "一次性失败"语义失效）。
       _callCount += 1; // 与 callLog 计数对齐（防 failOnCallIndex 相对偏移）
       throw error;
     }
     if (failOnCall != null && call == failOnCall) {
       failOnCall = null; // 单次生效
+      failOnCallIndex = null; // **r52**：命中语义钩子同样清除序号钩子（互斥）
+      _callCount += 1; // **r52**：与 callLog 计数对齐——防与 failOnCallIndex
+      // 同时设置时序号钩子比预期晚一次触发（相对偏移，与 nextError 分支一致）。
       throw Exception('mock 条件失败（操作 $call）');
     }
     final indexError = failOnCallIndex;
@@ -519,7 +542,10 @@ void expectPullBeforePush(List<String> log) {
     if (log[i].startsWith('pull:')) lastPull = i;
     if (log[i].startsWith('push:') && firstPush == -1) firstPush = i;
   }
-  if (firstPush == -1) return; // 无推送
+  // **无推送即失败（r53）**：若引擎回归为"只拉不推"，无 push 时直接 return
+  // 会让"先拉后推"契约空真通过——有拉取则必须存在推送（推送为空表的场景
+  // 由调用侧另行构造，本函数只守护顺序契约本身）。
+  expect(firstPush, isNot(-1), reason: '同步必须存在推送（拉取后）:$log');
   expect(lastPull, isNot(-1), reason: '推送之前必须存在拉取：$log');
   expect(lastPull, lessThan(firstPush),
       reason: '所有拉取必须早于首个推送：$log');

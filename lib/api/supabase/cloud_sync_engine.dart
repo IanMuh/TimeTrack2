@@ -82,6 +82,10 @@ class CloudSyncEngine {
   /// [userId] 由调用方（登录会话）传入；本地行缺失 user_id 时推送补填。
   /// 游标推进为**本次实际处理的最大行 updated_at**（而非墙钟）——防拉取后、
   /// 游标写入前远端插入的行（updated_at < 墙钟）被永久漏同步。
+  /// **并发互斥契约（r53 公开文档化）**：并发调用（如 Future.wait 同时触发
+  /// 两次）确定性恰好一个成功、另一个返回"同步正在进行中"——锁在首个
+  /// await 之前**同步置位**（见 [_inFlight] 文档；测试依赖该时序，若重构把
+  /// 置锁推迟到 await 之后会静默削弱并发保护且无编译期报错）。
   Future<AppResult<SyncReport>> syncNow({required String userId}) async {
     if (_inFlight) {
       return const AppFailure('同步正在进行中，请稍后再试');
@@ -161,13 +165,17 @@ class CloudSyncEngine {
       // 本地 updatedAt 晚于远端（上一用户有未同步修改），不得被当前用户远端
       // 行覆盖（防上一用户未同步修改被静默销毁）；本地归属他人但本地更旧时
       // 照常应用（当前用户远端配置应生效）。
+      // **跳过语义（r52 修正）**：归属冲突跳过放 [skipWhen]（不计 count/
+      // maxSeen）而非 apply 内提前返回——后者仍会被计数并推进游标，与
+      // _pullTable 的 skipWhen 契约（"跳过：不计 count，也不推进 maxSeen，
+      // 防游标吞掉归属冲突增量窗口"）冲突：被跳过行每轮重复拉取/跳过且统计
+      // 虚增。本地查询在 skipWhen 内完成（同为异步回调，无行为差异）。
       final settingsPull =
           await _pullTable(
             table: RemoteTables.profileSettings,
             userId: userId,
             since: since,
-            apply: (row) async {
-              final remoteSettings = ProfileSettings.fromMap(row);
+            skipWhen: (row) async {
               final localRow = await (database.select(database.profileSettings)
                     ..where((t) => t.id.equals(1)))
                   .getSingleOrNull();
@@ -175,12 +183,16 @@ class CloudSyncEngine {
                   localRow.userId != null &&
                   localRow.userId != userId) {
                 final localUpdated = DateTime.tryParse(localRow.updatedAt);
-                final remoteUpdated = remoteSettings.updatedAt;
-                if (localUpdated != null &&
-                    !localUpdated.isBefore(remoteUpdated.toUtc())) {
-                  return const AppSuccess(null); // 他人遗留 + 本地更晚：跳过
+                if (localUpdated != null) {
+                  final remoteUpdated =
+                      ProfileSettings.fromMap(row).updatedAt;
+                  return !localUpdated.isBefore(remoteUpdated.toUtc());
                 }
               }
+              return false;
+            },
+            apply: (row) async {
+              final remoteSettings = ProfileSettings.fromMap(row);
               final applied = await settings.applyIfRemoteNewer(remoteSettings);
               if (applied case AppFailure<ProfileSettings> failure) {
                 throw StateError('拉取表 profile_settings 失败：${failure.message}');

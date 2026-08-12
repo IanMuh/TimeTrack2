@@ -231,9 +231,17 @@ class SyncStatusStore with RepositoryMappings {
             // **乱序完成**（旧 syncedAt 早于现有游标）：不覆盖游标/目标，
             // **保留 lastError**——较早开始的慢同步乱序完成不得抹掉更新的
             // 失败记录（"错误反映最近一次失败"语义；正常推进分支才清错误）。
-            return const AppSuccess(null);
-          }
-          if (syncedAt.toUtc().isAtSameMomentAs(existingAt)) {
+            // **未来游标自愈（r52）**：existingAt 为**未来时间**（容差内曾被
+            // 接受的偏快游标，设备时钟随后被向后校正）时，允许真实 syncedAt
+            // **覆盖回退**——把"read 接受未来游标 → 每轮空跑 → markSuccess
+            // no-op → 游标永不回退 → 永久静默漏同步"的死锁转为自愈路径（首个
+            // 真实同步即回退游标）；与 >5min 显式失败分支（line 223）互补：
+            // 超容差走 reset，容差内自动恢复。
+            if (!existingAt.isAfter(DateTime.now().toUtc())) {
+              return const AppSuccess(null);
+            }
+            // 未来游标：落回覆盖分支（覆盖游标/目标，清错误）。
+          } else if (syncedAt.toUtc().isAtSameMomentAs(existingAt)) {
             // **相等时间戳**（无新行空跑同步的确定性路径）：游标无需覆盖，
             // 但更新 lastTarget——"最近一次成功同步的目标"应反映本次成功
             //（防连续空跑后 lastTarget 停留在上次目标）；**保留 lastError**

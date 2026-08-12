@@ -1,4 +1,4 @@
-import 'package:drift/drift.dart' show Value;
+import 'package:drift/drift.dart' show InsertMode, Value;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timetrack2/api/supabase/cloud_sync_engine.dart';
@@ -132,6 +132,10 @@ void main() {
         expect((await h.activities.activities()).requireValue(), hasLength(5));
 
         // 精确断言：5 行 pageSize=2 → 恰好 3 次 activities 拉取，页偏移逐页推进。
+        // **锁定意图（r53 注明）**：该精确计数锁定的是**引擎"短页终止"停止
+        // 条件**（拉到 hasMore=false 即停，不多拉空页/死循环）——不是 mock
+        // 内部切片实现；mock 的偏移分页语义本就是网关契约的镜像（与真网关
+        // range 分页对齐），计数随 mock 语义调整而变红属预期（同步调整即可）。
         final pullCalls =
             h.remote.pullLog.where((c) => c.table == 'activities').toList();
         expect(pullCalls, hasLength(3), reason: '5 行 pageSize=2 需 3 页');
@@ -224,6 +228,97 @@ void main() {
             withDeleted.firstWhere((a) => a.id == localActivity.id);
         expect(tombstoned.isDeleted, isTrue, reason: '墓碑行保留且标记软删');
         expect(tombstoned.deletedAt, isNotNull);
+      } finally {
+        await h.close();
+      }
+    });
+
+    test('删除冲突平局：相等时间戳下远端墓碑仍胜出（删除永远赢，r52 补锁）', () async {
+      // **平局决胜分支锁定**：replaceIfRemoteNewer 的决胜规则含
+      // `updatedAt 相等 && 远端删除 && 本地存活` 分支（删除永远赢）——但删除
+      // 传播用例都用 +1min 严格更新触发，从未用**相等时间戳**触发该分支；
+      // 多设备时钟偏差/离线编辑下平局真实存在，须显式锁定（防实现把平局
+      // 改为"远端不覆盖"后删除静默失效而测试仍通过）。
+      final h = CloudHarness.create();
+      try {
+        final t0 = DateTime(2026, 8, 11, 10).toUtc();
+        final localActivity = (await h.activities.createActivity(
+          name: '本地存活',
+          color: 0xff112233,
+        ))
+            .requireValue();
+        // 本地 updatedAt 与远端墓碑**完全相同**（force 覆盖：本地行时间与
+        // 远端墓碑时间对齐——平局场景）。
+        final tombstone = localActivity.copyWith(
+          deletedAt: t0,
+          updatedAt: t0,
+        );
+        // 本地行时间也对齐 t0（写库覆盖）。
+        await h.db.into(h.db.activities).insert(
+              ActivitiesCompanion.insert(
+                id: localActivity.id,
+                userId: const Value(CloudHarness.userId),
+                name: '本地存活',
+                color: 0xff112233,
+                isFavorite: const Value(false),
+                updatedAt: t0.toIso8601String(),
+                deletedAt: const Value(null),
+              ),
+              mode: InsertMode.insertOrReplace,
+            );
+        h.remote.seed(RemoteTables.activities, tombstone.toMap());
+        await h.engine.syncNow(userId: CloudHarness.userId);
+
+        final withDeleted =
+            (await h.activities.activities(includeDeleted: true)).requireValue();
+        final row = withDeleted.firstWhere((a) => a.id == localActivity.id);
+        expect(row.isDeleted, isTrue,
+            reason: '相等时间戳下远端删除墓碑胜出（平局决胜分支生效）');
+      } finally {
+        await h.close();
+      }
+    });
+
+    test('平局复活语义（r52 文档化）：相等时间戳 + 远端存活更晚 → 删除被撤销', () async {
+      // **复活语义（deliberate LWW）**：多设备场景"本地墓碑 + 远端存活更新"
+      // 且时间戳相等时，pull 按"远端非删除 + 时间不早于本地"不应用、push 按
+      // 防旧跳过——行保持本地删除（远端存活行被本地删除**撤销**，即"复活"）。
+      // 这是行级 LWW 的有意语义（删除与存活是同权重状态、时间戳决胜；远端
+      // 存活更新更晚则远端赢、本地删除被撤销），不是缺陷——显式锁定防误改。
+      final h = CloudHarness.create();
+      try {
+        final t0 = DateTime(2026, 8, 11, 10).toUtc();
+        // 远端存活行：时间戳 t0（与本地墓碑相等）。
+        final remoteLive = Activity(
+          id: 'revive-1',
+          name: '远端存活',
+          color: 0xffaabbcc,
+          isFavorite: false,
+          userId: CloudHarness.userId,
+          updatedAt: t0,
+        );
+        h.remote.seed(RemoteTables.activities, remoteLive.toMap());
+        // 本地墓碑：同样时间戳 t0。
+        await h.db.into(h.db.activities).insert(
+              ActivitiesCompanion.insert(
+                id: 'revive-1',
+                userId: const Value(CloudHarness.userId),
+                name: '本地已删',
+                color: 0xffaabbcc,
+                isFavorite: const Value(false),
+                updatedAt: t0.toIso8601String(),
+                deletedAt: Value(t0.toIso8601String()),
+              ),
+              mode: InsertMode.insertOrReplace,
+            );
+        await h.engine.syncNow(userId: CloudHarness.userId);
+        // 平局 + 远端存活：本地删除保留（远端存活行不覆盖本地墓碑；推送防旧
+        // 也不写回）——"复活"语义：删除方需严格更晚才赢。
+        final withDeleted =
+            (await h.activities.activities(includeDeleted: true)).requireValue();
+        final row = withDeleted.firstWhere((a) => a.id == 'revive-1');
+        expect(row.isDeleted, isTrue,
+            reason: '平局 + 远端存活不撤销本地删除（删除方时间不严格更晚）');
       } finally {
         await h.close();
       }

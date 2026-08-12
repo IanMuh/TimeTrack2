@@ -32,8 +32,13 @@ BEGIN
   END IF;
   -- FOR KEY SHARE 行锁：阻塞并发软删（UPDATE deleted_at），防"检查后、提交前
   -- 被引用行被删"的 TOCTOU 竞态。
+  -- **显式归属校验（r52）**：动态 SQL 追加 `user_id = auth.uid()`——把"引用
+  -- 存在性与归属校验"从 RLS 隐式过滤副作用提升为显式契约（防函数被改
+  -- SECURITY DEFINER / service_role 旁路 / RLS 配置演进时跨用户引用直接
+  -- 写入成功；无 auth 上下文的服务端路径调用本函数会因 auth.uid() 为 null
+  -- 恒不匹配而拒绝，属显式行为）。
   EXECUTE format(
-    'SELECT id FROM %I WHERE id = $1 AND deleted_at IS NULL FOR KEY SHARE',
+    'SELECT id FROM %I WHERE id = $1 AND deleted_at IS NULL AND user_id = auth.uid() FOR KEY SHARE',
     ref_table
   ) INTO exists_id USING ref_id;
   IF exists_id IS NULL THEN
@@ -60,7 +65,7 @@ CREATE TABLE IF NOT EXISTS activities (
   id          text PRIMARY KEY,
   user_id     uuid REFERENCES auth.users(id) ON DELETE CASCADE,
   name        text NOT NULL,
-  color       bigint NOT NULL DEFAULT 0xff64748b,
+  color       bigint NOT NULL DEFAULT 4284773515, -- 0xff64748b（PG 不支持 C 风格 0x 字面量，r52 改十进制）
   is_favorite boolean NOT NULL DEFAULT true,
   updated_at  text NOT NULL,
   deleted_at  text,
@@ -73,7 +78,7 @@ CREATE TABLE IF NOT EXISTS activity_categories (
   id        text PRIMARY KEY,
   user_id   uuid REFERENCES auth.users(id) ON DELETE CASCADE,
   name      text NOT NULL,
-  color     bigint NOT NULL DEFAULT 0xff0f766e,
+  color     bigint NOT NULL DEFAULT 4279203438, -- 0xff0f766e（PG 不支持 C 风格 0x 字面量，r52 改十进制）
   updated_at text NOT NULL,
   deleted_at text,
   parent_id text REFERENCES activity_categories(id)
@@ -174,6 +179,15 @@ BEGIN
   IF NEW.deleted_at IS NULL THEN
     RETURN NEW;
   END IF;
+  -- **嵌套触发守卫（r52）**：本函数在 AFTER UPDATE OF deleted_at 中逐行
+  -- UPDATE 子孙，每次对子孙行的 UPDATE 又触发同表触发器（嵌套调用），
+  -- 递归深度 = 分类树深度且每层重新执行完整子树的 WITH RECURSIVE 收集——
+  -- 深层树（几十~上百层，云同步大包导入）可能触发 PostgreSQL stack depth
+  -- limit 或产生 O(n·d) 重复扫描。pg_trigger_depth() > 1 即本函数级联 UPDATE
+  -- 的嵌套调用：直接返回，顶层调用已处理整棵子树。
+  IF pg_trigger_depth() > 1 THEN
+    RETURN NEW;
+  END IF;
   -- 删除时间服务端强制推进（max(客户端时间, 服务端 now)）：客户端若沿用旧
   -- updated_at 软删（未递增/回填），子孙墓碑时间过旧会被远端较新存活行
   -- 按 LWW 判胜"复活"；推进后删除事件不早于服务端当前时刻，删除永远赢。
@@ -250,6 +264,42 @@ FOR EACH ROW
 WHEN (NEW.deleted_at IS NOT NULL)
 EXECUTE FUNCTION soft_delete_category_links();
 
+-- 活动软删 → 级联软删其 links（r52，与分类级联对称）：活动软删后指向它的
+-- 活跃 link 行残留会导致 (1) 同步持续把已失效关联分发给其他设备、分类页残留
+-- 已删活动；(2) 残留 link 一旦被本地更新（sort_order/is_primary）并推送，
+-- validate_link_ref 会因活动已软删而报错、阻塞同步（本地 deleteActivity 只
+-- 软删活动本身、不清理 links，与服务端级联相互印证）。
+CREATE OR REPLACE FUNCTION soft_delete_activity_links()
+RETURNS trigger AS $$
+BEGIN
+  IF NEW.deleted_at IS NULL THEN
+    RETURN NEW;
+  END IF;
+  UPDATE activity_category_links
+    SET deleted_at = greatest(NEW.updated_at, now_utc_iso()),
+        updated_at = CASE
+          WHEN updated_at > greatest(NEW.updated_at, now_utc_iso())
+            THEN updated_at
+          ELSE greatest(NEW.updated_at, now_utc_iso())
+        END
+    WHERE activity_id = NEW.id AND deleted_at IS NULL;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_activity_links_soft_delete
+AFTER UPDATE OF deleted_at ON activities
+FOR EACH ROW
+WHEN (NEW.deleted_at IS NOT NULL AND OLD.deleted_at IS NULL)
+EXECUTE FUNCTION soft_delete_activity_links();
+
+-- INSERT 路径级联（云同步场景下客户端可能直接 INSERT deleted_at 已非空的活动）
+CREATE TRIGGER trg_activity_links_soft_delete_insert
+AFTER INSERT ON activities
+FOR EACH ROW
+WHEN (NEW.deleted_at IS NOT NULL)
+EXECUTE FUNCTION soft_delete_activity_links();
+
 -- =============================================================
 -- 触发器：写入前外键存在性显式校验
 -- =============================================================
@@ -271,7 +321,13 @@ BEGIN
   IF NEW.deleted_at IS NOT NULL THEN
     RETURN NEW;
   END IF;
-  PERFORM assert_ref_exists('activities', NEW.activity_id);
+  -- 仅当引用字段写入/变更时校验（r52 修正）：活跃条目指向已软删活动时，
+  -- 其他字段（note/end_at 等）的更新应放行——活动软删后历史条目按设计
+  -- 保留为活跃行，若无此守卫，对其任何 UPDATE（改备注/切分/合并）都会因
+  -- 被引用活动已软删而抛异常、整批推送卡死。
+  IF TG_OP = 'INSERT' OR OLD.activity_id IS DISTINCT FROM NEW.activity_id THEN
+    PERFORM assert_ref_exists('activities', NEW.activity_id);
+  END IF;
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -287,8 +343,15 @@ BEGIN
   IF NEW.deleted_at IS NOT NULL THEN
     RETURN NEW;
   END IF;
-  PERFORM assert_ref_exists('activities', NEW.activity_id);
-  PERFORM assert_ref_exists('activity_categories', NEW.category_id);
+  -- 仅当引用字段写入/变更时校验（r52 修正）：与 validate_time_entry_ref 同理
+  -- ——分类软删后其 links 保留为活跃行的语义下，改 sort_order/is_primary 等
+  -- 非引用字段的更新应放行（防残留 link 被更新时同步卡死）。
+  IF TG_OP = 'INSERT'
+     OR OLD.activity_id IS DISTINCT FROM NEW.activity_id
+     OR OLD.category_id IS DISTINCT FROM NEW.category_id THEN
+    PERFORM assert_ref_exists('activities', NEW.activity_id);
+    PERFORM assert_ref_exists('activity_categories', NEW.category_id);
+  END IF;
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -305,7 +368,10 @@ BEGIN
   IF NEW.deleted_at IS NOT NULL THEN
     RETURN NEW;
   END IF;
-  IF NEW.parent_id IS NOT NULL THEN
+  -- 仅当 parent_id 写入/变更时校验（r52 修正）：父分类软删后子孙分类改为
+  -- 顶层（parent_id 置空）的更新应放行。
+  IF NEW.parent_id IS NOT NULL AND
+     (TG_OP = 'INSERT' OR OLD.parent_id IS DISTINCT FROM NEW.parent_id) THEN
     PERFORM assert_ref_exists('activity_categories', NEW.parent_id);
   END IF;
   RETURN NEW;

@@ -467,6 +467,84 @@ void main() {
       }
     });
 
+    test('未来时间容差边界（r53）：+4min 接受 / 恰好 +5min 接受 / +6min 拒绝', () async {
+      // **容差窗口边界锁定**：生产守卫是 `isAfter(now + 5min)`——+4min 应
+      // 接受、恰好 +5min（isAfter 为 false）应接受、+6min 应拒绝。若实现把
+      // 容差误改为 0 或 10 分钟，现有"仅 +30min 拒绝"用例无法检出。
+      final db = AppDatabase(NativeDatabase.memory());
+      try {
+        final store = SyncStatusStore(database: db);
+        final base = DateTime.now().toUtc();
+        // +4min：接受（游标写入成功）
+        final plus4 = await store.markSuccess(
+          syncedAt: base.add(const Duration(minutes: 4)),
+          target: SyncTarget.supabase,
+        );
+        expect(plus4.isSuccess, isTrue, reason: '+4min（容差内）接受');
+        // 恰好 +5min：isAfter(now+5min) 为 false → 接受
+        final plus5 = await store.markSuccess(
+          syncedAt: base.add(const Duration(minutes: 5)),
+          target: SyncTarget.supabase,
+        );
+        expect(plus5.isSuccess, isTrue, reason: '恰好 +5min（isAfter 边界）接受');
+        // +6min：拒绝（超出容差）
+        final plus6 = await store.markSuccess(
+          syncedAt: base.add(const Duration(minutes: 6)),
+          target: SyncTarget.supabase,
+        );
+        expect(plus6.isSuccess, isFalse, reason: '+6min（超容差）拒绝');
+      } finally {
+        await db.close();
+      }
+    });
+
+    test('容差内未来游标自愈（r52）：时钟校正后首个真实同步回退游标', () async {
+      // 场景：设备时钟偏快时同步写入游标（容差内 ≤+5min 曾被 read 接受），
+      // 随后时钟被向后校正——旧实现下：read 接受未来游标作为 since → 每轮
+      // 空跑 → markSuccess 因 syncedAt < existingAt 走 no-op → 游标永不回退
+      // → 新数据永久静默漏同步（报告仍显示成功）。r52 修正：existingAt 为
+      // 未来时间时允许真实 syncedAt 覆盖回退（自愈，与 >5min 显式失败分支
+      // 互补——超容差走 reset，容差内自动恢复）。
+      final db = AppDatabase(NativeDatabase.memory());
+      try {
+        final store = SyncStatusStore(database: db);
+        // 模拟时钟偏快时写入的未来游标（容差内，read 会接受）。
+        final skewed = DateTime.now()
+            .toUtc()
+            .add(const Duration(minutes: 3));
+        await store.markSuccess(syncedAt: skewed, target: SyncTarget.supabase);
+        // 时钟校正后：真实同步时刻（now）覆盖回退未来游标。
+        final healed = await store.markSuccess(
+          syncedAt: DateTime.now().toUtc(),
+          target: SyncTarget.supabase,
+        );
+        expect(healed.isSuccess, isTrue, reason: '未来游标可被真实同步覆盖');
+        final status = (await store.read()).requireValue();
+        expect(status.lastSuccessfulSyncAt, isNotNull);
+        expect(
+          status.lastSuccessfulSyncAt!.isAfter(DateTime.now().toUtc()),
+          isFalse,
+          reason: '游标已回退到非未来（自愈完成，不再空跑）',
+        );
+        // 正常单调性不受影响：更早的 syncedAt 仍不覆盖（乱序保护保留）。
+        final earlier = DateTime.now()
+            .toUtc()
+            .subtract(const Duration(days: 1));
+        await store.markSuccess(
+          syncedAt: earlier,
+          target: SyncTarget.supabase,
+        );
+        final afterEarly = (await store.read()).requireValue();
+        expect(
+          afterEarly.lastSuccessfulSyncAt!.isAfter(earlier),
+          isTrue,
+          reason: '非未来场景乱序 syncedAt 仍不覆盖（单调性保护保留）',
+        );
+      } finally {
+        await db.close();
+      }
+    });
+
     test('read：损坏游标值显式失败（不静默降级为全量）', () async {
       final db = AppDatabase(NativeDatabase.memory());
       try {
@@ -580,7 +658,13 @@ void main() {
       expect(report.wasFullSync, isTrue);
       expect(report.pulledRows, 5);
       expect(report.pushedRows, 3);
-      expect(report.toString(), contains('supabase'));
+      // **toString 输出契约（r53）**：逐字段断言字符串表示（防实现只输出
+      // target、漏掉其余字段时现有 `contains('supabase')` 仍通过）。
+      final text = report.toString();
+      expect(text, contains('supabase'));
+      expect(text, contains('full: true'));
+      expect(text, contains('pulled: 5'));
+      expect(text, contains('pushed: 3'));
     });
   });
 }

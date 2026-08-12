@@ -74,22 +74,30 @@ final class AppSuccess<T> extends AppResult<T> {
 }
 
 /// 失败结果；[message] 为可读的失败原因（供提示/日志），非空。
+/// [code] 为**可选的结构化错误标识**（r52 新增）：调用方需要以编程方式区分
+/// 特定失败形态（如"未配置"）时用 code 判定，**不要依赖 message 字符串相等**
+///（文案可读性调整/本地化会让字符串比较静默失效且无编译期保护）；业务层
+/// 仍可只用 message（code 为 null）。
 /// （const 构造限制，仅拦截完全空串；纯空白消息由调用方保证语义。）
 final class AppFailure<T> extends AppResult<T> {
-  const AppFailure(this.message) : assert(message != '');
+  const AppFailure(this.message, {this.code}) : assert(message != '');
 
   final String message;
 
-  /// 值相等：按 [message] 比较。
+  /// 结构化错误标识（可空）：同一语义的失败用同一 code（单一事实来源），
+  /// 供调用方结构化区分；文案调整不影响判定。
+  final String? code;
+
+  /// 值相等：按 [message] 与 [code] 比较。
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is AppFailure && runtimeType == other.runtimeType &&
-          message == other.message;
+          message == other.message && code == other.code;
 
   @override
-  int get hashCode => Object.hash(runtimeType, message);
+  int get hashCode => Object.hash(runtimeType, message, code);
 
   @override
-  String toString() => 'AppFailure(message: $message)';
+  String toString() => 'AppFailure(message: $message, code: $code)';
 }

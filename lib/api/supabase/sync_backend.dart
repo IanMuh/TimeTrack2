@@ -19,6 +19,9 @@ import '../../utils/result.dart';
 /// 同步目标标识（status lastTarget 取值）。
 abstract final class SyncTarget {
   static const supabase = 'supabase';
+  /// LAN 同步目标（**当前未落地，r53 注明**）：模块 2b 的 LAN 后端实现进入
+  /// 代码库时随实现一起启用——当前仅作为语义注记保留（避免同步目标标识
+  /// 在 LAN 落地时散落为字面量）。
   static const lan = 'lan';
 }
 
@@ -26,10 +29,15 @@ abstract final class SyncTarget {
 abstract interface class SyncBackend {
   /// 未配置（SUPABASE_URL/ANON_KEY 缺失或非法）时的统一失败文案。
   ///
-  /// 两个后端（[NoopSyncBackend] 与 Supabase 后端）共用同一常量：调用方
-  /// （编排层/UI）可据此可靠区分"未配置"与真实登出/同步失败——失败对象只有
-  /// message（无错误码），文案必须单一事实来源防漂移。
+  /// 两个后端（[NoopSyncBackend] 与 Supabase 后端）共用同一常量。
   static const unconfiguredError = '云同步未配置（缺少 SUPABASE_URL/ANON_KEY）';
+
+  /// 未配置失败的结构化错误码（**r52**）：与 [unconfiguredError] 文案解耦——
+  /// 调用方（编排层/UI）判定"未配置"用 `failure.code == unconfiguredCode`
+  /// 而非 message 字符串相等（文案调整/本地化不影响结构化判定，且有编译期
+  /// 类型保障）；未配置失败统一构造为
+  /// `AppFailure(unconfiguredError, code: unconfiguredCode)`。
+  static const unconfiguredCode = 'unconfigured';
 
   /// 是否已注入云配置（SUPABASE_URL + ANON_KEY）。
   ///
@@ -102,6 +110,11 @@ class NoopSyncBackend implements SyncBackend {
 
   /// 未配置：状态恒为 null。单例广播流（late final 缓存同一实例，符合
   /// "多次访问返回同一流实例"契约）。
+  /// **机制说明（r53）**：`Stream.multi` 的 onListen 对**每个订阅者各执行
+  /// 一次**——每个订阅者收到独立的 null 快照回放，**并非共享同一事件序列**
+  ///（当前仅回放常量 null，功能等价）；若未来 Noop 需模拟登录态变化（如作
+  /// 测试替身扩展），各订阅者会收到彼此独立的事件序列，须按"每订阅者独立
+  /// 回放"语义设计而非"共享事件源"。
   @override
   late final Stream<String?> authStateStream = Stream<String?>.multi(
     (controller) => controller.add(null),
@@ -113,23 +126,23 @@ class NoopSyncBackend implements SyncBackend {
 
   @override
   Future<AppResult<void>> sendMagicLink(String email) async {
-    return const AppFailure(SyncBackend.unconfiguredError);
+    return const AppFailure(SyncBackend.unconfiguredError, code: SyncBackend.unconfiguredCode);
   }
 
   @override
   Future<AppResult<String>> verifyEmailOtp(String email, String token) async {
-    return const AppFailure(SyncBackend.unconfiguredError);
+    return const AppFailure(SyncBackend.unconfiguredError, code: SyncBackend.unconfiguredCode);
   }
 
   @override
   Future<AppResult<SyncReport>> syncNow() async {
-    return const AppFailure(SyncBackend.unconfiguredError);
+    return const AppFailure(SyncBackend.unconfiguredError, code: SyncBackend.unconfiguredCode);
   }
 
   @override
   Future<AppResult<void>> signOut() async {
     // 未配置场景无会话可登出：与其余方法一致返回失败，防调用方误判云端登出
     // 成功而继续执行本地状态清理（本文件契约：失败语义由编排层统一处理）。
-    return const AppFailure(SyncBackend.unconfiguredError);
+    return const AppFailure(SyncBackend.unconfiguredError, code: SyncBackend.unconfiguredCode);
   }
 }

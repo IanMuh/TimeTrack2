@@ -241,6 +241,11 @@ class SupabaseSyncBackend implements SyncBackend {
   /// [_runSync] 对**网络段**（token 刷新 + engine 同步）施加 [syncTimeout]
   /// 超时，超时按失败处理（不清游标，下次可重试），防止在途锁被永久占据。
   void reset() {
+    // **释放旧认证服务的底层 gotrue 订阅（r52）**：不释放则旧 client 及其
+    // 底层资源被持续引用，每次登录/登出循环累积一条旧订阅与一个旧 client
+    //（资源持续增长）；dispose 主动取消订阅/关闭流，解除"须等监听者全部
+    // 取消"的隐式依赖（此后旧服务不可再用，调用方须丢弃引用）。
+    _auth?.dispose();
     _client = null;
     _auth = null;
     _epoch += 1;
@@ -271,19 +276,19 @@ class SupabaseSyncBackend implements SyncBackend {
 
   @override
   Future<AppResult<void>> sendMagicLink(String email) async {
-    if (!isConfigured) return const AppFailure(SyncBackend.unconfiguredError);
+    if (!isConfigured) return const AppFailure(SyncBackend.unconfiguredError, code: SyncBackend.unconfiguredCode);
     return _lazyAuth.sendMagicLink(email);
   }
 
   @override
   Future<AppResult<String>> verifyEmailOtp(String email, String token) async {
-    if (!isConfigured) return const AppFailure(SyncBackend.unconfiguredError);
+    if (!isConfigured) return const AppFailure(SyncBackend.unconfiguredError, code: SyncBackend.unconfiguredCode);
     return _lazyAuth.verifyEmailOtp(email, token);
   }
 
   @override
   Future<AppResult<void>> signOut() async {
-    if (!isConfigured) return const AppFailure(SyncBackend.unconfiguredError);
+    if (!isConfigured) return const AppFailure(SyncBackend.unconfiguredError, code: SyncBackend.unconfiguredCode);
     final result = await _lazyAuth.signOut();
     if (result is AppSuccess<void>) {
       // 仅成功时释放懒加载引用：失败时保留现有 client（其本地持久化会话仍
@@ -299,7 +304,7 @@ class SupabaseSyncBackend implements SyncBackend {
 
   @override
   Future<AppResult<SyncReport>> syncNow() async {
-    if (!isConfigured) return const AppFailure(SyncBackend.unconfiguredError);
+    if (!isConfigured) return const AppFailure(SyncBackend.unconfiguredError, code: SyncBackend.unconfiguredCode);
     // 互斥/去重：并发调用共享同一 in-flight Future（防并发双 refreshSession
     // 消费同一 refresh token 导致二次刷新失败、以及重复执行同一轮同步）。
     final inFlight = _syncInFlight;
@@ -394,8 +399,12 @@ class SupabaseSyncBackend implements SyncBackend {
           // 写回持久化存储——此后 currentUserId 会水合出旧身份、后续 engine
           // 同步以旧身份执行（云端写库已发生）；与 TimeoutException/AuthException
           // 分支统一，在刷新成功返回后立即校验代数（防旧身份继续同步）。
+          // **身份守卫（r52）**：与 AuthException/超时分支统一走
+          // [_guardClearPersistedSession]——刷新成功把旧会话写回共享存储的
+          // 窗口同样可达秒/分钟级（慢网络下刷新成功返回前用户可能已重登新
+          // 账号），裸 [_clearPersistedSession] 会误抹新会话。
           if (epoch != _epoch) {
-            _clearPersistedSession(client);
+            _guardClearPersistedSession(client, userId);
             return const AppFailure('会话已切换，本次同步结果已丢弃');
           }
           if (refreshed.session == null) {
@@ -422,12 +431,23 @@ class SupabaseSyncBackend implements SyncBackend {
           // client 时水合旧身份由 ① 的 epoch/身份校验兜底）。
           stderr.writeln('[supabase-sync] token 刷新超时（$syncTimeout）');
           if (epoch != _epoch) {
-            unawaited(refreshFuture
-                .then(
-                  (_) => _guardClearPersistedSession(client, userId),
-                  onError: (_) => _guardClearPersistedSession(client, userId),
-                )
-                .timeout(syncTimeout, onTimeout: () {}));
+            // **执行上限真实生效（r52 修正）**：`.timeout(...)` 只能约束外层
+            // Future 的完成时间，**无法阻止** `refreshFuture.then(...)` 回调在
+            // 底层刷新迟到 settle（可能远超超时窗口）后仍执行——"刷新超时未
+            // 落定则放弃清理"的上限语义须在**回调内部**判定：记录调度时刻的
+            // 截止时间，回调落定时先校验是否仍在窗口内，超出则放弃清理
+            //（防无限等待期间的清理窗口被同账号重登的新会话触发误抹）。
+            final cleanupDeadline = DateTime.now().add(syncTimeout);
+            void clearIfWithinWindow() {
+              if (DateTime.now().isBefore(cleanupDeadline)) {
+                _guardClearPersistedSession(client, userId);
+              }
+            }
+
+            unawaited(refreshFuture.then(
+              (_) => clearIfWithinWindow(),
+              onError: (_) => clearIfWithinWindow(),
+            ));
             return const AppFailure('会话已切换，本次同步结果已丢弃');
           }
           return const AppFailure('同步超时，请稍后重试');

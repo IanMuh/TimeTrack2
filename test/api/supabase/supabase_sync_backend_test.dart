@@ -209,7 +209,7 @@ void main() {
       // unconfiguredError；authStateStream 回放 null。
       final backend = NoopSyncBackend();
       expect(backend.isConfigured, isFalse);
-      // 四个操作方法统一精确断言失败消息 = 共享常量
+      // 四个操作方法统一精确断言失败消息 = 共享常量 + 结构化错误码
       for (final result in [
         await backend.sendMagicLink('a@b.com'),
         await backend.verifyEmailOtp('a@b.com', '123456'),
@@ -220,7 +220,17 @@ void main() {
         expect(
           result.when(onSuccess: (_) => '', onFailure: (m) => m),
           SyncBackend.unconfiguredError,
-          reason: '失败消息精确等于共享未配置常量（可结构化区分，不绑定文案子串）',
+          reason: '失败消息精确等于共享未配置常量（不绑定文案子串）',
+        );
+        // **结构化错误码（r52）**：判定"未配置"用 code（文案调整/本地化不
+        // 影响结构化判定）——锁定 unconfiguredCode 契约。
+        expect(
+          result.fold(
+            onSuccess: (_) => null,
+            onFailure: (f) => f.code,
+          ),
+          SyncBackend.unconfiguredCode,
+          reason: '未配置失败必须携带 unconfiguredCode（结构化区分）',
         );
       }
       // authStateStream：订阅即回放 null（未登录）。
