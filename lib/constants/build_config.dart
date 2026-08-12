@@ -50,6 +50,16 @@ class AppBuildConfig {
   static const supabaseUrlKey = 'SUPABASE_URL';
   static const supabaseAnonKeyKey = 'SUPABASE_ANON_KEY';
 
+  /// 是否已注入云同步配置（SUPABASE_URL + ANON_KEY 均非空）。
+  ///
+  /// 未配置时应用完全离线运行（老项目语义）；由后端工厂决定用
+  /// NoopSyncBackend（api/supabase/sync_backend.dart）。
+  static bool isSupabaseConfigured() {
+    final url = getString(supabaseUrlKey, defaultValue: '');
+    final key = getString(supabaseAnonKeyKey, defaultValue: '');
+    return url.isNotEmpty && key.isNotEmpty;
+  }
+
   /// 更新清单 URL（默认指向本仓库 raw.githubusercontent，可覆盖）。
   static const updateManifestUrlKey = 'UPDATE_MANIFEST_URL';
 }

@@ -409,7 +409,7 @@ packages:
     source: hosted
     version: "17.4.0"
   gotrue:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: gotrue
       sha256: f6f42ea035953b2439664c1afb46630460edbb917093843a3a0618bfa45619f6
@@ -705,7 +705,7 @@ packages:
     source: hosted
     version: "1.5.2"
   postgrest:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: postgrest
       sha256: b7f957273ba6a1c26cefa987ac524f4138e9ab7542fbb9e6abdfddacb9895a21
@@ -753,7 +753,7 @@ packages:
     source: hosted
     version: "0.6.0"
   shared_preferences:
-    dependency: transitive
+    dependency: "direct dev"
     description:
       name: shared_preferences
       sha256: c3025c5534b01739267eb7d76959bbc25a6d10f6988e1c2a3036940133dd10bf

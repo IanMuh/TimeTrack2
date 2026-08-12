@@ -9,20 +9,21 @@
 - viewmodels（领域模型 deletedAt/parentId/容错）→ utils（CLI 解析器/SemVer/时间/SHA-256）→ constants（配置/指令定义）→ data（drift 8 表 + 5 仓储）
 - 门禁：analyze 0 / 测试全绿 / Windows Release 构建通过
 
-**阶段 2 进行中（模块 2a、2b 完成，2c 待开始）**：
-- 2a 同步包 + 文件互通：已完成、ocr 5 轮清零、212 测试、已推送（678f0b2）
-  - `data/sync/`：SyncBundle（schema 严格 1..2）+ Codec（校验先于写库）+ BundleRepository（单事务行级 LWW + normalizeAfterMerge）
-  - `data/interop/file_interop_service.dart`：.timetrack.json 导入导出（降级选目录）
-  - `data/repositories/sync_peer_store.dart`：LAN 对端表
-  - 仓储补：xxxSince 增量/全量含删导出/saveMergedEntry（逐段 LWW+悬挂回退）/3 归一化
-- 2b LAN：已完成、ocr 3 轮清零（67 条）、248 测试、已提交本地（0b6eea9，未推送）
-  - `api/lan/lan_sync_protocol.dart`：/health /pair /sync 端点、包络编解码、错误码 wireValue+statusCode 推导、私网白名单（IPv4 段/IPv6 链路本地·ULA·映射·回环等价形式/zone id 拒绝）、主机输入归一化（仅 http scheme、端口 1..65535、拒 userinfo、剥离 ?/#）
-  - `api/lan/lan_sync_server.dart`：端口 8787..8797 候选+回退、6 位配对码 TTL5min 单次使用+绑定设备身份防冒用轮换、每 IP 限流+定期清扫、/sync Bearer 鉴权+source_device_id 校验+merge→normalize（失败 5xx 不返回收敛包）、body 双重超时+上限、错误脱敏不泄露内部细节
-  - `api/lan/lan_sync_client.dart`：配对即自动同步、先存后清对端（clearLanClientPeersExcept）、token 字符白名单防头注入、响应体限长+超时、单次解析+connectionFactory 直连已校验 IP（消 TOCTOU）、异常全收敛 on Object
-  - 测试：协议纯函数（白名单边界/归一化/包络一致性）+ 真 HttpServer 集成（配对/鉴权/限流/过期/单次/轮换/设备身份/413/双向收敛/删除传播/幂等）
+**阶段 2 进行中（2a/2b 已合并 main，2c 待审批，2d 待开始）**：
+- 2a 同步包 + 文件互通：已合并 main
+- 2b LAN：已合并 main（PR #2）；协议/服务器/客户端 + 真 HttpServer 测试
+- 2c 云同步：已完成、ocr 2 轮清零（98 条）、280 测试、已推送 PR #3（待审批）
+  - `api/supabase/`：SyncBackend 抽象 + NoopSyncBackend（未配置离线）、CloudSyncEngine
+    （先拉后推/推送防旧/游标=最大行时间/in-flight 互斥/settings 归属过滤）、
+    RemoteTableGateway 抽象 + Supabase 实现（uuid 归属/idKey/tie-breaker/onConflict/
+    重试 3 次/表名白名单）、SupabaseAuthService（OTP 登录/快照流/脱敏）、
+    SyncStatusStore（单事务读/单调性/损坏显式失败/lastTarget 仅成功写）
+  - `supabase/schema.sql`：6 表镜像（user_id uuid、color bigint）+ 递归软删触发器
+    （WITH RECURSIVE + greatest() LWW + FOR KEY SHARE）+ 3 校验触发器 + RLS + 增量索引
+  - 测试：引擎 mock（先拉后推/分页精确/增量 since/删除传播双向/LWW/并发互斥/边界行）
+    + 状态存储 + schema 结构锁定
 
 ## 阶段 2 剩余模块（按序）
-- 2c 云同步：`api/supabase/` 抽象 SyncBackend + OTP 认证 + sync_status_store + `supabase/schema.sql`（6 表 + parent_id 递归软删触发器 greatest() LWW + RLS）+ mock 测试
 - 2d AI 预留：`api/ai/` LlmClient 接口 + OpenAI 兼容骨架
 - 2e 更新：`api/update/`（清单/下载/校验）+ `data/update/`（Windows staging/Android FileProvider 安装器）
 - 2f 清理：`data/cleanup/` 保留期 180 天 + VACUUM

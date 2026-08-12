@@ -1,3 +1,5 @@
+import 'dart:io' show stderr;
+
 import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
 
@@ -82,6 +84,40 @@ class ActionLogRepository with RepositoryMappings {
       return AppSuccess(rows.map(actionLogFromRow).toList());
     } catch (e) {
       return AppFailure('增量查询操作日志失败：$e');
+    }
+  }
+
+  /// LWW upsert（删除永远赢：deleted_at 随行 LWW）。云同步拉取用。
+  Future<AppResult<void>> replaceIfRemoteNewer(ActionLog remote) async {
+    try {
+      // LWW 读-判-写同一事务：防比较后写入前本地新写入被旧远端覆盖。
+      await database.transaction(() async {
+        final query = database.select(database.actionLogs)
+          ..where((t) => t.id.equals(remote.id));
+        final row = await query.getSingleOrNull();
+        final local = row == null ? null : actionLogFromRow(row);
+        // **平局分支（r53，与 ActivityRepository 对齐）**：时间戳相等时远端
+        // 删除墓碑仍应用（删除永远赢）。注：action log 行写入后不可变（无
+        // 本地更新/删除路径，updatedAt 恒等于 occurredAt），远端墓碑必然
+        // 晚于本地行，平局实际不可达——分支为语义一致性与防御深度保留。
+        final remoteWins = local == null ||
+            local.updatedAt.isBefore(remote.updatedAt) ||
+            (local.updatedAt.isAtSameMomentAs(remote.updatedAt) &&
+                remote.isDeleted &&
+                !local.isDeleted);
+        if (remoteWins) {
+          await database.into(database.actionLogs).insertOnConflictUpdate(
+                actionLogToCompanion(remote),
+              );
+        }
+      });
+      return const AppSuccess(null);
+    } catch (e) {
+      // **不拼接 $e（r53）**：同步链路失败消息会经 StateError 最终写入
+      // statusStore 的 lastError 面向用户展示——内嵌数据库驱动/SQL 异常
+      // 细节与 engine"失败消息脱敏"注释相悖；详细原因写 stderr 日志。
+      stderr.writeln('[action-log] 同步操作日志失败：$e');
+      return const AppFailure('同步操作日志失败');
     }
   }
 
