@@ -440,14 +440,18 @@ void main() {
       // **双路径分别锚定（r53）**：UPDATE 路径（AFTER UPDATE OF deleted_at）
       // 与 INSERT 路径（AFTER INSERT，云同步直插已删行）各须挂载一次——只查
       // 出现次数 ≥1 会在未来删掉其中一个触发器时静默通过。
+      // **单语句限定（r54）**：用 `[^;]*` 把匹配收窄到单条 CREATE TRIGGER
+      // 语句内——`[\s\S]*` 贪婪匹配会跨语句命中最后一次出现的
+      // `EXECUTE FUNCTION SOFT_DELETE_ACTIVITY_LINKS()`（即另一路径的调用），
+      // 未来误删其中一个触发器的 `EXECUTE FUNCTION` 子句时断言仍假绿。
       expect(
-        has(r'AFTER UPDATE OF DELETED_AT ON ACTIVITIES [\s\S]*'
+        has(r'AFTER UPDATE OF DELETED_AT ON ACTIVITIES [^;]*'
             r'EXECUTE FUNCTION SOFT_DELETE_ACTIVITY_LINKS\(\)'),
         isTrue,
         reason: '活动 links 级联 UPDATE 路径必须挂载',
       );
       expect(
-        has(r'AFTER INSERT ON ACTIVITIES [\s\S]*'
+        has(r'AFTER INSERT ON ACTIVITIES [^;]*'
             r'EXECUTE FUNCTION SOFT_DELETE_ACTIVITY_LINKS\(\)'),
         isTrue,
         reason: '活动 links 级联 INSERT 路径必须挂载',
