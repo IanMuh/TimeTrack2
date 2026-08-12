@@ -366,6 +366,11 @@ class MemoryRemote implements RemoteTableGateway {
   ///（`table → 该表最近一次成功 upsert 的原始负载`）——消除"某表是每轮同步
   /// 最后一个非空推送表"的顺序依赖（见 cloud_sync_engine_test 认领用例注释）；
   /// 两个视图共用同一底层记录（不是两份副本）。
+  /// **跨轮次保留边界（r51）**：本视图只在该表**再次被 push** 时才
+  /// remove/替换该表记录——其他表 push（含失败）不清除本表记录。因此
+  /// `isNotEmpty` 类断言只能证明"该表**曾经**推送过"，不能证明"**本轮**推送
+  /// 了"（本轮未推时读到的是上一轮残留）。轮次级断言须配合
+  /// [callLog] 的 `push:<table>` 计数或 [lastPushedIds] 交叉验证。
   final List<Map<String, Object?>> lastPushedRawRows = [];
   final Map<String, List<Map<String, Object?>>> lastPushedRawRowsByTable = {};
 
@@ -422,7 +427,7 @@ class MemoryRemote implements RemoteTableGateway {
       if (id == null) {
         throw ArgumentError(
           'upsertRows: ${isSettings ? 'profile_settings' : '常规表'} 行必须携带'
-          '${isSettings ? 'user_id' : 'id'}（行内容：$row）',
+          ' ${isSettings ? 'user_id' : 'id'}（行内容：$row）',
         );
       }
       // 归属校验（写入前统一检查，防部分写入）：

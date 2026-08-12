@@ -1119,7 +1119,20 @@ void main() {
 
         // 重复同步：本地表 id 主键唯一，行不产生重复（LWW 幂等——本地
         // user_id 仍为 null，属上文声明的非收敛稳态）。
+        // **本轮确有一次新推送（r51 交叉验证）**：按表视图在本轮未推该表时
+        // 保留上一轮记录（跨轮次残留边界）——`pushedAgain` 非空无法单独证明
+        // 本轮重复推送；用 callLog 的 `push:activities` 计数交叉验证本轮
+        // 确实发生了一次新的 activities 推送（对比第二轮 syncNow 前后计数）。
+        final pushCountBefore = h.remote.callLog
+            .where((c) => c == 'push:${RemoteTables.activities}')
+            .length;
         (await h.engine.syncNow(userId: CloudHarness.userId)).requireValue();
+        final pushCountAfter = h.remote.callLog
+            .where((c) => c == 'push:${RemoteTables.activities}')
+            .length;
+        expect(pushCountAfter, pushCountBefore + 1,
+            reason: '第二轮同步必须新发起一次 activities 推送（非收敛稳态：'
+                '每轮都重复推送，非仅残留旧记录）');
         final local2 = (await h.activities.activities()).requireValue();
         expect(local2.where((a) => a.id == 'unowned-a'), hasLength(1),
             reason: '重复同步不产生重复行（主键唯一）');
@@ -1138,7 +1151,7 @@ void main() {
             const <Map<String, Object?>>[])
             .where((r) => r['id'] == 'unowned-a');
         expect(pushedAgain, isNotEmpty,
-            reason: '第二轮同步该行仍被重复推送（当前非收敛稳态）');
+            reason: '本轮推送的 activities 负载含 unowned-a（配合上方 push 计数）');
         expect(pushedAgain.first['user_id'], CloudHarness.userId,
             reason: '重复推送行归属仍为当前用户');
       } finally {

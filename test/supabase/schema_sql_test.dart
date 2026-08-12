@@ -137,12 +137,14 @@ void main() {
       // `E&'` 等非盲区形态的误匹配）。**作用范围限定到剥离注释后的代码文本**
       // [withoutLineComments]（r50）——注释/说明文本中出现 `E'`/`U&'` 字样
       // 与剥离逻辑无关、不得误报；仅代码形态引入时本断言先失败、提示须升级
-      // 扫描。
-      final escapePrefixes = RegExp(r"\bE'|\bU&'");
+      // 扫描。**大小写不敏感（r51）**：PostgreSQL 的 `E'`/`U&'` 前缀大小写
+      // 不敏感（`e'...'`、`u&'...'` 同为合法盲区形态）——仅匹配大写会漏掉
+      // 小写引入。
+      final escapePrefixes = RegExp(r"\bE'|\bU&'", caseSensitive: false);
       expect(
         escapePrefixes.allMatches(withoutLineComments).isEmpty,
         isTrue,
-        reason: 'schema 代码无 E\'\'/U&\' 转义字符串前缀（状态机盲区形态未引入）',
+        reason: 'schema 代码无 E\'\'/U&\'（含小写）转义字符串前缀（状态机盲区形态未引入）',
       );
       // 结束状态平衡：顶层语句不应残留未闭合字符串/标识符（$$ 块由闭合
       // 定界符平衡；未闭合字符串在末尾行会遗留 inSingle=true——值仅为文档
