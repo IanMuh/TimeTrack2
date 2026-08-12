@@ -23,6 +23,21 @@ class CloudHarness {
       this.actionLogs, this.entries, this.statusStore, this.remote, this.engine);
 
   static CloudHarness create({int pageSize = 999}) {
+    final remote = MemoryRemote();
+    return _build(remote: remote, pageSize: pageSize);
+  }
+
+  /// 宽松模式 harness：远端允许无主行（[MemoryRemote.allowUnownedRows]）——
+  /// 模拟"远端遗留无归属行"的历史数据场景（见 [MemoryRemote.seedUnowned]）。
+  static CloudHarness createLoose({int pageSize = 999}) {
+    final remote = MemoryRemote()..allowUnownedRows = true;
+    return _build(remote: remote, pageSize: pageSize);
+  }
+
+  static CloudHarness _build({
+    required MemoryRemote remote,
+    required int pageSize,
+  }) {
     final db = AppDatabase(NativeDatabase.memory());
     final activities = ActivityRepository(database: db);
     final categories = CategoryRepository(database: db);
@@ -33,7 +48,6 @@ class CloudHarness {
       activityRepository: activities,
       settingsRepository: settings,
     );
-    final remote = MemoryRemote();
     final statusStore = SyncStatusStore(database: db);
     final engine = CloudSyncEngine(
       database: db,
@@ -60,7 +74,9 @@ class CloudHarness {
   final MemoryRemote remote;
   final CloudSyncEngine engine;
 
-  static const userId = 'user-1';
+  /// 引擎单用户测试的约定用户：与 memory_remote 的 seed 默认归属同源
+  ///（seed 未显式带 user_id 的行注入该值；两处共享单一事实来源防漂移）。
+  static const userId = MemoryRemote.defaultSeedUserId;
 
   Future<void> close() => db.close();
 }
@@ -1041,6 +1057,143 @@ void main() {
         final child =
             remoteCats.values.firstWhere((r) => r['name'] == '子分类');
         expect(child['parent_id'], parent.id, reason: 'parent_id 随行推送');
+      } finally {
+        await h.close();
+      }
+    });
+  });
+
+  group('远端无主行：宽松模式认领 / 严格模式隔离', () {
+    /// 无主行统一用**远离当前时刻的固定 UTC 常量**（2020 年——LWW 关键字段
+    /// 时区语义明确，且不会受运行环境时钟影响：贴近当前时间的绝对日期在
+    /// CI 沙箱快照/系统时钟异常下会成为未来时间戳、偏离游标推进设计意图）。
+    final unownedAt = DateTime.utc(2020, 1, 1, 10);
+
+    test('无主行在宽松模式下可见并被拉回本地，推送后远端归属当前用户（网关层语义）', () async {
+      final h = CloudHarness.createLoose();
+      try {
+        // 远端遗留无归属行（user_id 为 null，模拟历史数据）——seedUnowned
+        // 是宽松模式下构造真无主行的唯一入口（seed 恒注入默认归属；严格
+        // 模式用 injectUnownedRow，见下方用例——两者同一数据构造路径）。
+        h.remote.seedUnowned(
+          RemoteTables.activities,
+          Activity(
+            id: 'unowned-a',
+            name: '无主活动',
+            color: 0xffabcdef,
+            isFavorite: false,
+            updatedAt: unownedAt,
+          ).toMap(),
+        );
+
+        (await h.engine.syncNow(userId: CloudHarness.userId)).requireValue();
+        final local = (await h.activities.activities()).requireValue();
+        expect(local.map((a) => a.id), contains('unowned-a'),
+            reason: '宽松模式下拉取应含无主行');
+
+        // **认领路径真正守护**：远端行归属由 MemoryRemote.upsertRows
+        // 无条件注入（无法区分"引擎 _withUserId 生效"与"网关注入兜底"）——
+        // 改用 `lastPushedRawRows`（注入前原始负载）断言引擎**实际发送**的
+        // 行已携带当前用户归属，认领路径失效时测试变红。
+        // **本地永不收敛（如实声明）**：首轮拉回的无主行以 user_id=null 落
+        // 本地库；_withUserId 只补填**出站**行副本、不写回本地——第二轮
+        // 同步时远端行时间戳相等、LWW 平局跳过，本地行 user_id 永远保持
+        // null，该行在**每一轮**同步都被重复推送（非收敛稳态，属引擎设计
+        // 语义；共享设备换号后会与已认领远端行产生归属冲突，归阶段 3 多
+        // 用户数据隔离/清除入口处理）。
+        final pushedRaw =
+            h.remote.lastPushedRawRows.where((r) => r['id'] == 'unowned-a');
+        expect(pushedRaw, isNotEmpty, reason: '无主行被推送');
+        expect(pushedRaw.first['user_id'], CloudHarness.userId,
+            reason: '引擎 _withUserId 补填的推送行归属当前用户（认领路径生效）');
+        // **lastPushedRawRows 依赖声明（r49）**：该字段语义为"最近一次 upsert
+        // 调用的原始负载"（每次 upsertRows 开头即 clear）——本断言依赖
+        // activities 是每轮同步里**最后一个非空推送表**（其余表均为空）。
+        // 若未来在本用例给其他表补 seed 行，推送顺序变为 activities → … →
+        // 其它表，`pushedRaw` 将不含 'unowned-a' 而静默变空/误通过；给其它
+        // 表补 seed 时须同步改用按表拆分的记录或断言方式。
+        final remoteRow =
+            h.remote.tables[RemoteTables.activities]?['unowned-a'];
+        expect(remoteRow, isNotNull, reason: '推送后远端行存在');
+        expect(remoteRow!['user_id'], CloudHarness.userId,
+            reason: '远端行归属为当前用户（推送语义）');
+
+        // 重复同步：本地表 id 主键唯一，行不产生重复（LWW 幂等——本地
+        // user_id 仍为 null，属上文声明的非收敛稳态）。
+        (await h.engine.syncNow(userId: CloudHarness.userId)).requireValue();
+        final local2 = (await h.activities.activities()).requireValue();
+        expect(local2.where((a) => a.id == 'unowned-a'), hasLength(1),
+            reason: '重复同步不产生重复行（主键唯一）');
+        // **非收敛契约守护（r48）**：注释声明的"本地永不收敛、每一轮都被
+        // 重复推送"稳态须由断言锁定——若引擎未来改为推送后收敛本地归属
+        //（回写 user_id）或游标推进使该行不再被重复取回/推送，下方断言
+        // 变红（设计语义变化须显式同步本用例）。
+        expect(
+          local2.singleWhere((a) => a.id == 'unowned-a').userId,
+          isNull,
+          reason: '本地行 user_id 仍为 null（未收敛——非收敛稳态契约）',
+        );
+        final pushedAgain =
+            h.remote.lastPushedRawRows.where((r) => r['id'] == 'unowned-a');
+        expect(pushedAgain, isNotEmpty,
+            reason: '第二轮同步该行仍被重复推送（非收敛稳态契约）');
+        expect(pushedAgain.first['user_id'], CloudHarness.userId,
+            reason: '重复推送行归属仍为当前用户');
+      } finally {
+        await h.close();
+      }
+    });
+
+    test('严格模式（默认）下 syncNow 对远端无主行隔离（不拉回本地）', () async {
+      final h = CloudHarness.create();
+      try {
+        // **语义说明（r22 修正）**：严格模式下无主行的隔离在**网关层**完成
+        //（MemoryRemote 的 fetchRowsSince 过滤 user_id==null 行，与真网关
+        // eq('user_id') 对 NULL 不匹配一致）——此用例验证的是严格模式端到端
+        // 不拉取无主行（含网关层过滤）；引擎 _pullTable 的防御性过滤只跳过
+        // **非 null 他人** user_id 行（无主行设计上允许本地认领，见引擎
+        // 注释）。
+        // 用 injectUnownedRow（与 seedUnowned 同一数据构造路径：行校验 +
+        // 深拷贝）注入无主行——seed 恒注入默认归属、seedUnowned 在严格模式
+        // 抛错，无法构造此场景。
+        h.remote.injectUnownedRow(
+          RemoteTables.activities,
+          Activity(
+            id: 'unowned-strict',
+            name: '无主活动',
+            color: 0xffabcdef,
+            isFavorite: false,
+            updatedAt: unownedAt, // 与宽松模式组共用 UTC 常量
+          ).toMap(),
+        );
+        // **正向对照**：同轮 seed 一条正常有主行——防过滤/拉取逻辑
+        // 被误改得过宽（所有行都被过滤时仅断言"无主行不出现"仍会通过，
+        // 有主行对照能区分"正确隔离"与"过度过滤"）。
+        h.remote.seed(
+          RemoteTables.activities,
+          Activity(
+            id: 'owned-strict',
+            name: '有主活动',
+            color: 0xff123456,
+            isFavorite: false,
+            updatedAt: unownedAt,
+          ).toMap(),
+        );
+
+        (await h.engine.syncNow(userId: CloudHarness.userId)).requireValue();
+        final local = (await h.activities.activities()).requireValue();
+        expect(local.map((a) => a.id), isNot(contains('unowned-strict')),
+            reason: '严格模式下无主行不得被拉回本地（与真网关 eq 对 NULL 不匹配一致）');
+        expect(local.map((a) => a.id), contains('owned-strict'),
+            reason: '严格模式只隔离无主行，有主行正常拉取（正向对照）');
+        // **完整语义守护**：严格模式"只隔离、不触碰"——同步后远端无主行
+        // 必须保持 user_id 为 null（防未来引擎改动出现"未拉回却直接认领/
+        // 改写远端无主行"的路径）。
+        final remoteRow =
+            h.remote.tables[RemoteTables.activities]?['unowned-strict'];
+        expect(remoteRow, isNotNull, reason: '远端无主行仍存在');
+        expect(remoteRow!['user_id'], isNull,
+            reason: '严格模式下同步不得认领/改写远端无主行');
       } finally {
         await h.close();
       }

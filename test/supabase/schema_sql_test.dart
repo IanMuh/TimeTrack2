@@ -22,19 +22,147 @@ void main() {
       File('${findRoot(Directory.current).path}/supabase/schema.sql');
   late final String raw;
   late final String schema;
+  /// 生产剥离输出（main() 顶部的 late final，供守卫断言校验**生产剥离结果**——
+  /// 防守卫用同款正则重新替换造成的恒真断言）。
+  late final String withoutLineComments;
 
   setUpAll(() {
     expect(schemaFile.existsSync(), isTrue,
         reason: '未找到 ${schemaFile.path}（已按 pubspec.yaml 定位项目根）');
     raw = schemaFile.readAsStringSync();
-    // 仅剥离**行首**注释（`--` 起始的行）：函数体内的 `--`（如字符串/文本
-    // 常量）是 SQL 语法的一部分，不能剥离；本文件注释均为行首整行。
-    final withoutLineComments =
-        raw.replaceAll(RegExp(r'^--[^\n]*', multiLine: true), '');
+    // 剥离**行首（可含缩进）注释**（`--` 起始的行）：函数体内的 `--`（如
+    // 字符串/文本常量）是 SQL 语法的一部分，不能剥离；本文件注释均为行首
+    // 整行（含 2 空格缩进者——防残留注释中的关键字骗过正向断言/击穿负向断言）。
+    // 注意：行注释剥离在块注释剥离**之前**、无词法感知——若未来 schema 引入
+    // `/* ... */` 块注释，须保证行注释不误剥离块注释内的 `--`；**字符串字面量
+    // 场景**（跨行字符串的第二物理行以 `--` 开头，如
+    // `msg := 'line one\n-- line two';`）同样会被误剥离——该行会被当注释剥掉，
+    // 后续断言基于被篡改的 schema 文本运行。当前 schema 无块注释、无跨行
+    // 字符串字面量（已核实 78 处匹配行均为真实注释），功能正常；扩展时须
+    // 重评估（见下方字符串字面量守卫断言）。
+    withoutLineComments =
+        raw.replaceAll(RegExp(r'^[ \t]*--[^\n]*', multiLine: true), '');
     final withoutBlockComments = withoutLineComments
         .replaceAll(RegExp(r'/\*[\s\S]*?\*/'), '');
     // 空白归一化（空白细节不参与语义锁定），断言正则大小写不敏感。
     schema = withoutBlockComments.replaceAll(RegExp(r'\s+'), ' ');
+  });
+
+  group('注释剥离前置守卫', () {
+    test('schema 无跨行字符串/标识符续行以 `--` 开头（剥离安全）', () {
+      // 行注释剥离无词法感知——若未来函数体/普通语句引入**跨行字符串或跨行
+      // 引号标识符**（其第二物理行以 `--` 开头），该行会被误当注释剥掉、
+      // 后续断言基于被篡改文本运行。本守卫用**跨行状态机**扫描（替代旧版
+      // "仅上一行引号奇偶"启发式）：维护 单引号字符串 / 双引号标识符 / 美元
+      // 引用块 三个跨行词法状态，某行若处于**未闭合字符串/标识符**的续行
+      // 起点且以 `--` 开头 → 标记可疑（该文本是内容、非注释，生产剥离会误删）。
+      // **为何不把 $$ 块内所有 `--` 行视为可疑**：PL/pgSQL 函数体内的 `--`
+      // 行是**真实 SQL 注释**（当前 schema 6 个函数体共 13 处），生产剥离移除
+      // 它们是正确行为；只有**未闭合字符串/标识符**的续行 `--` 才是内容。
+      // **美元引用块无特殊解析**：`$$...$$` 函数体仍是普通 SQL 文本——其中的
+      // `'`/`"`/`--` 语义与外部一致（故统一按同一状态机扫描，仅额外识别
+      // `$$`/`$tag$` 定界符以便注释说明），字符串内的 `$$` 不会被误当定界符
+      //（单引号状态优先）。
+      // **已知盲区（非完整词法）**：`E'...\'...'` 反斜杠转义字符串未处理
+      //（`\'` 会被当作字符串闭合）；`U&'...'` 等 Unicode 转义前缀未处理。
+      // 当前 schema 无这些形态（下方有自校验负向断言锁定，防静默引入）。
+      // 本守卫是"未来演化早期预警"而非完整词法校验——引入上述形态时须
+      // 升级扫描。
+      var inSingle = false; // 单引号字符串内（跨行）
+      var inDouble = false; // 双引号标识符内（跨行）
+      var inDollar = false; // 美元引用块内（仅配对计数/结束平衡校验用）
+      var suspicious = 0;
+      // 定界符/转义形态正则：**循环外构造一次**（防逐字符路径重复分配）。
+      final dollarRe = RegExp(r'\$[A-Za-z0-9_]*\$');
+      final lines = raw.split('\n');
+      for (final line in lines) {
+        final isContinuation = inSingle || inDouble;
+        if (isContinuation && line.trimLeft().startsWith('--')) {
+          suspicious += 1;
+        }
+        // 逐字符推进词法状态（字符串/标识符内的 `--` 是内容、不识别注释）。
+        for (var i = 0; i < line.length; i++) {
+          final ch = line[i];
+          if (inSingle) {
+            if (ch == "'") {
+              // `''` 转义对是 SQL 单引号字面量（不闭合）。
+              if (i + 1 < line.length && line[i + 1] == "'") {
+                i += 1;
+              } else {
+                inSingle = false;
+              }
+            }
+            continue;
+          }
+          if (inDouble) {
+            if (ch == '"') {
+              // `""` 转义对（标识符内双引号字面量）。
+              if (i + 1 < line.length && line[i + 1] == '"') {
+                i += 1;
+              } else {
+                inDouble = false;
+              }
+            }
+            continue;
+          }
+          // 普通代码段：`--` 注释起点后本行剩余为注释（忽略其中引号）。
+          if (ch == '-' && i + 1 < line.length && line[i + 1] == '-') {
+            break;
+          }
+          if (ch == "'") {
+            inSingle = true;
+          } else if (ch == '"') {
+            inDouble = true;
+          } else if (ch == r'$') {
+            final m = dollarRe.matchAsPrefix(line, i);
+            if (m != null) {
+              inDollar = !inDollar; // 切换（裸 `$$` 或 `$tag$`）
+              i += m.end - 1;
+            }
+          }
+        }
+      }
+      expect(suspicious, 0,
+          reason: '无跨行字符串/标识符续行以 `--` 开头（注释剥离不会误伤）');
+      // **美元引用闭合平衡（r49）**：`inDollar` 若在扫描中只为装饰则属写后即弃
+      // 死变量——改为**结束态校验**：扫描结束时美元引用定界符必须配对闭合
+      //（当前 schema 7 对 `$$` 全部配对且均不在字符串内，可安全断言；未来
+      // 引入未闭合 `$$` 会在此失败而非静默）。
+      expect(inDollar, isFalse,
+          reason: '美元引用定界符必须配对闭合（扫描结束态平衡）');
+      // **盲区形态自校验（r49）**：`E'` / `U&'` 反斜杠/Unicode 转义字符串是
+      // 状态机盲区——若未来 schema 引入它们，扫描会静默失效（suspicious 恒 0）。
+      // 负向断言锁定当前 schema 无这些形态（`E'` 检测用词边界防把 `... FOR KEY
+      // SHARE'` 结尾的 E+引号误判；`U&'` 同理）。盲区形态引入时本断言先失败、
+      // 提示须升级扫描。
+      final escapePrefixes = RegExp(r"\b[EU]&?'");
+      expect(
+        escapePrefixes.allMatches(raw).isEmpty,
+        isTrue,
+        reason: 'schema 无 E\'\'/U&\' 转义字符串前缀（状态机盲区形态未引入）',
+      );
+      // 结束状态平衡：顶层语句不应残留未闭合字符串/标识符（$$ 块由闭合
+      // 定界符平衡；未闭合字符串在末尾行会遗留 inSingle=true——值仅为文档
+      // 意图，不用于断言，避免词法盲区造成误报）。
+      // 行首注释确实存在（剥离正则生效，非空转）。
+      expect(
+        RegExp(r'^[ \t]*--[^\n]*', multiLine: true).allMatches(raw).length,
+        greaterThanOrEqualTo(1),
+        reason: 'schema 含行首注释',
+      );
+      // **剥离能力直接校验（生产剥离输出）**：带缩进的 `[ \t]*--` 注释必须
+      // 全部被**生产剥离逻辑**移除——防剥离正则回退为 `^--` 时函数体内 13
+      // 处缩进注释残留进 schema（其文本含 deleted_at/updated_at/greatest 等
+      // 断言关键字会污染正向/负向断言），而上方"列首注释存在"断言仍通过。
+      // 直接断言 [withoutLineComments]（setUpAll 生产输出），非重新替换。
+      expect(
+        RegExp(r'^[ \t]*--[^\n]*', multiLine: true).hasMatch(
+          withoutLineComments,
+        ),
+        isFalse,
+        reason: '行首注释（含缩进）必须全部被生产剥离逻辑移除',
+      );
+    });
   });
 
   /// 正则匹配（大小写不敏感）。
@@ -130,14 +258,19 @@ void main() {
   });
 
   group('触发器：分类递归软删（删除永远赢 + LWW）', () {
-    test('触发器定义挂载：ON activity_categories + EXECUTE FUNCTION', () {
-      // [^;]* 限定单条语句内匹配（防跨语句假阳性）
+    test('触发器定义挂载：ON activity_categories + FOR EACH ROW + EXECUTE FUNCTION', () {
+      // [^;]* 限定单条语句内匹配（防跨语句假阳性）。
+      // **FOR EACH ROW 必须显式锁定**：PostgreSQL 省略该子句时默认为
+      // FOR EACH STATEMENT，函数体内引用 NEW 会在运行时直接报错，逐行递归
+      // 级联软删彻底失效（schema 当前所有触发器都带 FOR EACH ROW）。
+      // 注：`FOR ROW` 与 `FOR EACH ROW` 语义等价（EACH 可省略，都是行级），
+      // 但项目统一书写 `FOR EACH ROW`——此处锁定完整写法（防混用风格漂移）。
       expect(
         has(r'CREATE TRIGGER TRG_ACTIVITY_CATEGORY_SOFT_DELETE AFTER UPDATE OF '
-            r'DELETED_AT ON ACTIVITY_CATEGORIES [^;]*EXECUTE FUNCTION '
-            r'SOFT_DELETE_ACTIVITY_CATEGORY_CHILDREN\(\)'),
+            r'DELETED_AT ON ACTIVITY_CATEGORIES [^;]*FOR EACH ROW [^;]*'
+            r'EXECUTE FUNCTION SOFT_DELETE_ACTIVITY_CATEGORY_CHILDREN\(\)'),
         isTrue,
-        reason: '递归软删函数必须被触发器挂载',
+        reason: '递归软删函数必须被触发器挂载（FOR EACH ROW 逐行级联）',
       );
       // 递归逻辑限定在目标函数体内（负向前瞻拒绝跨定界符）：
       // WITH RECURSIVE + CTE 种子（WHERE PARENT_ID = NEW.ID）+ 递归分支 UNION
@@ -146,7 +279,9 @@ void main() {
       const withinFunction = r'(?:(?!\$[A-Za-z0-9_]*\$)[\s\S])*?';
       expect(
         has(
-          r'FUNCTION SOFT_DELETE_ACTIVITY_CATEGORY_CHILDREN\(\)'
+          // 锚定到函数**定义**（CREATE OR REPLACE FUNCTION——`EXECUTE FUNCTION`
+          // 调用处不匹配此前缀），防文本片段来自触发器挂载语句时假通过。
+          r'CREATE (?:OR REPLACE )?FUNCTION SOFT_DELETE_ACTIVITY_CATEGORY_CHILDREN\(\)'
           r'[\s\S]*?\$[A-Za-z0-9_]*\$' '$withinFunction'
           r'WITH RECURSIVE TREE AS \( ' '$withinFunction'
           r'WHERE PARENT_ID = NEW\.ID' '$withinFunction'
@@ -165,6 +300,9 @@ void main() {
       // 负向前瞻 `(?:(?!\$[A-Za-z0-9_]*\$)[\s\S])*?` 拒绝跨过定界符——
       // 防目标文本在函数体之外（如其他函数）时仍匹配成功。
       // 同时接受两种等价写法：CASE WHEN ... THEN ... ELSE ... 或 GREATEST(...)。
+      // 注意：本测试的 `within`（不排除分号，跨语句匹配可行——UPDATED_AT 赋值
+      // 与 CASE/GREATEST 表达式可跨语句片段）与"递归写回"测试的 `within`
+      //（排除分号，限定 SET→WHERE 同语句）**语义不同**，故各自独立命名不共享。
       const within = r'(?:(?!\$[A-Za-z0-9_]*\$)[\s\S])*?';
       final lwwPattern =
           r'(?:WHEN UPDATED_AT > PARENT_TS THEN UPDATED_AT' '$within'
@@ -174,7 +312,7 @@ void main() {
               r')';
       expect(
         has(
-          r'FUNCTION SOFT_DELETE_ACTIVITY_CATEGORY_CHILDREN\(\)'
+          r'CREATE (?:OR REPLACE )?FUNCTION SOFT_DELETE_ACTIVITY_CATEGORY_CHILDREN\(\)'
           r'[\s\S]*?\$[A-Za-z0-9_]*\$' '$within'
           r'UPDATED_AT = ' '$within'
           '$lwwPattern' '$within'
@@ -183,6 +321,83 @@ void main() {
         isTrue,
         reason: '递归删除函数内必须保留 LWW（greatest）传播且赋值给 updated_at'
             '（SET ... updated_at = ... 写回列，防仅残留不写回的计算表达式）',
+      );
+    });
+
+    test('递归写回：SET deleted_at 实际执行（非仅残留计算表达式）', () {
+      // 锁定函数体内的实际写回语句 `UPDATE activity_categories
+      // SET deleted_at = parent_ts ... WHERE id = descendant.id`——只断言
+      // WITH RECURSIVE/UPDATED_AT 赋值片段可能落在死代码里而级联从不写回。
+      // 通用美元引用定界符（$function$ / $$ 等）成对圈定函数体，负向前瞻
+      // 拒绝跨过定界符（防目标文本在其他函数中时仍匹配成功）：
+      // - 前导（DECLARE/BEGIN 等，含分号）与尾部（; END LOOP; END;）用
+      //   `withinTail`（仅禁定界符）；
+      // - SET → WHERE 必须落在**同一条 UPDATE 语句内**，用 `within`
+      //   （额外禁分号——防 SET 与 WHERE 分属两条语句时假通过）。
+      const within = r'(?:(?!\$[A-Za-z0-9_]*\$|;)[\s\S])*?';
+      const withinTail = r'(?:(?!\$[A-Za-z0-9_]*\$)[\s\S])*?';
+      const withinLoop = r'(?:(?!\$[A-Za-z0-9_]*\$|\bEND\b LOOP\b)[\s\S])*?';
+      // LOOP→UPDATE 区间额外禁止 `END LOOP`（**词边界**，与显式关键字
+      // `\bEND\b LOOP\b` 一致）：把 UPDATE 真正锚定在该 LOOP...END LOOP 块内——
+      // 防"前一个 LOOP + 跨过其 END LOOP + UPDATE + 后一个 END LOOP"的假匹配
+      //（写回被移出循环时测试仍通过）；词边界防含 "END LOOP" 子串的标识符/
+      // 字符串字面量误命中。
+      // **脆弱面声明**：负向前瞻禁止跨越**任意** `END LOOP` 且 `\bLOOP\b`
+      // 锚定函数体内**首个** LOOP——未来若在写回 UPDATE 之前新增嵌套内层循环
+      //（写回仍正确位于外层 LOOP 内），正则会因跨内层 END LOOP 整体失配而
+      // 误报失败（当前 schema 为单循环结构故通过）；引入多层循环时须同步
+      // 调整本锚定。**函数体捕获组（r48）**：整个函数体作为 group(1) 圈出，
+      // 供下方写回计数断言**限定在函数体内**统计（防 schema 其他函数/文本
+      // 含同语句片段时计数误报）。
+      final writeBackRe = RegExp(
+        // 锚定到函数**定义**（`CREATE (?:OR REPLACE )?FUNCTION`——`EXECUTE
+        // FUNCTION` 调用处不匹配此前缀，防文本片段来自触发器挂载语句时假通过；
+        // OR REPLACE 为风格可选项，等价写法 CREATE FUNCTION 同样成立，正则
+        // 容忍两者，仅区分"定义"与"调用点"）。
+        // **LOOP ... END LOOP 显式锚定**：descendant 在 DECLARE 顶层声明
+        //（整个函数体可见），若重构把写回移到 END LOOP 之后，函数仍能
+        // CREATE 编译（仅运行时 record 未赋值报错）——锚定 LOOP 边界才能
+        // 真正锁定"逐行 LOOP 写回"语义（防级联失效回归）。
+        // 关键字加 `\b` 词边界：防未来引入 LOOP_/SET_ 等前缀同名标识符
+        // 或字符串字面量时子串假匹配（与同文件 FOR (DELETE|ALL)\b 一致）。
+        r'CREATE (?:OR REPLACE )?FUNCTION SOFT_DELETE_ACTIVITY_CATEGORY_CHILDREN\(\)'
+        r'[\s\S]*?\$[A-Za-z0-9_]*\$' '(' '$withinTail'
+        r'\bLOOP\b' '$withinLoop'
+        r'\bUPDATE\b ACTIVITY_CATEGORIES\b[^;]*\bSET\b DELETED_AT\s*=\s*PARENT_TS\b'
+            '$within'
+        r'\bWHERE\b ID = DESCENDANT\.ID\b[^;]*' '$withinTail'
+        r'\bEND\b LOOP\b' '$withinTail'
+        r')' r'\$[A-Za-z0-9_]*\$',
+        caseSensitive: false,
+      );
+      final writeBackMatch = writeBackRe.firstMatch(schema);
+      expect(
+        writeBackMatch,
+        isNotNull,
+        reason: '递归删除函数内必须实际执行 SET deleted_at 写回'
+            '（WHERE id = descendant.id 逐行 LOOP 写回，SET 与 WHERE 同语句，'
+            '写回锚定在 LOOP...END LOOP 块内）',
+      );
+      // **词法盲区说明 + 构造性防护（出现次数断言，r48 收窄到函数体）**：
+      // 正则无法区分真实 UPDATE 语句与函数体内字符串字面量——**出现次数
+      // 断言**：写回文本在**已匹配的函数体（group 1）**中必须**恰好出现
+      // 1 次**（当前函数体内无 RAISE/字符串常量含此文本；若未来加入
+      // `RAISE NOTICE '...SET deleted_at = parent_ts...'` 类文本，计数变 2
+      // 使断言失败——构造性拒绝**新增**字符串字面量假通过）。**范围收窄
+      // （r48）**：限定函数体统计，schema 其他函数/语句含同文本不再误报。
+      // **防护范围（如实声明）**：若未来把真实写回**替换**为含同文本的字面量
+      //（计数仍为 1），本断言无法检出（LOOP 锚定正向断言会命中字面量内部）——
+      // 该场景由"写回锚定在 LOOP...END LOOP 块内 + WITH RECURSIVE 递归
+      // CTE"断言约束（字面量文本不含这些结构）。
+      expect(
+        RegExp(
+          r'\bUPDATE\b ACTIVITY_CATEGORIES\b[^;]*\bSET\b DELETED_AT\s*=\s*PARENT_TS\b',
+          caseSensitive: false,
+        ).allMatches(writeBackMatch!.group(1)!),
+        hasLength(1),
+        reason: '函数体内 SET deleted_at = parent_ts 写回必须恰好出现 1 次'
+            '（防字符串字面量/死代码假匹配；= 两侧空白容错——空白归一化'
+            '不补空格，deleted_at=parent_ts 等价写法不得误失败）',
       );
     });
 
@@ -248,9 +463,10 @@ void main() {
         );
         // 禁止任何 FOR DELETE / FOR ALL（ALL 隐含 DELETE）策略——防物理删除
         // 绕过软删体系（不只查固定命名 _DELETE_OWN）。
+        // `\b` 词边界防 `FOR ALLOW` 类前缀被 `FOR ALL` 误匹配（假失败）。
         expect(
           has("CREATE POLICY [^;]* ON $table [^;]*"
-              r'FOR (DELETE|ALL)[^;]*'),
+              r'FOR (DELETE|ALL)\b[^;]*'),
           isFalse,
           reason: '$table 不应有任何物理删除策略（软删体系禁物理删除）',
         );
@@ -286,24 +502,28 @@ void main() {
           reason: '$fn 必须实际调用 assert_ref_exists',
         );
       }
-      // 校验触发器挂载到表（[^;]* 限定单条语句，防跨语句假阳性）
+      // 校验触发器挂载到表（[^;]* 限定单条语句；必须逐行校验新插入/更新行
+      // → 显式锁定 FOR EACH ROW——省略默认 FOR EACH STATEMENT 会失效）。
       expect(
         has(r'CREATE TRIGGER TRG_TIME_ENTRIES_REF_CHECK [^;]*'
+            r'FOR EACH ROW [^;]*'
             r'EXECUTE FUNCTION VALIDATE_TIME_ENTRY_REF\(\)'),
         isTrue,
-        reason: 'time_entries 引用校验触发器必须挂载',
+        reason: 'time_entries 引用校验触发器必须挂载（FOR EACH ROW）',
       );
       expect(
         has(r'CREATE TRIGGER TRG_ACTIVITY_CATEGORY_LINKS_REF_CHECK [^;]*'
+            r'FOR EACH ROW [^;]*'
             r'EXECUTE FUNCTION VALIDATE_LINK_REF\(\)'),
         isTrue,
-        reason: 'links 引用校验触发器必须挂载',
+        reason: 'links 引用校验触发器必须挂载（FOR EACH ROW）',
       );
       expect(
         has(r'CREATE TRIGGER TRG_ACTIVITY_CATEGORIES_PARENT_REF_CHECK [^;]*'
+            r'FOR EACH ROW [^;]*'
             r'EXECUTE FUNCTION VALIDATE_CATEGORY_PARENT_REF\(\)'),
         isTrue,
-        reason: '分类 parent 引用校验触发器必须挂载',
+        reason: '分类 parent 引用校验触发器必须挂载（FOR EACH ROW）',
       );
     });
   });

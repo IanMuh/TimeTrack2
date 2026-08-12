@@ -23,10 +23,31 @@ class SyncStatus {
     this.lastTarget,
   });
 
-  /// 最近一次成功同步完成时刻（增量游标起点）；null = 从未同步。
+  /// 增量同步游标：**最近一次成功同步实际处理数据的最大 updated_at（高水位）**，
+  /// 而非墙钟完成时刻（同步期间远端新增/本地更新的行 updated_at 必然 ≤ 该值，
+  /// 下一轮 `>= 游标` 才不会漏行）；null = 从未同步。
+  /// **例外（非严格高水位）**：唯一写方 CloudSyncEngine 存在两类
+  /// 兜底——空全量同步写墙钟 startedAt、远端时钟偏快时截断到 startedAt，
+  /// 此时**已处理行**的 updated_at 可**大于**游标（下轮靠 LWW 幂等重复处理）。
+  /// 下游不得按"严格高水位"解读本字段（如用于裁剪/去重）。
+  /// **字段名保留说明**：虽语义为高水位游标（非墙钟），字段名沿用
+  /// `lastSuccessfulSyncAt`（历史命名，改名为 cursor 会波及 app_metadata
+  /// 键/序列化契约——键 `last_sync_at` 已固化，见 [AppMetadataKeys.lastSyncAt]）；
+  /// 文档与键注释已统一为游标语义。
+  /// **升级迁移**：本键语义由"墙钟完成时刻"迁移为"高水位"——
+  /// 存量库若存在旧版墙钟游标值，按高水位解释会跳过 updated_at ∈（真实
+  /// 高水位, 墙钟时刻] 的行（静默漏同步）；**升级路径须对存量库做一次性
+  /// 游标 reset（[SyncStatusStore.reset] 触发全量重同步，LWW 幂等不丢数据）**。
+  /// 本项目从零重建（无存量库），该迁移归阶段 3 首次云同步前的升级逻辑。
   final DateTime? lastSuccessfulSyncAt;
 
-  /// 最近一次同步失败原因（成功后清除）。
+  /// 最近一次同步失败原因（**游标真正推进时**清除——相等时间戳/乱序成功
+  /// 分支不清，防抹掉游标未推进期间的真实失败记录）。
+  /// **消费语义**：本字段 = "游标推进周期内的最近失败"，**非**
+  /// "最近一次同步结果"——无新数据的空跑成功（相等分支）保留 lastError，
+  /// 一次真实失败后可能跨多轮空跑长期残留（read() 呈 hasSynced=true +
+  /// lastTarget 已更新 + lastError 非空）；阶段 3 消费方据此展示"最近失败"
+  /// 而非"上次同步失败"。
   final String? lastError;
 
   /// 最近一次成功同步的目标（[SyncTarget] 取值；null = 未同步过）。
@@ -63,6 +84,16 @@ class SyncStatus {
 /// 拉取/推送永久漏行）；**lastError 同样按 userId 分区**（共享设备上互不串扰、
 /// 不误清）；未传 userId（null）时使用全局键（默认/向后兼容）。
 ///
+/// **并发约束**：`markSuccess` 的读-改-写原子性依赖 drift 在**单连接**上串行化
+/// 事务——仅支持单 AppDatabase 实例（阶段 3 编排在单实例内调用）；若未来以
+/// 多 isolate/多实例打开同一库文件，两个事务可各自读到旧游标后并发写，较旧
+/// syncedAt 可能后落盘回退游标（超出本类支持范围，需迁移为条件 UPDATE）。
+///
+/// **userId 入参契约（行为变更）**：空/空白/超长 userId 属调用方编程错误，
+/// 各公开方法在**进入 try 之前直接抛 ArgumentError**（此前被 try 包装成
+/// AppFailure 返回）——编程错误不被静默降级为普通运行期数据错误，且该路径
+/// 不经 catch 掩盖（null 仍走全局键，语义不变）。
+///
 /// 失败文案常量（供测试引用做精确断言——不绑定具体措辞变化）。
 abstract final class SyncStatusMessages {
   /// 游标损坏（无法解析/无时区偏移）失败前缀。
@@ -80,20 +111,21 @@ class SyncStatusStore with RepositoryMappings {
   /// 读取当前同步状态（按 userId 分区键点查，**单事务**保证快照一致——防
   /// 各次 await 之间被写入交错读到互相矛盾的快照）。
   Future<AppResult<SyncStatus>> read({String? userId}) async {
+    final normalized = _normalizeUserId(userId); // 编程错误在 try 之外直接抛
     try {
       return await database.transaction(() async {
         DateTime? lastSyncAt;
         String? lastError;
         String? lastTarget;
         final statusKeys = {
-          _statusKey(AppMetadataKeys.lastSyncAt, userId):
+          _statusKey(AppMetadataKeys.lastSyncAt, normalized):
               AppMetadataKeys.lastSyncAt,
           // lastError 与游标/目标一样按 userId 分区：共享设备上用户 B 不得
           // 读到用户 A 的失败原因（信息串扰），也不得被 A 的 markSuccess
           // 清掉（"错误反映最近一次失败"不变量在共享设备场景成立）。
-          _statusKey(AppMetadataKeys.lastSyncError, userId):
+          _statusKey(AppMetadataKeys.lastSyncError, normalized):
               AppMetadataKeys.lastSyncError,
-          _statusKey(AppMetadataKeys.lastSyncTarget, userId):
+          _statusKey(AppMetadataKeys.lastSyncTarget, normalized):
               AppMetadataKeys.lastSyncTarget,
         };
         // 一次 IN 查询取齐三个状态键（单事务快照一致，降往返/持锁时间）。
@@ -159,6 +191,7 @@ class SyncStatusStore with RepositoryMappings {
     required String target,
     String? userId,
   }) async {
+    final normalized = _normalizeUserId(userId); // 编程错误在 try 之外直接抛
     final trimmedTarget = target.trim();
     if (trimmedTarget.isEmpty) {
       return const AppFailure('同步目标不能为空');
@@ -173,7 +206,7 @@ class SyncStatusStore with RepositoryMappings {
     }
     try {
       return await database.transaction(() async {
-        final cursorKey = _statusKey(AppMetadataKeys.lastSyncAt, userId);
+        final cursorKey = _statusKey(AppMetadataKeys.lastSyncAt, normalized);
         final existing = await (database.select(database.appMetadata)
               ..where((t) => t.key.equals(cursorKey)))
             .getSingleOrNull();
@@ -207,7 +240,7 @@ class SyncStatusStore with RepositoryMappings {
             //（游标未推进，本次成功并未晚于失败时刻，清空会抹掉真实失败）。
             await database.batch((batch) {
               batch.insert(database.appMetadata, AppMetadataCompanion.insert(
-                key: _statusKey(AppMetadataKeys.lastSyncTarget, userId),
+                key: _statusKey(AppMetadataKeys.lastSyncTarget, normalized),
                 value: trimmedTarget,
               ), mode: InsertMode.insertOrReplace);
             });
@@ -221,11 +254,11 @@ class SyncStatusStore with RepositoryMappings {
             value: utcString(syncedAt),
           ), mode: InsertMode.insertOrReplace);
           batch.insert(database.appMetadata, AppMetadataCompanion.insert(
-            key: _statusKey(AppMetadataKeys.lastSyncTarget, userId),
+            key: _statusKey(AppMetadataKeys.lastSyncTarget, normalized),
             value: trimmedTarget,
           ), mode: InsertMode.insertOrReplace);
           batch.insert(database.appMetadata, AppMetadataCompanion.insert(
-            key: _statusKey(AppMetadataKeys.lastSyncError, userId),
+            key: _statusKey(AppMetadataKeys.lastSyncError, normalized),
             value: '',
           ), mode: InsertMode.insertOrReplace);
         });
@@ -236,20 +269,58 @@ class SyncStatusStore with RepositoryMappings {
     }
   }
 
+  /// userId 长度上限（**单一事实来源**）：`_statusKey` 与 `_normalizeUserId`
+  /// 两处校验共用（防单处调整造成 debug/release 行为分叉或分区键长度口径
+  /// 不一致）。
+  static const _maxUserIdLength = 128;
+
   /// 生成分区键：userId 非 null 时 `base:<userId>`，否则原键（全局）。
-  /// trim + 限制长度防键名膨胀/重复分区（共享设备游标隔离失效）。
-  /// **空/空白 userId 显式抛错**：与 null 区分（null=未登录用全局键；
-  /// 空串是调用方 bug，静默回落全局键会污染未登录状态）。
+  /// **入参须已归一化**（各公开方法入口统一 [_normalizeUserId] 校验一次——
+  /// 这里不再重复校验，避免同一 userId 双次 trim/长度检查）。
+  /// **契约说明**：本方法假定调用方已归一化——四个公开方法
+  ///（read/markSuccess/markFailure/reset）在 try 之前统一调用
+  /// [_normalizeUserId] 并传归一化结果；新增方法须遵循同一约定。
+  /// **兜底校验（无 assert，防御性）**：未归一化（空白/空串/超长）
+  /// userId 直接生成脏分区键会拆裂共享设备游标隔离——**debug 与 release 均
+  /// 直接抛 ArgumentError**（不依赖 assert）。
+  /// **范围说明**：`normalized.length != userId.length` 仅捕获**首尾**
+  /// 空白；含**内部空白**的 userId（如 `'user 1'`）无法在此识别（会生成
+  /// 带空格的键）——属调用方约定边界（[_normalizeUserId] 同样只 trim 首尾）。
+  /// **可达性（如实声明）**：当前四个公开方法均先经 [_normalizeUserId]
+  /// 归一化（本分支不可达）；若未来新增方法在 try 内直接调用本方法且未
+  /// 先归一化，抛出的 ArgumentError 会被外层 catch 包成 AppFailure（被静默
+  /// 降级）——属已知边界，新增调用点须遵循"先归一化、try 之外校验"约定。
   static String _statusKey(String base, String? userId) {
     if (userId == null) return base;
+    final normalized = userId.trim();
+    if (normalized.isEmpty ||
+        normalized.length != userId.length ||
+        normalized.length > _maxUserIdLength) {
+      // **不嵌入原始 userId（防 PII 泄露）**：本分支在四个公开方法归一化后
+      // 不可达，但若未来新增调用点触发，携带邮箱/手机号等 PII 的 userId 会
+      // 随 ArgumentError 被外层 catch 写入日志——只输出长度摘要（与
+      // [_normalizeUserId] 的报错口径一致）。
+      throw ArgumentError(
+        'userId 未归一化（空白/空串/超长，长度 ${normalized.length}）'
+        '——须先经 _normalizeUserId',
+      );
+    }
+    return '$base:$normalized';
+  }
+
+  /// userId 归一化：null → null（未登录用全局键）；空白/超长 → 显式抛错
+  /// （调用方 bug，与 null 语义区分——静默回落全局键会污染未登录状态）。
+  /// 各公开方法在 try 之外调用一次并传归一化结果给 [_statusKey]。
+  static String? _normalizeUserId(String? userId) {
+    if (userId == null) return null;
     final normalized = userId.trim();
     if (normalized.isEmpty) {
       throw ArgumentError('userId 不能为空字符串，需显式传 null 使用全局键');
     }
-    if (normalized.length > 128) {
+    if (normalized.length > _maxUserIdLength) {
       throw ArgumentError('userId 过长，无法生成游标分区键');
     }
-    return '$base:$normalized';
+    return normalized;
   }
 
   /// 记录一次失败（只记错误，**不清游标**）。
@@ -258,6 +329,7 @@ class SyncStatusStore with RepositoryMappings {
   /// "失败不清游标/成功后清错误"的状态不变量。
   /// lastError 与游标一样按 userId 分区（共享设备上互不串扰）。
   Future<AppResult<void>> markFailure(String message, {String? userId}) async {
+    final normalized = _normalizeUserId(userId); // 编程错误在 try 之外直接抛
     final trimmed = message.trim();
     if (trimmed.isEmpty) {
       return const AppFailure('失败原因不能为空');
@@ -265,7 +337,7 @@ class SyncStatusStore with RepositoryMappings {
     try {
       await database.into(database.appMetadata).insert(
             AppMetadataCompanion.insert(
-              key: _statusKey(AppMetadataKeys.lastSyncError, userId),
+              key: _statusKey(AppMetadataKeys.lastSyncError, normalized),
               value: trimmed,
             ),
             mode: InsertMode.insertOrReplace,
@@ -281,6 +353,7 @@ class SyncStatusStore with RepositoryMappings {
   /// 供"游标损坏/未来游标需重置"场景的恢复入口：清除分区键（userId 为 null
   /// 时清全局键），下次同步将从全量重新开始（LWW 幂等，不丢数据）。
   Future<AppResult<void>> reset({String? userId}) async {
+    final normalized = _normalizeUserId(userId); // 编程错误在 try 之外直接抛
     try {
       await database.transaction(() async {
         for (final base in [
@@ -289,7 +362,7 @@ class SyncStatusStore with RepositoryMappings {
           AppMetadataKeys.lastSyncError,
         ]) {
           await (database.delete(database.appMetadata)
-                ..where((t) => t.key.equals(_statusKey(base, userId))))
+                ..where((t) => t.key.equals(_statusKey(base, normalized))))
               .go();
         }
       });

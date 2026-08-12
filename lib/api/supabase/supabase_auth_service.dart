@@ -115,7 +115,18 @@ class SupabaseAuthService {
     } on http.ClientException {
       return const AppFailure('网络不可用，请稍后重试');
     }
-    // 其余非预期异常（编程错误）：重新抛出保留原始堆栈，由上层统一处理。
+    // 其余非预期异常（编程错误）：重新抛出保留原始堆栈，由上层统一处理——
+    // 重抛前记日志（含堆栈，与 lan_sync_server 未捕获异常记录方式一致；
+    // 防用户直接触发的 OTP 流程中非预期异常类型导致界面崩溃时无痕可查）。
+    // **可达性说明**：gotrue 的 GotrueFetch 会把网络/解析等异常统一
+    // 包装成 AuthException（fallthrough 到上方 `on AuthException` 分支），
+    // 本 catch 实际仅覆盖 SDK 之外的非预期异常（防御层保留，不专门构造
+    // 触发——避免假覆盖测试）。
+    // ignore: avoid_catches_without_on_clauses
+    catch (e, st) {
+      stderr.writeln('[supabase-auth] sendMagicLink 非预期异常：$e\n$st');
+      rethrow;
+    }
   }
 
   /// 校验邮箱 OTP 验证码并登录；成功返回用户 id。
@@ -136,11 +147,14 @@ class SupabaseAuthService {
         token: trimmedToken,
         type: OtpType.email,
       );
-      // OTP 一次性凭证已被消费：response.user 可能为空，但 response.session.user
-      // 才是本次登录建立的会话的**权威用户**——优先从中取值（不依赖
-      // currentUser：会话切换未完成时 currentUser 仍是旧账号会误判失败，
-      // OTP 已被消费无法重试会锁死用户；旧账号恰同邮箱则身份错配）。
-      final userId = response.user?.id ?? response.session?.user.id;
+      // OTP 一次性凭证已被消费：**response.session.user 才是本次登录建立的
+      // 会话的权威用户**——优先取之（防客户端已有旧会话时 response.user 与
+      // 新建会话的 session.user 不一致，OTP 已被消费无法重试会锁死用户）。
+      // 空安全说明：gotrue 的 Session.user 为非空类型（'user' 缺失时
+      // Session.fromJson 解析期即抛 FormatException，落入 on AuthException
+      // 分支），取值行 `session?.user.id` 安全；未来 SDK 若将 user 改为可空，
+      // 须同步改为 `session?.user?.id ?? response.user?.id`。
+      final userId = response.session?.user.id ?? response.user?.id;
       if (userId == null) {
         // 中性表述（失败结果不应自称"登录成功"）。
         return const AppFailure('无法确认登录用户，请重试');
@@ -155,7 +169,14 @@ class SupabaseAuthService {
     } on http.ClientException {
       return const AppFailure('网络不可用，请稍后重试');
     }
-    // 其余非预期异常（编程错误）：重新抛出保留原始堆栈，由上层统一处理。
+    // 其余非预期异常（编程错误）：重新抛出保留原始堆栈，由上层统一处理——
+    // 重抛前记日志（含堆栈；OTP 一次性凭证已被消费后，非预期异常类型让
+    // 上层无从定位，用户又无法重试，日志是唯一排查入口）。
+    // ignore: avoid_catches_without_on_clauses
+    catch (e, st) {
+      stderr.writeln('[supabase-auth] verifyEmailOtp 非预期异常：$e\n$st');
+      rethrow;
+    }
   }
 
   /// 登出。
@@ -172,7 +193,13 @@ class SupabaseAuthService {
     } on http.ClientException {
       return const AppFailure('网络不可用，请稍后重试');
     }
-    // 其余非预期异常（编程错误）：重新抛出保留原始堆栈，由上层统一处理。
+    // 其余非预期异常（编程错误）：重新抛出保留原始堆栈，由上层统一处理——
+    // 重抛前记日志（含堆栈）。
+    // ignore: avoid_catches_without_on_clauses
+    catch (e, st) {
+      stderr.writeln('[supabase-auth] signOut 非预期异常：$e\n$st');
+      rethrow;
+    }
   }
 
   /// 极简邮箱形态校验（supabase 服务端仍会最终校验）：单个 @、本地部分/域名

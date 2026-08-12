@@ -24,6 +24,13 @@ abstract final class SyncTarget {
 
 /// 云同步后端接口。
 abstract interface class SyncBackend {
+  /// 未配置（SUPABASE_URL/ANON_KEY 缺失或非法）时的统一失败文案。
+  ///
+  /// 两个后端（[NoopSyncBackend] 与 Supabase 后端）共用同一常量：调用方
+  /// （编排层/UI）可据此可靠区分"未配置"与真实登出/同步失败——失败对象只有
+  /// message（无错误码），文案必须单一事实来源防漂移。
+  static const unconfiguredError = '云同步未配置（缺少 SUPABASE_URL/ANON_KEY）';
+
   /// 是否已注入云配置（SUPABASE_URL + ANON_KEY）。
   ///
   /// 注意：**仅表示配置是否注入**，不代表认证会话可用——会话有效性请通过
@@ -49,6 +56,10 @@ abstract interface class SyncBackend {
   Future<AppResult<SyncReport>> syncNow();
 
   /// 登出。
+  ///
+  /// 前置条件：调用方应**先检查 [isConfigured]** 再决定是否调用——未配置场景
+  /// 本方法返回 [unconfiguredError] 失败（无会话可登出），防调用方误判云端
+  /// 登出成功而继续执行本地状态清理；失败语义由编排层统一处理。
   Future<AppResult<void>> signOut();
 }
 
@@ -86,9 +97,6 @@ class SyncReport {
 class NoopSyncBackend implements SyncBackend {
   NoopSyncBackend();
 
-  /// 未配置时的统一失败文案（4 处引用同一常量，防漏改导致消息不一致）。
-  static const unconfiguredError = '云同步未配置（缺少 SUPABASE_URL/ANON_KEY）';
-
   @override
   bool get isConfigured => false;
 
@@ -105,23 +113,23 @@ class NoopSyncBackend implements SyncBackend {
 
   @override
   Future<AppResult<void>> sendMagicLink(String email) async {
-    return const AppFailure(unconfiguredError);
+    return const AppFailure(SyncBackend.unconfiguredError);
   }
 
   @override
   Future<AppResult<String>> verifyEmailOtp(String email, String token) async {
-    return const AppFailure(unconfiguredError);
+    return const AppFailure(SyncBackend.unconfiguredError);
   }
 
   @override
   Future<AppResult<SyncReport>> syncNow() async {
-    return const AppFailure(unconfiguredError);
+    return const AppFailure(SyncBackend.unconfiguredError);
   }
 
   @override
   Future<AppResult<void>> signOut() async {
     // 未配置场景无会话可登出：与其余方法一致返回失败，防调用方误判云端登出
     // 成功而继续执行本地状态清理（本文件契约：失败语义由编排层统一处理）。
-    return const AppFailure(unconfiguredError);
+    return const AppFailure(SyncBackend.unconfiguredError);
   }
 }

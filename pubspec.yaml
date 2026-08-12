@@ -20,6 +20,12 @@ dependencies:
   intl: ^0.20.3
   path: ^1.9.1
   path_provider: ^2.1.6
+  # **直接固定传递依赖 postgrest**（supabase_flutter → supabase 2.16.0 精确
+  # 固定 2.9.1）：其内部"POST 不被 SDK 内层重试、GET 内层重试"策略被测试的
+  # 精确计数断言依赖（见 remote_tables_retry_test.dart 文件头）——直接声明
+  # 使版本意图显式可见、防 supabase 未来放宽约束时 postgrest 静默升级改变
+  # 该行为（断言会失败提示，但需先核验版本）。
+  postgrest: 2.9.1
   sqlite3: ^3.5.1
   supabase_flutter: ^2.17.1
   uuid: ^4.6.0
@@ -30,6 +36,10 @@ dev_dependencies:
   flutter_lints: ^6.0.0
   build_runner: ^2.15.1
   drift_dev: ^2.34.5
+  # 仅测试用：supabase_flutter 的 GoTrueClient 经 shared_preferences 持久化
+  # 会话（传递依赖），测试用 setMockInitialValues 重置存储保证用例顺序无关。
+  # 运行期仍无 shared_preferences（技术选型：数据落 app_metadata 表）。
+  shared_preferences: ^2.5.4
 
 flutter:
   uses-material-design: true

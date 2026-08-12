@@ -121,23 +121,170 @@ void main() {
       }
     });
 
-    test('markSuccess 并发交错：最终游标为较晚时间戳（事务原子性）', () async {
+    test('markSuccess 并发交错：最终游标为较晚时间戳（事务原子性，每轮全新库）', () async {
+      final t0 = DateTime.now().toUtc().subtract(const Duration(minutes: 30));
+      final t1 = t0.add(const Duration(minutes: 5));
+      // 循环多轮、**每轮全新库**：读-改-写若非事务，两调用谁先读谁先写取决于
+      // 真实调度，首轮可能"侥幸通过"——多轮显著提高原子性回归的检出概率。
+      // （复用同一库会让首轮后游标已推进，后续轮次全走相等分支，失去检出力。）
+      for (var round = 0; round < 10; round++) {
+        final db = AppDatabase(NativeDatabase.memory());
+        try {
+          final store = SyncStatusStore(database: db);
+          await Future.wait([
+            store.markSuccess(syncedAt: t1, target: SyncTarget.supabase),
+            store.markSuccess(syncedAt: t0, target: SyncTarget.supabase),
+          ]);
+          final status = (await store.read()).requireValue();
+          expect(status.lastSuccessfulSyncAt, isNotNull,
+              reason: '并发完成后游标不得丢失（第 $round 轮）');
+          expect(
+            status.lastSuccessfulSyncAt!.isAtSameMomentAs(t1),
+            isTrue,
+            reason: '并发完成后游标必须为较晚时间戳（事务原子性，第 $round 轮）',
+          );
+        } finally {
+          await db.close();
+        }
+      }
+    });
+
+    test('markSuccess（推进）× markFailure 并发交错：不抛错且终态自洽（冒烟守护）', () async {
+      final t = DateTime.now().toUtc().subtract(const Duration(minutes: 30));
+      // 循环多轮、每轮全新库：markFailure 与 markSuccess 并发交错。
+      // **守护定位（r32 明确）**：本用例是**并发冒烟守护**——并发调度不可控，
+      // "无论顺序都清错"的 LWW 缺陷无法在此确定性检出（错误为 null 是合法
+      // 终态之一）；顺序敏感的 LWW 语义由**确定性用例**锁定（"推进后失败
+      // 保留错误/失败后推进清错"分别见 markFailure 保留游标、从未同步失败
+      // 后成功清错、相等/乱序分支保留错误用例）。本用例只守护并发下不抛错、
+      // 游标/错误键终态自洽（不出现矛盾组合）。
+      for (var round = 0; round < 10; round++) {
+        final db = AppDatabase(NativeDatabase.memory());
+        try {
+          final store = SyncStatusStore(database: db);
+          await Future.wait([
+            store.markSuccess(syncedAt: t, target: SyncTarget.supabase),
+            store.markFailure('并发失败（第 $round 轮）'),
+          ]);
+          final status = (await store.read()).requireValue();
+          expect(status.lastSuccessfulSyncAt, isNotNull,
+              reason: '并发成功×失败后游标不得丢失（第 $round 轮）');
+          expect(
+            status.lastSuccessfulSyncAt!.isAtSameMomentAs(t),
+            isTrue,
+            reason: '并发成功×失败后游标仍为 t（第 $round 轮）',
+          );
+          // lastError 合法终态之一：清除（成功晚于失败）或保留最近失败
+          //（失败晚于成功写回）——两者都是合法 LWW 结果。
+          final error = status.lastError;
+          expect(
+            error == null || error.startsWith('并发失败'),
+            isTrue,
+            reason: 'lastError 必须为合法 LWW 终态：清除或保留最近失败'
+                '（第 $round 轮，实际：$error）',
+          );
+        } finally {
+          await db.close();
+        }
+      }
+    });
+
+    test('userId 契约（r12 行为变更）：空/空白/超长 userId 直接抛 ArgumentError', () async {
       final db = AppDatabase(NativeDatabase.memory());
       try {
         final store = SyncStatusStore(database: db);
-        final t0 = DateTime.now().toUtc().subtract(const Duration(minutes: 30));
-        final t1 = t0.add(const Duration(minutes: 5));
-        // 并发同时触发 t1/t0 两次 markSuccess：断言最终游标仍为 t1
-        //（读-改-写在同一 transaction 内，drift 串行化事务保证原子性）。
-        await Future.wait([
-          store.markSuccess(syncedAt: t1, target: SyncTarget.supabase),
-          store.markSuccess(syncedAt: t0, target: SyncTarget.supabase),
-        ]);
-        final status = (await store.read()).requireValue();
+        final t = DateTime.now().toUtc().subtract(const Duration(minutes: 30));
+        // 空/空白/超长是调用方编程错误：入口直接抛（不被包成 AppFailure）——
+        // 防编程错误被静默降级为普通运行期数据错误；null 仍走全局键（合法）。
+        // **空白覆盖**：含 \t/\n 等其它空白字符（String.trim 一并剥离；
+        // 若回归为仅剥离空格的自定义 trim 可检出）+ trim 后超长（
+        // `' ' + 'x'*129` trim 后 129 仍抛——固化"先 trim 后判长"顺序）。
+        for (final bad in [
+          '',
+          '   ',
+          '\t',
+          '\n',
+          'x' * 129,
+          ' ${'x' * 129}', // trim 后 129 仍抛（固化"先 trim 后判长"顺序）
+        ]) {
+          await expectLater(store.read(userId: bad), throwsArgumentError,
+              reason: 'read 空/超长 userId 直接抛：$bad');
+          await expectLater(
+            store.markSuccess(syncedAt: t, target: SyncTarget.supabase,
+                userId: bad),
+            throwsArgumentError,
+            reason: 'markSuccess 空/超长 userId 直接抛：$bad',
+          );
+          await expectLater(
+            store.markFailure('失败', userId: bad),
+            throwsArgumentError,
+            reason: 'markFailure 空/超长 userId 直接抛：$bad',
+          );
+          await expectLater(store.reset(userId: bad), throwsArgumentError,
+              reason: 'reset 空/超长 userId 直接抛：$bad');
+        }
+        // null = 未登录用全局键：合法，不抛。
+        expect((await store.read()).isSuccess, isTrue);
+        // **无污染断言**：非法输入循环后，全局状态必须仍为
+        // "从未同步"且游标/错误/目标三字段均 null——固化"校验发生在任何写
+        // 操作之前"的顺序契约（防"先写后校验"污染 lastError/lastTarget 时
+        // 仅查 hasSynced 漏检）。
+        final afterBad = (await store.read()).requireValue();
+        expect(afterBad.lastSuccessfulSyncAt, isNull,
+            reason: '非法 userId 校验失败不得产生任何写副作用（游标）');
+        expect(afterBad.lastError, isNull,
+            reason: '非法 userId 校验失败不得产生任何写副作用（错误）');
+        expect(afterBad.lastTarget, isNull,
+            reason: '非法 userId 校验失败不得产生任何写副作用（目标）');
+        // **整表零写入（r45）**：超长非空 userId 若走"先写后校验"会写独立
+        // 分区键（lastSyncAt:xxx...），全局 read 观察不到——查全表才能覆盖
+        // 分区侧写副作用（库全新，非法输入循环后应零写入）。
+        expect(await db.select(db.appMetadata).get(), isEmpty,
+            reason: '非法 userId 校验失败不得产生任何分区写副作用');
+
+        // 合法边界（防阈值误改 `>= 128` 或空串误判）：恰好 128 长度与 1 字符
+        // 都是合法 userId（trim 后不改变长度、不超上限）。
+        // **先 trim 后判长（r33/r36 修正）**：`' ${'x' * 127} '` 原始 129 > 128、
+        // trim 后 127 ≤ 128 应成功写入；`' ${'x' * 128} '` 原始 130、trim 后
+        // 恰好 128 也应合法——完整锁定"先 trim 后判长"在阈值 128 处的包含
+        // 关系（回归为先判长后 trim 会误拒绝）。
+        for (final ok in ['a', 'x' * 128, ' ${'x' * 127} ', ' ${'x' * 128} ']) {
+          expect(
+            (await store.markSuccess(
+              syncedAt: t,
+              target: SyncTarget.supabase,
+              userId: ok,
+            ))
+                .isSuccess,
+            isTrue,
+            reason: '合法 userId 正常读写：$ok',
+          );
+          expect((await store.read(userId: ok)).requireValue().hasSynced, isTrue);
+        }
+
+        // **trim 归一化验证（双向交叉读写）**：锁读侧与写侧都必须 trim——
+        // 单向用例（写入带空白/读取已 trim）无法防"仅单侧 trim"的回归。
+        // 方向 1：写入带空白、读取已 trim（锁写侧 trim）
+        await store.markSuccess(
+          syncedAt: t,
+          target: SyncTarget.supabase,
+          userId: '  user-1  ',
+        );
         expect(
-          status.lastSuccessfulSyncAt!.isAtSameMomentAs(t1),
+          (await store.read(userId: 'user-1')).requireValue().hasSynced,
           isTrue,
-          reason: '并发完成后游标必须为较晚时间戳（事务原子性）',
+          reason: '带空白写入 / trim 后读取命中同一分区键',
+        );
+        // 方向 2：写入已 trim、读取带空白（锁读侧 trim）
+        await store.markSuccess(
+          syncedAt: t,
+          target: SyncTarget.supabase,
+          userId: 'user-2',
+        );
+        expect(
+          (await store.read(userId: '  user-2  ')).requireValue().hasSynced,
+          isTrue,
+          reason: 'trim 后写入 / 带空白读取命中同一分区键',
         );
       } finally {
         await db.close();
@@ -312,7 +459,8 @@ void main() {
         expect(readResult.isSuccess, isFalse, reason: '未来游标 read 显式失败');
         expect(
           readResult.when(onSuccess: (_) => '', onFailure: (m) => m),
-          contains('需重置'),
+          contains(SyncStatusMessages.cursorUnreasonable),
+          reason: '失败信息包含"游标不合理"常量前缀（不绑定具体文案）',
         );
       } finally {
         await db.close();

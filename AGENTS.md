@@ -37,6 +37,32 @@ lib/
 7. 全部操作经 CLI 指令系统统一分发（UI/快捷键/深链/未来 AI 收敛同一通道），扩展 = 注册指令，不改核心代码
 8. 提交与合并纪律（PR 工作流）：本地提交信息遵循 Conventional Commits；**合并到 main 一律走 feature 分支 + Pull Request**，禁止直接 push 到 main；feature 分支（`feat/`、`fix/`、`docs/` 等）可推送到远端并发起 PR（`gh pr create --base main`），**PR 合并须经用户审批**（用户明确指示后才 merge）；未经用户明确指示不得 push 除 feature 分支以外的任何分支
 
+## ocr 审查纪律（模块门禁的第三道门）
+
+ocr 审查与 analyze/测试是**两道不同门**：analyze/测试锁行为正确，ocr 锁语义/质量
+（含测试自身的真假覆盖）。通过标准**不是"评论数归零"**（全文件重扫 + LLM 幻觉下
+该度量不收敛），而是：
+
+1. **属实缺陷清零**：每轮评论按 severity 逐条处置——
+   - high/medium：逐条验证，**属实才修**；误报排除必须附硬证据
+     （`flutter analyze` 0 issues / 全量测试绿 / 语义正确性论证）并写明理由，
+     不得仅凭"我觉得不对"排除；
+   - low：显式处置三选一——修复 / 记入待办 / 挂起并写明理由，不静默忽略
+     （low 中可能藏真问题，模型分级不可靠）。
+2. **停循环判据**：连续 2 轮**无新增属实 high/medium** 即收尾；低危建议与
+   重复误报不计入门禁。单轮清零不可靠（全文件重扫每轮都会以新角度重报旧文件）。
+3. **文件选择分层**（增量审查，不是二选一）：
+   - 日常修复循环：`ocr review --commit <最新 commit>`——只审当次 commit 的
+     diff，已稳定代码不重扫（消除"已修复评论反复出现"噪音）；
+   - 模块/阶段门禁：`ocr review --from main --to <feature 分支>`——审整个分支
+     相对 main 的累积 diff，覆盖跨 commit 的契约演进（LWW 语义、user_id 归属、
+     epoch 竞态等分多 commit 长出来的交互问题）；
+   - 禁止使用无 ref 的全量 workspace 重扫（48 轮不收敛的根源）。
+4. **兜底分工**：增量 diff 验"修复对不对"，分支 diff 验"模块自洽"，全量测试
+   验"行为不回归"——三者互补，缺一不可；修复后代码的问题必然进入下一轮
+   `review --commit` 视图，唯一盲区是"未改动代码里的同类问题"，由分支门禁
+   与全量测试兜底。
+
 ## 保留不变式（行为级，实现不得破坏）
 1. 离线优先：读写先落本地 SQLite，云/LAN 异步不阻塞
 2. 软删除统一为 `deleted_at` 时间戳 + 更新 `updated_at`（删除永远赢）
@@ -70,5 +96,6 @@ lib/
 ## 安全与提交
 - `.gitignore` 不提交：SUPABASE_URL/ANON_KEY、AI key、本地 `*.sqlite`、`dist/` 构建产物
 - `--dart-define` 默认值指向公开地址（本仓库 raw.githubusercontent），可被覆盖；AI key 永不入编译参数
+- **SUPABASE_URL 约束（r14 收窄）**：仅接受 http(s) **根路径**（无子路径/query/fragment/userInfo）——SupabaseClient 会拼接 `/auth/v1`、`/rest/v1` 端点，非根路径生成错误 URL；含子路径代理配置会在工厂阶段降级离线（stderr 警告 + 脱敏日志），需子路径代理请在应用侧配置反代（对外仍根路径）
 - 阶段 0 起每个阶段一个 commit，信息写明阶段与内容
 - 合并到 main 一律走 feature 分支 + PR（铁律 8）；PR 合并须用户审批

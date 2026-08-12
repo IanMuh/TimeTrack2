@@ -10,10 +10,14 @@ class AppMetadataKeys {
   /// 本设备稳定 id（UUID；LAN 配对/时间条目 device_id 来源）。
   static const deviceId = 'device_id';
 
-  /// 最近一次云同步完成时刻（UTC ISO8601；增量同步游标起点）。
+  /// 增量同步游标：最近一次成功同步**实际处理数据的最大 updated_at（高水位）**，
+  /// 而非墙钟完成时刻（同步期间新增行的 updated_at ≤ 该值，下一轮
+  /// `>= 游标` 才不漏行；字段名 lastSyncAt 为历史命名，语义见
+  /// sync_status_store.dart 的 SyncStatus.lastSuccessfulSyncAt）。
   static const lastSyncAt = 'last_sync_at';
 
-  /// 最近一次云同步失败原因（可读消息；成功后清除）。
+  /// 最近一次云同步失败原因（可读消息；**游标真正推进时**清除——相等/乱序
+  /// 成功分支保留，防抹掉游标未推进期间的真实失败记录）。
   static const lastSyncError = 'last_sync_error';
 
   /// 最近一次成功同步的目标（`supabase` / `lan`；未同步为空）。
