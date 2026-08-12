@@ -130,16 +130,19 @@ void main() {
       // 引入未闭合 `$$` 会在此失败而非静默）。
       expect(inDollar, isFalse,
           reason: '美元引用定界符必须配对闭合（扫描结束态平衡）');
-      // **盲区形态自校验（r49）**：`E'` / `U&'` 反斜杠/Unicode 转义字符串是
-      // 状态机盲区——若未来 schema 引入它们，扫描会静默失效（suspicious 恒 0）。
-      // 负向断言锁定当前 schema 无这些形态（`E'` 检测用词边界防把 `... FOR KEY
-      // SHARE'` 结尾的 E+引号误判；`U&'` 同理）。盲区形态引入时本断言先失败、
-      // 提示须升级扫描。
-      final escapePrefixes = RegExp(r"\b[EU]&?'");
+      // **盲区形态自校验（r49，r50 收窄+限定范围）**：`E'` / `U&'` 反斜杠/
+      // Unicode 转义字符串是状态机盲区——若未来 schema 引入它们，扫描会静默
+      // 失效（suspicious 恒 0）。负向断言锁定当前 schema 无这些形态（只匹配
+      // PostgreSQL 盲区前缀 `E'` 与 `U&'`——r50 收窄掉 `[EU]&?'` 对 `U'`/
+      // `E&'` 等非盲区形态的误匹配）。**作用范围限定到剥离注释后的代码文本**
+      // [withoutLineComments]（r50）——注释/说明文本中出现 `E'`/`U&'` 字样
+      // 与剥离逻辑无关、不得误报；仅代码形态引入时本断言先失败、提示须升级
+      // 扫描。
+      final escapePrefixes = RegExp(r"\bE'|\bU&'");
       expect(
-        escapePrefixes.allMatches(raw).isEmpty,
+        escapePrefixes.allMatches(withoutLineComments).isEmpty,
         isTrue,
-        reason: 'schema 无 E\'\'/U&\' 转义字符串前缀（状态机盲区形态未引入）',
+        reason: 'schema 代码无 E\'\'/U&\' 转义字符串前缀（状态机盲区形态未引入）',
       );
       // 结束状态平衡：顶层语句不应残留未闭合字符串/标识符（$$ 块由闭合
       // 定界符平衡；未闭合字符串在末尾行会遗留 inSingle=true——值仅为文档
@@ -149,6 +152,15 @@ void main() {
         RegExp(r'^[ \t]*--[^\n]*', multiLine: true).allMatches(raw).length,
         greaterThanOrEqualTo(1),
         reason: 'schema 含行首注释',
+      );
+      // **缩进注释存在性（r50）**：`[ \t]*` 增强的回归防护依赖 schema 中存在
+      // **带缩进**的行首注释（函数体内 13 处）——显式锁定其存在，防未来格式化
+      // 把注释全部改顶格后 `[ \t]*` 增强失去意义（生产剥离正则回退为 `^--`
+      // 时守卫仍通过）。
+      expect(
+        RegExp(r'^[ \t]+--[^\n]*', multiLine: true).allMatches(raw).length,
+        greaterThanOrEqualTo(1),
+        reason: 'schema 必须存在带缩进的行首注释（否则 [ \\t]* 增强无回归防护意义）',
       );
       // **剥离能力直接校验（生产剥离输出）**：带缩进的 `[ \t]*--` 注释必须
       // 全部被**生产剥离逻辑**移除——防剥离正则回退为 `^--` 时函数体内 13
@@ -370,6 +382,13 @@ void main() {
         r')' r'\$[A-Za-z0-9_]*\$',
         caseSensitive: false,
       );
+      // **书写风格锁定声明（r50）**：本正则要求写回语句的字面形态
+      // `SET deleted_at = parent_ts ... WHERE id = descendant.id`（无表别名、
+      // 无 CASE/GREATEST 包装）——这是**有意锁定当前书写风格**，非纯语义
+      // 断言（与同文件 LWW 测试显式容忍等价写法的风格不同，因为这里还依赖
+      // 上述 LOOP 结构锚定）。语义等价但词法不同的重构（表加别名 `ac.id`、
+      // `deleted_at = greatest(...)` 包装等）会误报失败——届时须同步调整
+      // 本正则与计数断言，而非静默改 schema。
       final writeBackMatch = writeBackRe.firstMatch(schema);
       expect(
         writeBackMatch,

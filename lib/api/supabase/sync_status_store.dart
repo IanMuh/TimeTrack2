@@ -275,14 +275,15 @@ class SyncStatusStore with RepositoryMappings {
   static const _maxUserIdLength = 128;
 
   /// 生成分区键：userId 非 null 时 `base:<userId>`，否则原键（全局）。
-  /// **入参须已归一化**（各公开方法入口统一 [_normalizeUserId] 校验一次——
-  /// 这里不再重复校验，避免同一 userId 双次 trim/长度检查）。
-  /// **契约说明**：本方法假定调用方已归一化——四个公开方法
-  ///（read/markSuccess/markFailure/reset）在 try 之前统一调用
-  /// [_normalizeUserId] 并传归一化结果；新增方法须遵循同一约定。
-  /// **兜底校验（无 assert，防御性）**：未归一化（空白/空串/超长）
-  /// userId 直接生成脏分区键会拆裂共享设备游标隔离——**debug 与 release 均
-  /// 直接抛 ArgumentError**（不依赖 assert）。
+  /// **双层校验（r50 措辞澄清）**：入口权威校验在 [_normalizeUserId]（各公开
+  /// 方法在 try 之外统一调用一次）——这里**不重复 trim/长度检查作为主路径**，
+  /// 但保留**防御兜底校验**（无 assert）：若未来新增调用点未先归一化就调用
+  /// 本方法，未归一化的 userId 直接生成脏分区键会拆裂共享设备游标隔离——
+  /// **debug 与 release 均直接抛 ArgumentError**（不依赖 assert）。两层语义
+  /// 不同：入口校验是"调用方契约"（正常流程），本分支是"防御失效检测"
+  ///（编程错误哨兵）。
+  /// **契约说明**：四个公开方法（read/markSuccess/markFailure/reset）在 try
+  /// 之前统一调用 [_normalizeUserId] 并传归一化结果；新增方法须遵循同一约定。
   /// **范围说明**：`normalized.length != userId.length` 仅捕获**首尾**
   /// 空白；含**内部空白**的 userId（如 `'user 1'`）无法在此识别（会生成
   /// 带空格的键）——属调用方约定边界（[_normalizeUserId] 同样只 trim 首尾）。

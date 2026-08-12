@@ -75,12 +75,14 @@ class MemoryRemote implements RemoteTableGateway {
   }
 
   /// 是否配置表：无 id 列、以 user_id 作主键——行身份判定/错误文案/无主行
-  /// 拒绝在 seed、_validateRowBasics、injectUnownedRow 多处复用本判定。
-  /// **镜像说明（r36）**：字面量 `'profile_settings'` 是对生产表名
+  /// 拒绝在 seed、_validateRowBasics、injectUnownedRow、upsertRows 多处复用
+  /// 本判定。
+  /// **镜像说明（r36，r50 修正措辞）**：字面量 `'profile_settings'` 是对
   /// `RemoteTables.profileSettings`（cloud_sync_engine.dart 的单一事实来源）
-  /// 的**有意镜像**——mock 位于测试层、依赖方向不允许反向引生产引擎常量
-  ///（防循环依赖）；表名变更时须与本判定同步（同 `_isSettingsTable` 内部
-  /// 判定点唯一，非全局事实来源）。
+  /// 的**有意镜像**——mock 位于测试层，按依赖方向不反向引生产引擎常量
+  ///（引擎常量在 cloud_sync_engine 包，本 mock 只 import 纯接口
+  /// remote_tables.dart；引引擎常量需新增跨包依赖、非循环依赖问题）。表名
+  /// 变更时须与本判定同步（同 `_isSettingsTable` 内部判定点唯一）。
   static bool _isSettingsTable(String table) => table == 'profile_settings';
 
   /// 公共行校验（seed / seedUnowned 共用，单一事实来源防两处漂移）：
@@ -360,7 +362,12 @@ class MemoryRemote implements RemoteTableGateway {
   /// **成功路径语义（r48）**：仅在整批 upsert 校验通过并写入后填充（与
   /// [lastPushedIds] 成对）——失败路径保持清空，"最近一次**成功** upsert 的
   /// 负载"语义不含部分数据。
+  /// **按表拆分视图（r50）**：[lastPushedRawRowsByTable] 是**按表拆分**的记录
+  ///（`table → 该表最近一次成功 upsert 的原始负载`）——消除"某表是每轮同步
+  /// 最后一个非空推送表"的顺序依赖（见 cloud_sync_engine_test 认领用例注释）；
+  /// 两个视图共用同一底层记录（不是两份副本）。
   final List<Map<String, Object?>> lastPushedRawRows = [];
+  final Map<String, List<Map<String, Object?>>> lastPushedRawRowsByTable = {};
 
   /// 远端时间戳偏差（id → 时差）：fetchRemoteUpdatedAt 返回存储值 + 偏差——
   /// 模拟"拉取后、推送检查时远端被并发更新"（跳过分支 `remoteAt.isAfter`
@@ -376,6 +383,9 @@ class MemoryRemote implements RemoteTableGateway {
     callLog.add('push:$table');
     lastPushedIds.clear(); // 语义："本次调用尚未写入任何行"（失败路径也清空）
     lastPushedRawRows.clear(); // 同步清空原始负载记录（与 lastPushedIds 成对）
+    // 按表视图只清**当前表**的记录（不清其他表）——"每表最近一次成功 upsert
+    // 的负载"语义使断言不依赖"该表是最后一个非空推送表"的顺序（r50）。
+    lastPushedRawRowsByTable.remove(table);
     _maybeThrow('push:$table');
     onBeforePush?.call(table, userId);
     final target = tables.putIfAbsent(table, () => {});
@@ -400,16 +410,27 @@ class MemoryRemote implements RemoteTableGateway {
       // lastPushedIds"失败路径保持清空"的成对语义一致）。
       final rawCopy = _deepCopy(row);
       final owned = {...row, 'user_id': userId};
-      // 行身份：常规表用 id；profile_settings 无 id 键（云端主键 user_id）。
-      final id = owned['id'] ?? owned['user_id'];
+      // 行身份（r50 对齐 seed 的 fail-fast）：常规表**必须携带 id**——本方法
+      // 已强制注入 `user_id = userId`，若用 `id ?? user_id` 静默回退，任何缺
+      // id 的常规表行都会被键到当前 userId 下，再叠加 merge 语义与同键既有
+      // 行做字段级合并，比整行覆盖更隐蔽地静默损坏数据（与 seed 拒绝缺 id
+      // 行的 fail-fast 哲学一致，防 mock 放行真网关必拒的畸形行）。
+      final isSettings = _isSettingsTable(table);
+      final id = isSettings
+          ? (owned['user_id'] as String?)
+          : (owned['id'] as String?);
       if (id == null) {
-        throw ArgumentError('upsertRows: 行必须携带 id 或 user_id（行内容：$row）');
+        throw ArgumentError(
+          'upsertRows: ${isSettings ? 'profile_settings' : '常规表'} 行必须携带'
+          '${isSettings ? 'user_id' : 'id'}（行内容：$row）',
+        );
       }
       // 归属校验（写入前统一检查，防部分写入）：
       // - 目标行归属他人 → 拒绝覆盖（与 fetch 严格过滤对齐，模拟 RLS 拒绝）；
       // - 严格模式下目标行为无主行（user_id 为 null）→ 拒绝认领（防任意用户
       //   覆盖无主行，与 fetch 严格模式过滤对称）。
-      final existing = target[id as String];
+      // 注：id 在 null 检查后已提升为非空 String（r50 起类型收窄）。
+      final existing = target[id];
       final existingUser = existing?['user_id'];
       // 按值判定（非 String 的 user_id 也是归属冲突——类型漏洞防直接注入
       // tables 绕过校验）。
@@ -448,7 +469,12 @@ class MemoryRemote implements RemoteTableGateway {
       // **成功路径才记录原始负载（r48）**：写入循环仅在整批校验通过后执行
       // ——失败路径 lastPushedRawRows 与 lastPushedIds 一样保持清空（防"最近
       // 一次成功 upsert 的负载"语义读到误导性部分数据）。
+      // **按表视图（r50）**：与扁平列表共用同一记录（行副本），测试按表断言
+      // 认领负载时不依赖"该表是最后一个非空推送表"的顺序假设。
       lastPushedRawRows.add(rawCopy);
+      lastPushedRawRowsByTable
+          .putIfAbsent(table, () => [])
+          .add(rawCopy);
     }
   }
 

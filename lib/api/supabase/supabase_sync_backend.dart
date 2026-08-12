@@ -435,8 +435,12 @@ class SupabaseSyncBackend implements SyncBackend {
           // **epoch 校验（r35）**：与 TimeoutException 分支一致——登出/重置后
           // 刷新已失效 refresh token 的 AuthException 归因"会话已切换"而非
           // "登录已过期"（防旧同步调用方拿到误导性重登提示，错误归因模糊）。
+          // **身份守卫（r50）**：与超时分支统一走 [_guardClearPersistedSession]
+          // ——刷新在途期间可能已发生"A 登出 → B 登录新账号写入共享存储"，
+          // 无条件本地清除会误抹 B 的新会话（真实窗口是刷新在途的秒/分钟级，
+          // 非微任务间隔）；清理前校验当前身份仍是旧账号才执行。
           if (epoch != _epoch) {
-            _clearPersistedSession(client);
+            _guardClearPersistedSession(client, userId);
             return const AppFailure('会话已切换，本次同步结果已丢弃');
           }
           // 区分"会话失效"与"网络瞬时故障"：优先用结构化错误码精确白名单判定
@@ -492,6 +496,11 @@ class SupabaseSyncBackend implements SyncBackend {
         // 在此期间会被引擎以"同步进行中"拒绝——该占用时长**无上限**（取决于
         // 旧同步网络请求实际完成时间，可能远超超时阈值），属引擎设计边界；
         // 缓解方向是给引擎加取消/超时机制（阶段 3 编排集成时评估）。
+        // **活锁风险（r50 补充）**：syncTimeout 是墙钟总时长（含本地库操作 +
+        // 全部网络往返）——离线大积压全量同步或慢网络大批次同步合法耗时超
+        // 时即被误判失败；失败不清游标、重试重跑同一批次，网络持续慢时可能
+        // 形成"永远超时、永远重试"活锁。缓解方向：按数据量动态放大超时
+        //（阶段 3 编排时评估）。
         final result = await engine
             .syncNow(userId: effectiveUserId)
             .timeout(syncTimeout);

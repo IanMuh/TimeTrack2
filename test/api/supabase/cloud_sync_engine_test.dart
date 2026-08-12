@@ -1101,17 +1101,16 @@ void main() {
         // null，该行在**每一轮**同步都被重复推送（非收敛稳态，属引擎设计
         // 语义；共享设备换号后会与已认领远端行产生归属冲突，归阶段 3 多
         // 用户数据隔离/清除入口处理）。
-        final pushedRaw =
-            h.remote.lastPushedRawRows.where((r) => r['id'] == 'unowned-a');
+        final pushedRaw = (h.remote.lastPushedRawRowsByTable[
+                RemoteTables.activities] ??
+            const <Map<String, Object?>>[])
+            .where((r) => r['id'] == 'unowned-a');
         expect(pushedRaw, isNotEmpty, reason: '无主行被推送');
         expect(pushedRaw.first['user_id'], CloudHarness.userId,
             reason: '引擎 _withUserId 补填的推送行归属当前用户（认领路径生效）');
-        // **lastPushedRawRows 依赖声明（r49）**：该字段语义为"最近一次 upsert
-        // 调用的原始负载"（每次 upsertRows 开头即 clear）——本断言依赖
-        // activities 是每轮同步里**最后一个非空推送表**（其余表均为空）。
-        // 若未来在本用例给其他表补 seed 行，推送顺序变为 activities → … →
-        // 其它表，`pushedRaw` 将不含 'unowned-a' 而静默变空/误通过；给其它
-        // 表补 seed 时须同步改用按表拆分的记录或断言方式。
+        // **按表视图（r50）**：`lastPushedRawRowsByTable` 记录"每表最近一次
+        // 成功 upsert 的原始负载"——本断言不依赖 activities 是最后一个非空
+        // 推送表的顺序假设（未来给其他表补 seed 行也不会清掉本表记录）。
         final remoteRow =
             h.remote.tables[RemoteTables.activities]?['unowned-a'];
         expect(remoteRow, isNotNull, reason: '推送后远端行存在');
@@ -1124,19 +1123,22 @@ void main() {
         final local2 = (await h.activities.activities()).requireValue();
         expect(local2.where((a) => a.id == 'unowned-a'), hasLength(1),
             reason: '重复同步不产生重复行（主键唯一）');
-        // **非收敛契约守护（r48）**：注释声明的"本地永不收敛、每一轮都被
-        // 重复推送"稳态须由断言锁定——若引擎未来改为推送后收敛本地归属
-        //（回写 user_id）或游标推进使该行不再被重复取回/推送，下方断言
-        // 变红（设计语义变化须显式同步本用例）。
+        // **非收敛契约守护（r48，r50 注明演化边界）**：注释声明的"本地永不
+        // 收敛、每一轮都被重复推送"稳态由断言锁定——若引擎未来改为推送后
+        // 收敛本地归属（回写 user_id，阶段 3 评估方向），下方断言变红属
+        // **预期**：届时按新语义更新"实现细节断言"（本地 user_id/重复推送），
+        // 保留"特性级断言"（无主行可见、被拉回、远端认领、无重复行）。
         expect(
           local2.singleWhere((a) => a.id == 'unowned-a').userId,
           isNull,
-          reason: '本地行 user_id 仍为 null（未收敛——非收敛稳态契约）',
+          reason: '本地行 user_id 仍为 null（当前非收敛稳态；阶段 3 收敛实现须同步本断言）',
         );
-        final pushedAgain =
-            h.remote.lastPushedRawRows.where((r) => r['id'] == 'unowned-a');
+        final pushedAgain = (h.remote.lastPushedRawRowsByTable[
+                RemoteTables.activities] ??
+            const <Map<String, Object?>>[])
+            .where((r) => r['id'] == 'unowned-a');
         expect(pushedAgain, isNotEmpty,
-            reason: '第二轮同步该行仍被重复推送（非收敛稳态契约）');
+            reason: '第二轮同步该行仍被重复推送（当前非收敛稳态）');
         expect(pushedAgain.first['user_id'], CloudHarness.userId,
             reason: '重复推送行归属仍为当前用户');
       } finally {

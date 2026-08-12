@@ -176,17 +176,20 @@ void main() {
     test('GET 拉取路径（fetchRowsSince）在瞬时失败后同样重试恢复', () async {
       // GET 路径会叠加 SDK 内层重试（含真实退避延迟），只验证语义（恢复成功、
       // 不抛），不做精确计数。
-      // **failures=5 + 退避录制器（r48/r49）**：不能只注入 1 次失败——若 SDK
-      // 内层重试会吸收单次瞬时失败，`_withRetry` 的 GET 重试分支根本没被触发，
-      // 即使本实现 GET 重试逻辑失效用例仍通过（静默假通过）。注入超过 SDK
-      // 内层重试次数的失败（5 次）确保异常穿透到 `_withRetry`；**并用注入的
-      // 录制式假延迟断言 `_withRetry` 确实执行过退避**（若 GET 分支未触发、
-      // requestedDelays 为空则用例失败）——把"穿透到 _withRetry"从隐含假设
-      // 变为显式断言（防 SDK 内层重试次数 ≥5 时全部吸收的静默假通过）。
+      // **failures=5 + maxAttempts=6 + 退避录制器（r48/r49/r50）**：不能只注入
+      // 1 次失败——若 SDK 内层重试会吸收单次瞬时失败，`_withRetry` 的 GET
+      // 重试分支根本没被触发，即使本实现 GET 重试逻辑失效用例仍通过（静默
+      // 假通过）。注入超过 SDK 内层重试次数的失败（5 次）确保异常穿透到
+      // `_withRetry`；**maxAttempts: 6（r50）** 让 `_withRetry` 容量覆盖
+      // 0~4 次漏透失败（SDK 内层吸收全部 5 次时 requestedDelays 为空、本用例
+      // 失败提示）——通过区间为"SDK 内层重试 < 5 次"，不再收窄成"恰好重试
+      // 3~4 次"的窄带；**并用注入的录制式假延迟断言 `_withRetry` 确实执行过
+      // 退避**（把"穿透到 _withRetry"从隐含假设变为显式断言）。
       final requestedDelays = <Duration>[];
       final gateway = buildGateway(
         error: () => const SocketException('connection reset'),
         failures: 5,
+        maxAttempts: 6,
         retryDelay: (delay) async {
           requestedDelays.add(delay);
         },
@@ -419,10 +422,15 @@ void main() {
       // http.ClientException 的证书 message 判定前置）未被耗尽路径验证——若
       // 某分支误吞异常或耗尽后改写类型，仅"失败 1 次后恢复"用例无法检出。
       // **耗尽语义**：连续失败耗尽 maxAttempts 后上抛**原始异常类型**（防
-      // 分支误吞/改写导致同步静默失败）。
-      for (final (label, error) in [
-        ('TimeoutException', TimeoutException('request timed out')),
-        ('ClientException', http.ClientException('connection closed')),
+      // 分支误吞/改写导致同步静默失败）。断言用 `isA<T>()` 类型匹配而非精确
+      // runtimeType 相等（r50 放宽）——若传输层/SDK 对异常做合法包装（如
+      // IOClient 把超时包成 ClientException），精确相等会误报；isA 守护的是
+      // "不吞/不改写为不相关类型"的本实现语义。
+      for (final (label, error, matcher) in [
+        ('TimeoutException', TimeoutException('request timed out'),
+            isA<TimeoutException>()),
+        ('ClientException', http.ClientException('connection closed'),
+            isA<http.ClientException>()),
       ]) {
         final gateway = buildGateway(
           error: () => error,
@@ -431,11 +439,7 @@ void main() {
         );
         await expectLater(
           pushOnce(gateway),
-          throwsA(isA<Object>().having(
-            (e) => e.runtimeType,
-            'runtimeType',
-            error.runtimeType,
-          )),
+          throwsA(matcher),
           reason: '$label 耗尽后必须上抛原类型异常（不静默吞掉/改写）',
         );
       }

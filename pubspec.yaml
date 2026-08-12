@@ -26,6 +26,12 @@ dependencies:
   # 使版本意图显式可见、防 supabase 未来放宽约束时 postgrest 静默升级改变
   # 该行为（断言会失败提示，但需先核验版本）。
   postgrest: 2.9.1
+  # **直接固定传递依赖 gotrue**（supabase 2.16.0 精确固定 2.27.1）：auth
+  # 契约测试（supabase_auth_service_test.dart）深度耦合 gotrue 内部行为
+  #（有会话 local scope signOut 发 POST /logout、AuthResponse.fromJson 解析键、
+  # verifyOTP 广播时序）——直接声明使版本意图显式可见、防 supabase 放宽
+  # 约束时 gotrue 静默升级导致契约测试以误导性方式集体失败。
+  gotrue: 2.27.1
   sqlite3: ^3.5.1
   supabase_flutter: ^2.17.1
   uuid: ^4.6.0
