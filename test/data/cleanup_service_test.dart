@@ -720,6 +720,60 @@ void main() {
       final links = await (db.select(db.activityCategoryLinks)).get();
       expect(links.map((r) => r.id).toSet(), {'linkX'});
     });
+
+    test('软删未传播 link 引用超期分类 → 同样阻塞分类删除（r4）', () async {
+      // r4：blocked 集合含"软删但未传播"（deletedAt >= cutoff）的 link——
+      // 与 r5 timeEntries 方向对称，link 方向缺正向用例防退化。
+      await putMeta(AppMetadataKeys.lastSyncAt, nowStr());
+      final catDeleted = mapping.utcString(
+        DateTime.now().subtract(const Duration(days: 400)),
+      );
+      await db
+          .into(db.activityCategories)
+          .insert(
+            ActivityCategoriesCompanion.insert(
+              id: 'catZ',
+              name: 'Z',
+              color: 1,
+              updatedAt: catDeleted,
+              deletedAt: Value(catDeleted),
+              parentId: const Value(null),
+            ),
+          );
+      // 软删未传播 link（10 天前，早于游标=now 但晚于 cutoff=now-180）引用 catZ。
+      final linkDeleted = mapping.utcString(
+        DateTime.now().subtract(const Duration(days: 10)),
+      );
+      await db
+          .into(db.activities)
+          .insert(
+            ActivitiesCompanion.insert(
+              id: 'actZ',
+              name: 'actZ',
+              color: 1,
+              updatedAt: linkDeleted,
+            ),
+          );
+      await db
+          .into(db.activityCategoryLinks)
+          .insert(
+            ActivityCategoryLinksCompanion.insert(
+              id: 'linkZ',
+              activityId: 'actZ',
+              categoryId: 'catZ',
+              updatedAt: linkDeleted,
+              deletedAt: Value(linkDeleted),
+            ),
+          );
+      final report = (await service.run()).requireValue();
+      expect(
+        report.deletedByTable['activityCategories'] ?? 0,
+        0,
+        reason: '软删未传播 link 引用阻塞分类删除',
+      );
+      final left = await (db.select(db.activityCategories)).get();
+      expect(left.map((r) => r.id).toSet(), {'catZ'});
+    });
   });
 
   group('retentionDays DB 异常回退（r2）', () {
