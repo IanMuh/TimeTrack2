@@ -154,6 +154,30 @@ void main() {
       }
     });
 
+    test('StateError 消息匹配（already closed）→ 归因"已关闭"（r23）', () async {
+      // r22 新增的 `on StateError` 归因分支（与清单服务同款模式）——`_closed`
+      // 为 false 但底层 client 被外部强关抛 `StateError('Client is already
+      // closed')`：按消息匹配返回可读失败而非 rethrow。
+      final dir = await Directory.systemTemp.createTemp('dl_stateerr');
+      final downloader = UpdateDownloader(
+        tempDirectory: dir,
+        httpClient: MockClient(
+          (_) async => throw StateError('Client is already closed'),
+        ),
+      );
+      try {
+        final result = await downloader.download('https://x.example/app.zip');
+        expect(result.isSuccess, isFalse);
+        expect(
+          result.when(onSuccess: (_) => '', onFailure: (m) => m),
+          contains('已关闭'),
+          reason: '消息匹配归因已关闭',
+        );
+      } finally {
+        await dir.delete(recursive: true);
+      }
+    });
+
     test('流中途断连：重试恢复 + 半成品清理（r9）', () async {
       final dir = await Directory.systemTemp.createTemp('dl_midstream');
       final client = _AbortStreamHttpClient();
@@ -186,9 +210,10 @@ void main() {
 
     test('下载总字节上限（r19/r20）：声明超限前置拒绝 / 分块流超限流式中断且无残留', () async {
       final dir = await Directory.systemTemp.createTemp('dl_cap');
-      // **注入小上限（r22）**：maxBytes 可注入——免真实 200MB 写盘/哈希成本
-      //（与 retryCount/tempDirectory 注入模式一致）；保留对默认配置的轻量
-      // 断言在边界用例。
+      // **注入小上限（r22/r23）**：maxBytes 可注入——免真实 200MB 写盘/哈希
+      // 成本（与 retryCount/tempDirectory 注入模式一致）。**默认配置值不再被
+      // 任何用例覆盖**（本文件所有字节上限用例均注入）——默认值本身由
+      // update_config.dart 常量注释与代码评审守护。
       const smallCap = 1024 * 1024; // 1 MB
       try {
         // 场景 A：响应头 contentLength 超上限 → send 后立即前置拒绝（不写盘）。
@@ -487,10 +512,14 @@ void main() {
         );
         final result = await verifier.downloadAndVerify(artifact);
         expect(result.isSuccess, isFalse, reason: '下载失败透传');
+        // **完整文案等值断言（r23）**：downloadAndVerify 对 AppFailure 原样
+        // `AppFailure(failure.message)` 透传——断言完整文案锁住"透传下载器
+        // 原文"（contains('网络不可用') 过弱：verifier 自行生成泛化文案也能
+        // 通过）。
         expect(
           result.when(onSuccess: (_) => '', onFailure: (m) => m),
-          contains('网络不可用'),
-          reason: '透传下载器文案',
+          '下载失败（网络不可用），请稍后重试',
+          reason: '透传下载器原文',
         );
         expect(calls, 3, reason: '仅下载器内部重试（初始 + 2），无校验重下');
       } finally {

@@ -22,7 +22,7 @@ import '../../utils/result.dart';
 /// Windows 安装器。
 class WindowsInstaller {
   WindowsInstaller({
-    required this.programDir,
+    required String programDir,
     required this.dataDir,
     ZipDecoder? zipCodec,
     // **私有字段初始化形参（Dart 3.12 特性）**：`this._x` 命名参数跨库调用名
@@ -32,25 +32,9 @@ class WindowsInstaller {
     int? maxTotalUncompressedBytes,
     int? maxCompressedBytes,
     int? maxEntryCount,
-  }) : zipCodec = zipCodec ?? ZipDecoder(),
-       // **programDir 合理性（r22 防御）**：applyStaging/_clearProgramDir 会
-       // 递归备份/清空 programDir——误配为文件系统根（`/`、`C:\`）或空串会
-       // 复制整棵目录树/递归清空该目录（不可恢复大范围数据丢失）。与 staging
-       // 目录名同级防御：须为绝对路径且非根目录（相对路径运行时解析依赖 cwd、
-       // 无法静态判定目标，同样拒绝）。
-       assert(
-         programDir.isNotEmpty &&
-             (programDir.startsWith('/') ||
-                 programDir.startsWith(r'\') ||
-                 RegExp(r'^[A-Za-z]:[\\/]').hasMatch(programDir)),
-         'programDir 必须为绝对路径',
-       ),
-       assert(
-         !(programDir == '/' ||
-             programDir == r'\' ||
-             RegExp(r'^[A-Za-z]:[\\/]?$').hasMatch(programDir)),
-         'programDir 不得为文件系统根目录',
-       ),
+  }) : programDir = _checkedProgramDir(programDir),
+       zipCodec = zipCodec ?? ZipDecoder(),
+       // 上限参数 assert（显式传入的非法值开发期即暴露）。
        assert(
          (maxUncompressedEntryBytes ?? UpdateConfig.maxUncompressedEntryBytes) >
              0,
@@ -68,6 +52,40 @@ class WindowsInstaller {
        maxCompressedBytes =
            maxCompressedBytes ?? UpdateConfig.maxCompressedBytes,
        maxEntryCount = maxEntryCount ?? UpdateConfig.maxEntryCount;
+
+  /// 程序目录校验（**构造内 throw，r23**）：applyStaging/_clearProgramDir 会
+  /// 递归备份/清空 programDir——误配为文件系统根（`/`、`C:\`）或空串会复制
+  /// 整棵目录树/递归清空该目录（不可恢复大范围数据丢失）。**不用 assert**
+  ///（release 构建被剥离、防御失效——与 staging 目录名的运行时守卫同级）。
+  ///
+  /// 校验：非空 + 绝对路径 + 非根目录。**根判定按 Win32 规范化折叠**（与
+  /// stagingNameError 同策略）：裁剪尾部空格/点号、折叠连续分隔符、去尾分隔符
+  /// 后判定——`C:\\`（连续分隔符）、`C:\ `（尾部空格折叠为 `C:\`）均解析到
+  /// 盘根、须拒绝。返回原值（路径归一化由 File/Directory 运行时处理）。
+  static String _checkedProgramDir(String dir) {
+    if (dir.isEmpty) {
+      throw ArgumentError.value(dir, 'programDir', '不得为空');
+    }
+    final isAbsolute =
+        dir.startsWith('/') ||
+        dir.startsWith(r'\') ||
+        RegExp(r'^[A-Za-z]:[\\/]').hasMatch(dir);
+    if (!isAbsolute) {
+      throw ArgumentError.value(dir, 'programDir', '必须为绝对路径');
+    }
+    var norm = dir.replaceAll(RegExp(r'[ .]+$'), ''); // 尾部空格/点号（Win32 裁剪）
+    norm = norm.replaceAll(RegExp(r'([\\/])[\\/]+'), r'\1'); // 折叠连续分隔符
+    norm = norm.replaceAll(RegExp(r'[\\/]+$'), ''); // 去尾分隔符
+    final isRoot =
+        norm.isEmpty ||
+        norm == '/' ||
+        norm == r'\' ||
+        RegExp(r'^[A-Za-z]:$').hasMatch(norm);
+    if (isRoot) {
+      throw ArgumentError.value(dir, 'programDir', '不得为文件系统根目录');
+    }
+    return dir;
+  }
 
   /// 程序目录（exe 所在，安装目标）。
   final String programDir;

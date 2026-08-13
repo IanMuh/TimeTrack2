@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:timetrack2/api/update/update_manifest_service.dart';
 import 'package:timetrack2/constants/storage_keys.dart';
+import 'package:timetrack2/constants/update_config.dart';
 import 'package:timetrack2/data/database/app_database.dart';
 import 'package:timetrack2/viewmodels/update/update_manifest.dart';
 
@@ -522,5 +523,97 @@ void main() {
       // close 不落缓存）需可控数据库注入挂起点，现有 drift 架构无此注入——
       // 该分支仅由代码评审 + 本复查逻辑守护，属已知覆盖边界。
     });
+
+    test('清单体积上限（r23 流式）：声明超限拒绝 / 分块流超限中断 / 恰好等于上限放行', () async {
+      // r23：_http.send + 流式消费（防 http.get 先整体缓冲再检查的 OOM）——
+      // contentLength 前置拦截 + 流式累计超限中断；上限语义"严格大于才拒绝"。
+      final max = UpdateConfig.maxManifestBytes; // 2 MB
+      final good = utf8.encode(
+        jsonEncode({
+          'version': '2.0.0',
+          'windows': {'url': 'https://x.example/app.zip', 'sha256': 'b' * 64},
+        }),
+      );
+      // 场景 A：contentLength 声明超限 → send 后前置拒绝（不消费流）。
+      final clientA = UpdateManifestService(
+        database: db,
+        currentVersion: '1.0.0',
+        manifestUrl: Uri.parse('https://x.example/update.json'),
+        httpClient: _ManifestStreamClient(<List<int>>[
+          good,
+        ], contentLength: max + 1),
+      );
+      final resultA = await clientA.checkForUpdate();
+      expect(resultA.isSuccess, isFalse, reason: '声明超限拒绝');
+      expect(
+        resultA.when(onSuccess: (_) => '', onFailure: (m) => m),
+        contains('体积超上限'),
+      );
+
+      // 场景 B：无 Content-Length、分块流实际超限 → 流式累计检查中断。
+      final clientB = UpdateManifestService(
+        database: db,
+        currentVersion: '1.0.0',
+        manifestUrl: Uri.parse('https://x.example/update.json'),
+        httpClient: _ManifestStreamClient(
+          [good, List<int>.filled(max, 1)], // 总计 > 2MB
+          contentLength: null,
+        ),
+      );
+      final resultB = await clientB.checkForUpdate();
+      expect(resultB.isSuccess, isFalse, reason: '分块流超限中断');
+      expect(
+        resultB.when(onSuccess: (_) => '', onFailure: (m) => m),
+        contains('体积超上限'),
+      );
+
+      // 场景 C：恰好等于上限（严格大于语义）——2MB 合法清单放行。
+      final padded = <int>[
+        ...utf8.encode(
+          jsonEncode({
+            'version': '2.0.0',
+            'windows': {'url': 'https://x.example/app.zip', 'sha256': 'b' * 64},
+          }),
+        ),
+      ];
+      // 补齐到恰好 max 字节（尾部空格不影响 jsonDecode）。
+      final atLimit = List<int>.filled(max, 32);
+      atLimit.setRange(0, padded.length, padded);
+      final clientC = UpdateManifestService(
+        database: db,
+        currentVersion: '1.0.0',
+        manifestUrl: Uri.parse('https://x.example/update.json'),
+        httpClient: _ManifestStreamClient(<List<int>>[
+          atLimit,
+        ], contentLength: max),
+      );
+      final resultC = (await clientC.checkForUpdate()).requireValue();
+      expect(resultC.available, isTrue, reason: '恰好等于上限的合法清单放行');
+    });
   });
+}
+
+/// 流式清单响应 client（r23）：逐块发射 + 可选 contentLength（null 模拟无
+/// Content-Length 的分块响应）。
+class _ManifestStreamClient extends http.BaseClient {
+  _ManifestStreamClient(this.chunks, {this.contentLength});
+
+  final List<List<int>> chunks;
+  final int? contentLength;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    final controller = StreamController<List<int>>();
+    for (final c in chunks) {
+      controller.add(c);
+    }
+    controller.close();
+    return http.StreamedResponse(
+      controller.stream,
+      200,
+      contentLength: contentLength,
+      headers: {'content-type': 'application/json'},
+      request: request,
+    );
+  }
 }

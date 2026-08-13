@@ -61,6 +61,9 @@ class DownloadResult {
 
 /// 更新下载器。
 class UpdateDownloader {
+  /// "已关闭"失败文案（r23 类级常量——文件内 3 处复用，单点维护）。
+  static const downloadClosedMessage = '下载器已关闭，请重新创建';
+
   UpdateDownloader({
     http.Client? httpClient,
     this._tempDirectory,
@@ -126,14 +129,14 @@ class UpdateDownloader {
     void Function(int receivedBytes, int? totalBytes)? onProgress,
   }) async {
     if (_closed) {
-      return const AppFailure('下载器已关闭，请重新创建');
+      return const AppFailure(downloadClosedMessage);
     }
     var attempt = 0;
     while (true) {
       // **重试间隙 close() 已触发（r10）**：下次尝试前重新检查——防对已关闭
       // client 发起 send（异常被兜底分支捕获返回误导性文案而非"已关闭"）。
       if (_closed) {
-        return const AppFailure('下载器已关闭，请重新创建');
+        return const AppFailure(downloadClosedMessage);
       }
       try {
         return AppSuccess(await _attemptDownload(url, onProgress: onProgress));
@@ -170,7 +173,7 @@ class UpdateDownloader {
         // `_closed` 或消息匹配才归因"已关闭"；其它 StateError（编程错误）
         // rethrow（Error 不吞）。
         if (_closed || e.message.contains('already closed')) {
-          return const AppFailure('下载器已关闭，请重新创建');
+          return const AppFailure(downloadClosedMessage);
         }
         rethrow;
       } on HttpStatusException catch (e) {

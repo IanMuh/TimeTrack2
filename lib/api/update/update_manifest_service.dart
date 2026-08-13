@@ -15,8 +15,8 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io'
-    show HttpException, SocketException, TlsException, stderr;
+import 'dart:io' show HttpException, SocketException, TlsException, stderr;
+import 'dart:typed_data' show BytesBuilder;
 
 import 'package:http/http.dart' as http;
 
@@ -96,14 +96,15 @@ class UpdateManifestService {
     if (_closed) {
       return const AppFailure(_closedMessage);
     }
-    final http.Response response;
+    final http.StreamedResponse response;
     try {
       response = await _http
-          .get(_manifestUrl)
+          .send(http.Request('GET', _manifestUrl))
           .timeout(UpdateConfig.checkTimeout);
       // **await 期间可能已被 close（r3）**：资源已释放，不再继续评估——
       // 防"等待期间 close → 成功继续 _evaluate 写库返回成功"违背已关闭语义。
       if (_closed) {
+        response.stream.listen(null, onError: (_) {}).cancel().ignore();
         return const AppFailure(_closedMessage);
       }
     } on TimeoutException {
@@ -141,28 +142,68 @@ class UpdateManifestService {
       rethrow;
     }
     if (response.statusCode != 200) {
+      // **取消订阅立即中止（r23）**：错误响应体无界消费会耗带宽/占连接——
+      // 与下载器非 200 分支一致。
+      response.stream.listen(null, onError: (_) {}).cancel().ignore();
       return AppFailure('更新清单获取失败（${response.statusCode}）');
     }
-    // **清单响应体大小上限（r22）**：`_http.get` 将整个响应缓冲进内存
-    //（bodyBytes）——被入侵/恶意服务器可在 checkTimeout 内高速推流超大清单
-    // 导致 OOM（下载路径已设 _maxBytes 双层上限，此处补齐不对称）。超限即拒
-    //（不解析）。
+    // **清单响应体大小上限（r23 流式）**：`http.get` 会先把整个响应体缓冲进
+    // 内存才返回（对超大清单预检发生在缓冲之后、OOM 未消除）——改用
+    // `_http.send` 拿 StreamedResponse 后**逐块消费**：contentLength 前置拦截 +
+    // 流式累计超限即中止（与下载器 _maxBytes 同款方案）。防恶意服务器在
+    // checkTimeout 内高速推流超大清单耗尽内存。
     final maxManifestBytes = UpdateConfig.maxManifestBytes;
     if (response.contentLength != null &&
         response.contentLength! > maxManifestBytes) {
+      response.stream.listen(null, onError: (_) {}).cancel().ignore();
       return const AppFailure('更新清单体积超上限');
     }
-    if (response.bodyBytes.length > maxManifestBytes) {
+    final builder = BytesBuilder(copy: false);
+    var received = 0;
+    try {
+      await for (final chunk in response.stream.timeout(
+        UpdateConfig.checkTimeout,
+      )) {
+        received += chunk.length;
+        if (received > maxManifestBytes) {
+          throw const ManifestTooLargeException();
+        }
+        builder.add(chunk);
+      }
+      if (_closed) {
+        return const AppFailure(_closedMessage);
+      }
+    } on ManifestTooLargeException {
       return const AppFailure('更新清单体积超上限');
+    } on TimeoutException {
+      if (_closed) return const AppFailure(_closedMessage);
+      return const AppFailure('更新检查超时，请稍后重试');
+    } on SocketException {
+      if (_closed) return const AppFailure(_closedMessage);
+      return const AppFailure('网络不可用，请稍后重试');
+    } on HttpException {
+      if (_closed) return const AppFailure(_closedMessage);
+      return const AppFailure('网络不可用，请稍后重试');
+    } on TlsException {
+      if (_closed) return const AppFailure(_closedMessage);
+      return const AppFailure('网络不可用，请稍后重试');
+    } on http.ClientException {
+      if (_closed) return const AppFailure(_closedMessage);
+      return const AppFailure('网络不可用，请稍后重试');
+    } on StateError catch (e) {
+      if (_closed || e.message.contains('already closed')) {
+        return const AppFailure(_closedMessage);
+      }
+      rethrow;
     }
     final UpdateManifest manifest;
     try {
       // **显式 UTF-8 解码（r19）**：response.body 按响应头 charset 解码、未
       // 指定时默认 latin-1（JSON 规范要求 UTF-8）——清单服务器只发
-      // application/json 无 charset 时中文 releaseNotes 会乱码。按 bodyBytes
+      // application/json 无 charset 时中文 releaseNotes 会乱码。按原始字节
       // 显式 utf8 解码。
       manifest = UpdateManifest.fromMap(
-        jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, Object?>,
+        jsonDecode(utf8.decode(builder.takeBytes())) as Map<String, Object?>,
       );
     } on FormatException catch (e) {
       return AppFailure('更新清单解析失败：${e.message}');
@@ -292,4 +333,11 @@ class UpdateManifestService {
       }
     }
   }
+}
+
+/// 清单响应体超上限（[UpdateConfig.maxManifestBytes]，r23）。
+///
+/// **独立类型**：流式消费时用于中断——catch 后返回"更新清单体积超上限"。
+class ManifestTooLargeException implements Exception {
+  const ManifestTooLargeException();
 }

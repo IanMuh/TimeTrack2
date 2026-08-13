@@ -566,11 +566,15 @@ void main() {
           reason: '旧程序目录内容被替换（不含数据文件——数据在数据目录）',
         );
         // 备份目录已删
-        // **r22 修正死断言**：`uri.pathSegments.last` 对 Directory 实体（URI
+        // **r22/r23 修正死断言**：`uri.pathSegments.last` 对 Directory 实体（URI
         // 尾斜杠）恒空串——旧断言 where 恒空、isEmpty 无条件通过（残留备份
-        // 无法察觉）。改用 e.path 判前缀（Windows 反斜杠下按路径包含判断）。
+        // 无法察觉）。按最后路径段前缀判断（与实现侧 `_basename(e.path).startsWith
+        // ('.backup-')` 排除语义一致、天然兼容 Windows 反斜杠；整路径 contains
+        // 子串过宽会误伤含 `.backup-` 的合法文件名）。
         expect(
-          program.listSync().where((e) => e.path.contains('.backup-')),
+          program.listSync().where(
+            (e) => e.path.split(RegExp(r'[\\/]')).last.startsWith('.backup-'),
+          ),
           isEmpty,
         );
       } finally {
@@ -856,6 +860,21 @@ void main() {
         } finally {
           await sub.delete(recursive: true);
         }
+
+        // **反斜杠文件名拒绝（r23）**：Android 是 POSIX——反斜杠是合法文件名字
+        // 符，按 `/` 分割会取到错误基名（URI 指向与校验文件不同的文件）；须
+        // 返回 AppFailure（而非 apkContentUri 的 ArgumentError 逃逸）。检查前置
+        // 于 ensureApkValid（纯路径形态、与文件是否存在无关），无需真实文件。
+        final backslash = installer.installValidatedApk(
+          '${dir.path}/foo\\bar.apk',
+          cacheRoot: dir.path,
+        );
+        expect(backslash.isSuccess, isFalse, reason: '反斜杠文件名拒绝');
+        expect(
+          backslash.when(onSuccess: (_) => '', onFailure: (m) => m),
+          contains('含反斜杠'),
+          reason: '反斜杠文件名返回可读原因（非 ArgumentError 逃逸）',
+        );
       } finally {
         await dir.delete(recursive: true);
       }

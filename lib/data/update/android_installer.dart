@@ -130,6 +130,14 @@ class AndroidInstaller {
   /// 平台守卫级实现。
   AppResult<({String action, String dataUri, String mimeType, int flags})>
   installValidatedApk(String apkFilePath, {required String cacheRoot}) {
+    // **反斜杠文件名拒绝（r23 前置）**：Android 是 POSIX——反斜杠是合法文件名
+    // 字符；apkFileName 只按 `/` 分割会取到错误基名（URI 指向与校验文件不同
+    // 的文件）、apkContentUri 的反斜杠显式拒绝是 ArgumentError（Error 逃逸破
+    // 坏"任一环失败返回可读原因"契约）。纯路径形态检查、置于 ensureApkValid
+    // 之前（与文件是否存在无关）。
+    if (apkFileName(apkFilePath).contains(r'\')) {
+      return const AppFailure('安装文件名不合法（含反斜杠）');
+    }
     final check = ensureApkValid(apkFilePath);
     if (check is AppFailure<void>) {
       return AppFailure(check.message);
@@ -147,14 +155,6 @@ class AndroidInstaller {
     }
     if (fileParent != root) {
       return const AppFailure('安装文件必须位于应用 cache 根目录内');
-    }
-    // **反斜杠文件名拒绝（r22）**：Android 上反斜杠是合法文件名字符——基名
-    // 含反斜杠时 apkFileName 只按 `/` 分割会取到错误基名（URI 指向与校验文件
-    // 不同的文件）；且 apkContentUri 对反斜杠的显式拒绝是 ArgumentError（Error
-    // 非 Exception 会逃逸破坏"任一环失败返回可读原因"契约）——此处显式转
-    // AppFailure。
-    if (apkFileName(apkFilePath).contains(r'\')) {
-      return const AppFailure('安装文件名不合法（含反斜杠）');
     }
     final contentUri = apkContentUri(apkFileName(apkFilePath));
     final intent = installIntentFor(contentUri);
@@ -184,6 +184,9 @@ class AndroidInstaller {
   /// 字符**，按 `[\\/]` 分割会把 `foo\bar.apk` 的基名误取为 `bar.apk`（生成的
   /// content URI 指向 `$cacheRoot/bar.apk`，与校验的文件不同一，破坏核心不变
   /// 量）；含反斜杠的基名在 [installValidatedApk] 中被显式拒绝。
+  /// **平台限制（r23 注明）**：本模块面向 Android（POSIX 路径恒为 `/`）；在
+  /// Windows 开发/测试环境传原生反斜杠路径会被"含反斜杠"检查拒绝——属可接受
+  /// 取舍（Android 上不存在反斜杠路径）。
   static String apkFileName(String filePath) => filePath.split('/').last;
 
   /// 校验 APK 文件存在、为常规文件且非空（安装前置守卫；失败返回可读原因）。
