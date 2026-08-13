@@ -86,4 +86,9 @@ class UpdateConfig {
 
   /// **zip bomb 防护上限（r13）**：zip 条目数上限（10 万，防海量小条目攻击）。
   static const maxEntryCount = 100000;
+
+  /// **清单响应体大小上限（r22）**：`_http.get` 将整个清单缓冲进内存——被入侵/
+  /// 恶意服务器高速推流超大 update.json 会 OOM（与下载路径的 _maxBytes 双层
+  /// 上限补齐不对称）。contentLength 前置 + 实际字节数双检。
+  static const maxManifestBytes = 2 * 1024 * 1024; // 2 MB（正常清单远小于此）
 }

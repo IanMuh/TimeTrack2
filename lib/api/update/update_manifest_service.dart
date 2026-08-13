@@ -1,19 +1,22 @@
-/// 更新清单服务：拉取 `update.json` → 解析校验 → 与本地缓存比较。
+/// 更新清单服务：拉取 `update.json` → 解析校验 → 版本判定。
 ///
 /// 流程（计划"完整更新系统设计"·管线）：
 /// 1. 拉取 [UpdateConfig.defaultManifestUrl]（可被 --dart-define 覆盖）；
 /// 2. [UpdateManifest.fromMap] 校验（version/SemVer/sha256/url 快速失败）；
-/// 3. 与缓存清单（app_metadata `lastCheckedManifestVersion`）比较：
+/// 3. 版本判定（**不依赖"缓存清单比较"**——`lastCheckedManifestVersion` 仅
+///    记录最近成功检查版本供阶段 3 编排展示，本服务不读该键）：
 ///    - 远端版本 ≤ 当前应用版本 → 无更新；
-///    - 远端版本 ≤ 已忽略版本 → 无更新（"忽略此版本"持久化）；
-///    - 否则视为可用更新，缓存远端版本供后续比较。
+///    - 远端版本 ≤ 已忽略版本 → 无更新（"忽略此版本"持久化；强制更新不受
+///      忽略影响）；
+///    - 否则视为可用更新，缓存远端版本供后续展示。
 ///
 /// 版本比较用 [AppVersion]（SemVer 2.0.0，含 pre-release 规则）。
 library;
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show HttpException, SocketException, TlsException, stderr;
+import 'dart:io'
+    show HttpException, SocketException, TlsException, stderr;
 
 import 'package:http/http.dart' as http;
 
@@ -76,6 +79,9 @@ class UpdateManifestService {
   /// 是否已 close（close 后 checkForUpdate 返回可读失败，防 StateError 逃逸）。
   bool _closed = false;
 
+  /// "已关闭"失败文案（r22 抽为类级常量——文件内多分支重复，统一维护）。
+  static const _closedMessage = '更新服务已关闭，请重新创建';
+
   /// 释放自建 http client（注入对象由调用方负责生命周期）。
   void close() {
     if (_closed) return;
@@ -88,7 +94,7 @@ class UpdateManifestService {
   /// 检查更新；失败返回可读原因（网络/清单损坏/已关闭）。
   Future<AppResult<UpdateCheckResult>> checkForUpdate() async {
     if (_closed) {
-      return const AppFailure('更新服务已关闭，请重新创建');
+      return const AppFailure(_closedMessage);
     }
     final http.Response response;
     try {
@@ -98,27 +104,31 @@ class UpdateManifestService {
       // **await 期间可能已被 close（r3）**：资源已释放，不再继续评估——
       // 防"等待期间 close → 成功继续 _evaluate 写库返回成功"违背已关闭语义。
       if (_closed) {
-        return const AppFailure('更新服务已关闭，请重新创建');
+        return const AppFailure(_closedMessage);
       }
     } on TimeoutException {
       // 请求期间可能已被 close（自建 client 强关/超时都可能）——先判 _closed
       // 归因"已关闭"（防误导性"网络不可用/超时"）。
-      if (_closed) return const AppFailure('更新服务已关闭，请重新创建');
+      if (_closed) return const AppFailure(_closedMessage);
       return const AppFailure('更新检查超时，请稍后重试');
     } on SocketException {
-      if (_closed) return const AppFailure('更新服务已关闭，请重新创建');
+      if (_closed) return const AppFailure(_closedMessage);
       return const AppFailure('网络不可用，请稍后重试');
     } on HttpException {
       // **r19 补充**：http 包仅把 send 阶段与部分流中错误包装为 ClientException、
       // 其余透传——dart:io 的 HttpException/TlsException（含握手失败、证书校验
       // 失败）会直接逃逸（与下载器/supabase_remote_tables 既有处理一致）。
-      if (_closed) return const AppFailure('更新服务已关闭，请重新创建');
+      if (_closed) return const AppFailure(_closedMessage);
       return const AppFailure('网络不可用，请稍后重试');
     } on TlsException {
-      if (_closed) return const AppFailure('更新服务已关闭，请重新创建');
+      // **r22 修正**：SDK 层级为 `HandshakeException extends TlsException`
+      //（secure_socket.dart）——`on TlsException` 已捕获握手/证书校验失败的
+      // HandshakeException（Android/iOS CERTIFICATE_VERIFY_FAILED 等），无需
+      // 单独分支（先前的 `on HandshakeException` 分支是死代码，已移除）。
+      if (_closed) return const AppFailure(_closedMessage);
       return const AppFailure('网络不可用，请稍后重试');
     } on http.ClientException {
-      if (_closed) return const AppFailure('更新服务已关闭，请重新创建');
+      if (_closed) return const AppFailure(_closedMessage);
       return const AppFailure('网络不可用，请稍后重试');
     } on StateError catch (e) {
       // **仅当 _closed 或消息匹配时才归因"已关闭"（r14）**：自建 client 在
@@ -126,12 +136,24 @@ class UpdateManifestService {
       // 其它 StateError（编程错误）不应被包装成误导性关闭文案——与下载器
       // "Error 不吞"的取舍一致，非关闭 StateError 重新抛出交全局处理。
       if (_closed || e.message.contains('already closed')) {
-        return const AppFailure('更新服务已关闭，请重新创建');
+        return const AppFailure(_closedMessage);
       }
       rethrow;
     }
     if (response.statusCode != 200) {
       return AppFailure('更新清单获取失败（${response.statusCode}）');
+    }
+    // **清单响应体大小上限（r22）**：`_http.get` 将整个响应缓冲进内存
+    //（bodyBytes）——被入侵/恶意服务器可在 checkTimeout 内高速推流超大清单
+    // 导致 OOM（下载路径已设 _maxBytes 双层上限，此处补齐不对称）。超限即拒
+    //（不解析）。
+    final maxManifestBytes = UpdateConfig.maxManifestBytes;
+    if (response.contentLength != null &&
+        response.contentLength! > maxManifestBytes) {
+      return const AppFailure('更新清单体积超上限');
+    }
+    if (response.bodyBytes.length > maxManifestBytes) {
+      return const AppFailure('更新清单体积超上限');
     }
     final UpdateManifest manifest;
     try {
@@ -156,7 +178,7 @@ class UpdateManifestService {
   /// 立即失败（防先做一次不必要的 DB 读、到写库前才拒绝）。
   Future<AppResult<UpdateCheckResult>> evaluate(UpdateManifest manifest) async {
     if (_closed) {
-      return const AppFailure('更新服务已关闭，请重新创建');
+      return const AppFailure(_closedMessage);
     }
     return _evaluate(manifest);
   }
@@ -176,7 +198,7 @@ class UpdateManifestService {
     }
     // 远端版本 ≤ 当前应用版本 → 无更新。
     if (!(_current < remote)) {
-      return AppSuccess(_none(manifest));
+      return AppSuccess(_none());
     }
     // "忽略此版本"：用户选择忽略的版本不再提示（远端 ≤ 已忽略版本即跳过）。
     // **强制更新不受忽略影响（r19）**：required=true 语义为"不可跳过"——强制/
@@ -190,17 +212,21 @@ class UpdateManifestService {
     if (ignored != null) {
       try {
         if (!(AppVersion.parse(ignored) < remote)) {
-          return AppSuccess(_none(manifest));
+          return AppSuccess(_none());
         }
       } on FormatException {
         // 本地脏数据：视为未忽略，继续。
       }
     }
-    // 可用更新：缓存远端版本（供"检查过但未装"的后续判断）。
+    // 可用更新：缓存远端版本。
+    // **用途澄清（r22）**：`lastCheckedManifestVersion` 为阶段 3 编排预留的
+    // "最近一次成功检查的版本"记录（供 UI/更新状态机展示"已检查过"），**本服务
+    // 不做该键的读取比较**——是否提示更新仅由"远端 > 当前版本"与"未忽略"决定；
+    // 消费方须按此语义使用（勿误以为写库即"检查过不再提示"）。
     // **写库前复查（r4）**：_evaluate 的 DB await 期间若被 close，不再落缓存
     //（严格"已关闭语义"——不写入状态）。
     if (_closed) {
-      return const AppFailure('更新服务已关闭，请重新创建');
+      return const AppFailure(_closedMessage);
     }
     await _writeString(
       AppMetadataKeys.lastCheckedManifestVersion,
@@ -218,7 +244,7 @@ class UpdateManifestService {
     );
   }
 
-  UpdateCheckResult _none(UpdateManifest manifest) => UpdateCheckResult(
+  UpdateCheckResult _none() => UpdateCheckResult(
     available: false,
     latestVersion: '',
     required: false,

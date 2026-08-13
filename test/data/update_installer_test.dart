@@ -566,10 +566,11 @@ void main() {
           reason: '旧程序目录内容被替换（不含数据文件——数据在数据目录）',
         );
         // 备份目录已删
+        // **r22 修正死断言**：`uri.pathSegments.last` 对 Directory 实体（URI
+        // 尾斜杠）恒空串——旧断言 where 恒空、isEmpty 无条件通过（残留备份
+        // 无法察觉）。改用 e.path 判前缀（Windows 反斜杠下按路径包含判断）。
         expect(
-          program.listSync().where(
-            (e) => e.uri.pathSegments.last.startsWith('.backup-'),
-          ),
+          program.listSync().where((e) => e.path.contains('.backup-')),
           isEmpty,
         );
       } finally {

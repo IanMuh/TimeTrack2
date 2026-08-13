@@ -186,13 +186,17 @@ void main() {
 
     test('下载总字节上限（r19/r20）：声明超限前置拒绝 / 分块流超限流式中断且无残留', () async {
       final dir = await Directory.systemTemp.createTemp('dl_cap');
+      // **注入小上限（r22）**：maxBytes 可注入——免真实 200MB 写盘/哈希成本
+      //（与 retryCount/tempDirectory 注入模式一致）；保留对默认配置的轻量
+      // 断言在边界用例。
+      const smallCap = 1024 * 1024; // 1 MB
       try {
-        // 场景 A：响应头 contentLength 超 maxCompressedBytes → send 后立即
-        // 前置拒绝（不写盘）。
-        final declaredOver = _DeclaredOverLimitClient();
+        // 场景 A：响应头 contentLength 超上限 → send 后立即前置拒绝（不写盘）。
+        final declaredOver = _DeclaredOverLimitClient(smallCap);
         final downloaderA = UpdateDownloader(
           tempDirectory: dir,
           retryCount: 3,
+          maxBytes: smallCap,
           httpClient: declaredOver,
         );
         final resultA = await downloaderA.download('https://x.example/app.zip');
@@ -210,7 +214,8 @@ void main() {
         final downloaderB = UpdateDownloader(
           tempDirectory: dir,
           retryCount: 0,
-          httpClient: _OversizeChunkedHttpClient(),
+          maxBytes: smallCap,
+          httpClient: _OversizeChunkedHttpClient(smallCap),
         );
         final resultB = await downloaderB.download('https://x.example/app.zip');
         expect(resultB.isSuccess, isFalse, reason: '分块流超限失败');
@@ -227,22 +232,23 @@ void main() {
       }
     });
 
-    test('下载总字节上限边界（r20）：恰好等于上限成功', () async {
-      // 上限语义为"严格大于才拒绝"——恰好等于 maxCompressedBytes 的合法包须
-      // 放行（防未来误把等值判为超限的回归无感知）。
+    test('下载总字节上限边界（r22）：恰好等于上限成功（注入小上限）', () async {
+      // 上限语义为"严格大于才拒绝"——恰好等于上限的合法包须放行（防未来误把
+      // 等值判为超限的回归无感知）。**注入小上限**：免真实 200MB 写盘/哈希。
+      const cap = 1024 * 1024; // 1 MB
       final dir = await Directory.systemTemp.createTemp('dl_cap_boundary');
-      final atLimit = UpdateConfig.maxCompressedBytes;
       final downloader = UpdateDownloader(
         tempDirectory: dir,
-        httpClient: _AtLimitClient(atLimit),
+        maxBytes: cap,
+        httpClient: _AtLimitClient(cap),
       );
       try {
         final result = (await downloader.download(
           'https://x.example/app.zip',
         )).requireValue();
-        expect(result.totalBytes, atLimit, reason: '恰好等于上限下载成功');
+        expect(result.totalBytes, cap, reason: '恰好等于上限下载成功');
         final file = File(result.filePath);
-        expect(file.lengthSync(), atLimit);
+        expect(file.lengthSync(), cap);
       } finally {
         await dir.delete(recursive: true);
       }
@@ -458,6 +464,40 @@ void main() {
       }
     });
 
+    test('verifier 透传下载阶段失败（r22）：网络异常不重试校验、返回下载器文案', () async {
+      // downloadAndVerify 对下载失败（AppFailure）直接透传消息——无校验重下
+      //（下载器内部网络重试已耗尽）。
+      final dir = await Directory.systemTemp.createTemp('verify_netfail');
+      var calls = 0;
+      final artifact = UpdatePlatformArtifact(
+        url: 'https://x.example/app.zip',
+        sha256: 'a' * 64,
+      );
+      try {
+        final verifier = UpdateVerifier(
+          downloader: UpdateDownloader(
+            tempDirectory: dir,
+            retryCount: 2,
+            retryBaseDelay: Duration.zero,
+            httpClient: MockClient((_) async {
+              calls += 1;
+              throw http.ClientException('reset');
+            }),
+          ),
+        );
+        final result = await verifier.downloadAndVerify(artifact);
+        expect(result.isSuccess, isFalse, reason: '下载失败透传');
+        expect(
+          result.when(onSuccess: (_) => '', onFailure: (m) => m),
+          contains('网络不可用'),
+          reason: '透传下载器文案',
+        );
+        expect(calls, 3, reason: '仅下载器内部重试（初始 + 2），无校验重下');
+      } finally {
+        await dir.delete(recursive: true);
+      }
+    });
+
     test('校验失败 → 重下成功（恢复路径，r2）', () async {
       final dir = await Directory.systemTemp.createTemp('verify_recover');
       final goodPayload = 'good-payload';
@@ -522,16 +562,21 @@ class _ChunkedHttpClient extends http.BaseClient {
   }
 }
 
-/// 分块流总字节数超上限 client（r19/r20）：声明 contentLength 为小值、实际
-/// 分块超上限持续发送（模拟无 Content-Length 的分块响应绕过前置检查）。
+/// 分块流总字节数超上限 client（r19/r20/r22）：声明 contentLength 为小值、
+/// 实际分块超上限持续发送（模拟无 Content-Length 的分块响应绕过前置检查）。
 /// **async* 惰性逐块生成（r20）**：订阅前不缓存全部块（StreamController 在
-/// 监听前 add 会全量缓冲、约 200MB 内存峰值）——消费一块产出一块，下载器超限
-/// 中断（抛 DownloadSizeExceededException）取消订阅后生成器随之停止；块数按
-/// maxCompressedBytes 动态推导（防常量上调后用例静默失效）。
+/// 监听前 add 会全量缓冲）——消费一块产出一块，下载器超限中断（抛
+/// DownloadSizeExceededException）取消订阅后生成器随之停止；**上限可注入
+/// （r22）**：按注入上限动态推导块数（测试用 1MB 免真实 200MB 写盘/哈希成本，
+/// 防常量上调后用例静默失效）。
 class _OversizeChunkedHttpClient extends http.BaseClient {
-  /// 惰性逐块生成：超过 maxCompressedBytes 一个额外块（1MB）。
+  _OversizeChunkedHttpClient(this.cap);
+
+  final int cap;
+
+  /// 惰性逐块生成：超过 cap 一个额外块（1MB）。
   Stream<List<int>> _oversizeChunks() async* {
-    final chunkCount = (UpdateConfig.maxCompressedBytes ~/ (1024 * 1024)) + 2;
+    final chunkCount = (cap ~/ (1024 * 1024)) + 2;
     for (var i = 0; i < chunkCount; i++) {
       yield List<int>.filled(1024 * 1024, 7);
     }
@@ -580,9 +625,12 @@ class _AtLimitClient extends http.BaseClient {
   }
 }
 
-/// 响应头 contentLength 超上限 client（r19）：send 后即返回超限声明——下载器
-/// 前置检查须在流消费前拒绝（不写盘）。
+/// 响应头 contentLength 超上限 client（r19/r22）：send 后即返回超限声明——
+/// 下载器前置检查须在流消费前拒绝（不写盘）。上限可注入（测试用 1MB）。
 class _DeclaredOverLimitClient extends http.BaseClient {
+  _DeclaredOverLimitClient(this.cap);
+
+  final int cap;
   int _calls = 0;
 
   int get calls => _calls;
@@ -595,7 +643,7 @@ class _DeclaredOverLimitClient extends http.BaseClient {
     return http.StreamedResponse(
       controller.stream,
       200,
-      contentLength: UpdateConfig.maxCompressedBytes + 1,
+      contentLength: cap + 1,
       headers: {'content-type': 'application/octet-stream'},
       request: request,
     );

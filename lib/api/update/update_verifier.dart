@@ -23,6 +23,10 @@ class UpdateVerifier {
   ///
   /// [onProgress] 透传下载进度。校验失败删除文件重下（最多
   /// [UpdateConfig.redownloadAfterVerificationFailure] 次），仍失败返回可读原因。
+  /// **进度重置语义（r22 注明）**：校验失败触发重下时，onProgress 在新一轮下载
+  /// 中从 0 重新回调（下载器内部网络重试同样如此）——调用方须感知"下载阶段
+  /// 重新开始"（进度条会回退，勿误判"已完成"）；如需精确阶段标识由阶段 3
+  /// 编排层维护（本层回调仅携带字节数）。
   Future<AppResult<UpdateVerifierResult>> downloadAndVerify(
     UpdatePlatformArtifact artifact, {
     void Function(int receivedBytes, int? totalBytes)? onProgress,

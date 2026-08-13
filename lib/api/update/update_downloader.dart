@@ -66,10 +66,15 @@ class UpdateDownloader {
     this._tempDirectory,
     int? retryCount,
     Duration? retryBaseDelay,
+    int? maxBytes,
   }) : _http = httpClient ?? _defaultClient(),
        _ownsHttp = httpClient == null,
        _retryCount = retryCount ?? UpdateConfig.downloadRetryCount,
-       _retryBaseDelay = retryBaseDelay ?? UpdateConfig.retryBaseDelay;
+       _retryBaseDelay = retryBaseDelay ?? UpdateConfig.retryBaseDelay,
+       // **下载总字节上限（r22 可注入）**：默认取配置常量；测试注入小值即可
+       // 覆盖同一检查逻辑（免真实 200MB 写盘/哈希成本，与 retryCount/tempDirectory
+       // 的注入模式一致）。
+       _maxBytes = maxBytes ?? UpdateConfig.maxCompressedBytes;
 
   /// 默认底层 client（r20）：显式 `autoUncompress = false`——`Accept-Encoding:
   /// identity` 只是告知服务器、不保证禁用 dart:io 的自动解压（解压与否取决于
@@ -90,6 +95,9 @@ class UpdateDownloader {
   /// 退避基时（默认取 [UpdateConfig.retryBaseDelay]；测试注入零延迟）。
   final Duration _retryBaseDelay;
   final Directory? _tempDirectory;
+
+  /// 下载总字节上限（默认取 [UpdateConfig.maxCompressedBytes]；测试注入小值）。
+  final int _maxBytes;
 
   /// 临时文件名自增后缀（防同一微秒并发下载撞名覆盖）。
   int _seq = 0;
@@ -154,6 +162,17 @@ class UpdateDownloader {
         if (!_shouldRetry(attempt)) {
           return const AppFailure('下载失败（TLS 中断），请稍后重试');
         }
+      } on StateError catch (e) {
+        // **底层 client 强关归因（r22）**：close() 生命周期只覆盖重试间隙——
+        // 若 close() 在 send/流传输中被调用，底层 client 强关可能抛
+        // `StateError('Client is already closed')`（Error 非 Exception，会从
+        // download() 逃逸破坏"恒返回 AppResult"契约）。与清单服务一致：仅
+        // `_closed` 或消息匹配才归因"已关闭"；其它 StateError（编程错误）
+        // rethrow（Error 不吞）。
+        if (_closed || e.message.contains('already closed')) {
+          return const AppFailure('下载器已关闭，请重新创建');
+        }
+        rethrow;
       } on HttpStatusException catch (e) {
         // 服务端明确拒绝（4xx/5xx）：不重试，文案带状态码（区别于瞬态网络）。
         return AppFailure('下载失败（HTTP ${e.statusCode}）');
@@ -247,10 +266,12 @@ class UpdateDownloader {
     // **4xx 不重试**（永久性错误）：抛专用异常，download() 直接失败带状态码。
     // 5xx 也先不重试（本模块传输层保守——调用方编排层可整体重试）。
     if (response.statusCode != 200) {
-      // **消费/取消响应体（r2，r3 ignore）**：不读取则 dart:io 连接不归还连接池
-      // ——反复 4xx/5xx 会堆积占用连接。`.ignore()` 防 drain 过程中流错误成为
-      // 未捕获的异步异常（Flutter 全局错误/测试直接失败）；异步进行、不阻塞抛错。
-      response.stream.drain<void>().ignore();
+      // **立即取消订阅而非 drain（r22）**：drain() 会在后台把整个 4xx/5xx
+      // body 读尽——无大小上限/超时（downloadStreamTimeout 仅作用于 200 路径），
+      // 恶意/故障服务器超大或持续流式错误体时无限消耗带宽、长期占用连接且
+      // future 无法中止（与 200 路径的体积/超时防护不对称）。listen 需 onError
+      // 处理器防流错误成为未捕获异步异常；cancel 立即停止读取、释放连接。
+      response.stream.listen(null, onError: (_) {}).cancel().ignore();
       throw HttpStatusException(response.statusCode);
     }
     // **下载总字节上限（r19）**：`downloadStreamTimeout` 只是相邻 chunk 间的
@@ -261,8 +282,7 @@ class UpdateDownloader {
     // [UpdateConfig.maxCompressedBytes]（与安装器"压缩后大小上限"同口径——
     // 传输层先于解压层拦截）。
     final declaredTotal = response.contentLength;
-    if (declaredTotal != null &&
-        declaredTotal > UpdateConfig.maxCompressedBytes) {
+    if (declaredTotal != null && declaredTotal > _maxBytes) {
       // **取消订阅立即中止（r20）**：drain() 会把整个超限响应体下载完（本功能
       // 恰要防御恶意大响应——浪费带宽/占用连接）；listen(null).cancel() 立即
       // 停止消费、释放连接。
@@ -292,7 +312,7 @@ class UpdateDownloader {
         //（与前置检查同类型）而非 StateError（r19）**：StateError 是 Error 非
         // Exception——catch(_) rethrow 后 download() 的 `on Exception` 分类
         // 分支不匹配、直接从 download() 逃逸破坏"恒返回 AppResult"契约。
-        if (received > UpdateConfig.maxCompressedBytes) {
+        if (received > _maxBytes) {
           throw const DownloadSizeExceededException();
         }
         // **onProgress 异常隔离（r14/r16）**：UI 层回调抛错不应归因下载失败/

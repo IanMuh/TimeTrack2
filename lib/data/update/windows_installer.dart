@@ -33,14 +33,34 @@ class WindowsInstaller {
     int? maxCompressedBytes,
     int? maxEntryCount,
   }) : zipCodec = zipCodec ?? ZipDecoder(),
+       // **programDir 合理性（r22 防御）**：applyStaging/_clearProgramDir 会
+       // 递归备份/清空 programDir——误配为文件系统根（`/`、`C:\`）或空串会
+       // 复制整棵目录树/递归清空该目录（不可恢复大范围数据丢失）。与 staging
+       // 目录名同级防御：须为绝对路径且非根目录（相对路径运行时解析依赖 cwd、
+       // 无法静态判定目标，同样拒绝）。
        assert(
-         maxUncompressedEntryBytes == null || maxUncompressedEntryBytes > 0,
+         programDir.isNotEmpty &&
+             (programDir.startsWith('/') ||
+                 programDir.startsWith(r'\') ||
+                 RegExp(r'^[A-Za-z]:[\\/]').hasMatch(programDir)),
+         'programDir 必须为绝对路径',
        ),
        assert(
-         maxTotalUncompressedBytes == null || maxTotalUncompressedBytes > 0,
+         !(programDir == '/' ||
+             programDir == r'\' ||
+             RegExp(r'^[A-Za-z]:[\\/]?$').hasMatch(programDir)),
+         'programDir 不得为文件系统根目录',
        ),
-       assert(maxCompressedBytes == null || maxCompressedBytes > 0),
-       assert(maxEntryCount == null || maxEntryCount > 0),
+       assert(
+         (maxUncompressedEntryBytes ?? UpdateConfig.maxUncompressedEntryBytes) >
+             0,
+       ),
+       assert(
+         (maxTotalUncompressedBytes ?? UpdateConfig.maxTotalUncompressedBytes) >
+             0,
+       ),
+       assert((maxCompressedBytes ?? UpdateConfig.maxCompressedBytes) > 0),
+       assert((maxEntryCount ?? UpdateConfig.maxEntryCount) > 0),
        maxUncompressedEntryBytes =
            maxUncompressedEntryBytes ?? UpdateConfig.maxUncompressedEntryBytes,
        maxTotalUncompressedBytes =
