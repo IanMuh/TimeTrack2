@@ -207,9 +207,22 @@ void main() {
     try {
       // 构造 v2 库：正常打开（含全部表/索引）后 DROP 同步索引模拟 buggy 状态。
       final seeded = AppDatabase(NativeDatabase(file));
+      // **drift 惰性建库（r5）**：onCreate/beforeOpen 在首次执行语句时才触发
+      // ——直接 close 不会建表（user_version 仍为 0），后续 DROP/断言落空。
+      // 先执行 SELECT 1 强制触发建库生成 v2 schema。
+      await seeded.customSelect('SELECT 1').get();
       await seeded.close();
       final raw = sqlite3.open(file.path);
       raw.execute('DROP INDEX IF EXISTS idx_tracking_rules_sync');
+      // **模拟状态自校验（r5）**：断言 buggy 状态真实生效——索引确实已删，
+      // 否则用例空转（若重开仍走 onCreate 而非 _ensureIndexes 补齐则假通过）。
+      final afterDrop = raw.select(
+          "SELECT name FROM sqlite_master WHERE type='index' "
+          "AND name = 'idx_tracking_rules_sync'");
+      if (afterDrop.isNotEmpty) {
+        raw.close();
+        fail('DROP 后 idx_tracking_rules_sync 仍存在——buggy 状态模拟失败');
+      }
       raw.close();
 
       // 重新打开：_ensureIndexes 无条件补齐被删索引。
