@@ -25,10 +25,11 @@ class WindowsInstaller {
     required this.programDir,
     required this.dataDir,
     ZipDecoder? zipCodec,
-    // **私有字段初始化形参（r5 注明）**：Dart 对 `this._x` 命名参数剥离下划线——
-    // 跨库调用名是 `copyFileOverride`（测试/外部可引用），库内才用 `_copyFileOverride`。
-    this._copyFileOverride,
-  }) : zipCodec = zipCodec ?? ZipDecoder();
+    // 公开参数名 + 初始化列表赋值给私有字段（不依赖 Dart 私有命名参数
+    // 特性——跨库调用名直白为 copyFileOverride，测试/外部可引用）。
+    void Function(String from, String to)? copyFileOverride,
+  })  : zipCodec = zipCodec ?? ZipDecoder(),
+        _copyFileOverride = copyFileOverride;
   /// 程序目录（exe 所在，安装目标）。
   final String programDir;
 
