@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:drift/drift.dart' hide isNotNull, isNull;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -52,7 +54,9 @@ void main() {
     // FK 依赖：子表行引用 activities/activityCategories——先造对应父行（存活，
     // 否则本用例的物理删除断言会受父行存在性干扰）。
     if (table == 'timeEntries' || table == 'trackingRules') {
-      await db.into(db.activities).insert(
+      await db
+          .into(db.activities)
+          .insert(
             ActivitiesCompanion.insert(
               id: 'act-$id',
               name: 'parent-$id',
@@ -63,7 +67,9 @@ void main() {
           );
     }
     if (table == 'activityCategoryLinks') {
-      await db.into(db.activities).insert(
+      await db
+          .into(db.activities)
+          .insert(
             ActivitiesCompanion.insert(
               id: 'act-$id',
               name: 'parent-$id',
@@ -72,7 +78,9 @@ void main() {
             ),
             mode: InsertMode.insertOrIgnore,
           );
-      await db.into(db.activityCategories).insert(
+      await db
+          .into(db.activityCategories)
+          .insert(
             ActivityCategoriesCompanion.insert(
               id: 'cat-$id',
               name: 'parentcat-$id',
@@ -221,7 +229,9 @@ void main() {
       // 未超期（30 天）：保留。
       await seedSoftDeleted('timeEntries', 'e2', const Duration(days: 30));
       // 存活（deletedAt null）：保留（先造 FK 父行）。
-      await db.into(db.activities).insert(
+      await db
+          .into(db.activities)
+          .insert(
             ActivitiesCompanion.insert(
               id: 'act-e3',
               name: 'parent-e3',
@@ -373,6 +383,205 @@ void main() {
       final report = (await service.run()).requireValue();
       expect(report.deletedTotal, 5);
       expect(report.vacuumed, isFalse, reason: '恰等于阈值不触发');
+    });
+  });
+
+  group('cutoff 与 sync 边界（r2）', () {
+    test('lastSyncAt 早于保留截止（min 分支）：cutoff 取游标', () async {
+      // lastSyncAt = now-200 天（< 保留截止 now-180）→ cutoff = lastSyncAt。
+      final syncAt = mapping.utcString(
+        DateTime.now().subtract(const Duration(days: 200)),
+      );
+      await putMeta(AppMetadataKeys.lastSyncAt, syncAt);
+      // deletedAt = now-210 天（< now-200 游标）→ 删。
+      await seedSoftDeleted('activities', 'c1', const Duration(days: 210));
+      // deletedAt = now-190 天（> now-200 游标，即使早于保留截止 180 天）→ 保留
+      //（墓碑晚于最近同步时刻——尚未传播到远端，min 分支必须拦住）。
+      await seedSoftDeleted('activities', 'c2', const Duration(days: 190));
+      final report = (await service.run()).requireValue();
+      expect(report.deletedByTable['activities'], 1, reason: '仅早于游标者删');
+      final left = await (db.select(db.activities)).get();
+      expect(left.map((r) => r.id).toSet(), {'c2'}, reason: '晚于游标的墓碑保留');
+    });
+
+    test('deletedAt 恰等于游标 → 保留（严格小于语义，同步窗口边缘保守）', () async {
+      // 设备停止同步后 cutoff 恒等于 lastSyncAt：deleted_at == 游标时刻的行
+      // 是否已传播到远端不确定——有意保留（数据安全优先，宁留勿删）。
+      final syncAt = mapping.utcString(
+        DateTime.now().subtract(const Duration(days: 200)),
+      );
+      await putMeta(AppMetadataKeys.lastSyncAt, syncAt);
+      // 造 deletedAt 精确等于游标时刻的软删活动。
+      final atCutoff = mapping.utcString(
+        DateTime.now().subtract(const Duration(days: 200)),
+      );
+      await db
+          .into(db.activities)
+          .insert(
+            ActivitiesCompanion.insert(
+              id: 'edge',
+              name: 'edge',
+              color: 1,
+              updatedAt: atCutoff,
+              deletedAt: Value(atCutoff),
+            ),
+          );
+      final report = (await service.run()).requireValue();
+      expect(
+        report.deletedByTable['activities'] ?? 0,
+        0,
+        reason: '恰等于游标不删（严格小于）',
+      );
+      final left = await (db.select(db.activities)).get();
+      expect(left.map((r) => r.id).toSet(), {'edge'});
+    });
+  });
+
+  group('FK 引用完整性（r2）', () {
+    test('存活条目引用超期活动 → 跳过删除该活动（防悬空条目）', () async {
+      await putMeta(AppMetadataKeys.lastSyncAt, nowStr());
+      // 活动 A：超期软删；活动 B：超期软删（无引用）。
+      final deletedAt = mapping.utcString(
+        DateTime.now().subtract(const Duration(days: 400)),
+      );
+      await db
+          .into(db.activities)
+          .insert(
+            ActivitiesCompanion.insert(
+              id: 'actA',
+              name: 'A',
+              color: 1,
+              updatedAt: deletedAt,
+              deletedAt: Value(deletedAt),
+            ),
+          );
+      await db
+          .into(db.activities)
+          .insert(
+            ActivitiesCompanion.insert(
+              id: 'actB',
+              name: 'B',
+              color: 1,
+              updatedAt: deletedAt,
+              deletedAt: Value(deletedAt),
+            ),
+          );
+      // 存活 time_entry 引用 A（deletedAt null）——父被删会制造悬空条目。
+      await db
+          .into(db.timeEntries)
+          .insert(
+            TimeEntriesCompanion.insert(
+              id: 'e-alive',
+              activityId: 'actA',
+              activityName: const Value(''),
+              startAt: nowStr(),
+              deviceId: 'dev',
+              updatedAt: nowStr(),
+            ),
+          );
+      final report = (await service.run()).requireValue();
+      expect(report.deletedByTable['activities'], 1, reason: '仅无引用的 B 被删');
+      final left = await (db.select(db.activities)).get();
+      expect(left.map((r) => r.id).toSet(), {'actA'}, reason: 'A 被存活引用跳过');
+      // 存活条目仍在（未回滚、未误删）。
+      final entries = await (db.select(db.timeEntries)).get();
+      expect(entries.map((r) => r.id).toSet(), {'e-alive'});
+    });
+
+    test('软删未超期条目引用超期活动 → 随父清理（父已移除，子墓碑无参照价值）', () async {
+      await putMeta(AppMetadataKeys.lastSyncAt, nowStr());
+      final parentDeleted = mapping.utcString(
+        DateTime.now().subtract(const Duration(days: 400)),
+      );
+      await db
+          .into(db.activities)
+          .insert(
+            ActivitiesCompanion.insert(
+              id: 'actP',
+              name: 'P',
+              color: 1,
+              updatedAt: parentDeleted,
+              deletedAt: Value(parentDeleted),
+            ),
+          );
+      // 软删未超期（10 天前）条目引用 P——父被物理移除后此墓碑失去参照价值。
+      final childDeleted = mapping.utcString(
+        DateTime.now().subtract(const Duration(days: 10)),
+      );
+      await db
+          .into(db.timeEntries)
+          .insert(
+            TimeEntriesCompanion.insert(
+              id: 'e-soft',
+              activityId: 'actP',
+              activityName: const Value(''),
+              startAt: childDeleted,
+              deviceId: 'dev',
+              updatedAt: childDeleted,
+              deletedAt: Value(childDeleted),
+            ),
+          );
+      final report = (await service.run()).requireValue();
+      // 活动被删（无存活引用）；软删子条目随父清理（引用清理分支）。
+      expect(report.deletedByTable['activities'], 1, reason: 'P 被删');
+      expect(report.deletedByTable['timeEntries'], 1, reason: '引用 P 的软删子清理');
+      final entries = await (db.select(db.timeEntries)).get();
+      expect(entries, isEmpty);
+    });
+  });
+
+  group('retentionDays DB 异常回退（r2）', () {
+    test('数据库已关闭 → 回退默认 180（不崩溃）', () async {
+      await db.close();
+      expect(await service.retentionDays(), 180, reason: 'DB 异常回退默认');
+    });
+  });
+
+  group('文件库 VACUUM 集成（r3）', () {
+    test('文件型库 WAL 模式下 VACUUM + checkpoint 真实可执行', () async {
+      final dir = await Directory.systemTemp.createTemp('cleanup_file');
+      final fileDb = AppDatabase(
+        NativeDatabase(File('${dir.path}/timetrack.sqlite')),
+      );
+      final fileService = CleanupService(database: fileDb, vacuumThreshold: 3);
+      final mapping = _MappingHost();
+      try {
+        await fileDb.customStatement('PRAGMA journal_mode = WAL');
+        await fileDb
+            .into(fileDb.appMetadata)
+            .insert(
+              AppMetadataCompanion.insert(
+                key: AppMetadataKeys.lastSyncAt,
+                value: mapping.utcString(DateTime.now()),
+              ),
+              mode: InsertMode.insertOrReplace,
+            );
+        for (var i = 0; i < 5; i++) {
+          final deleted = mapping.utcString(
+            DateTime.now().subtract(const Duration(days: 400)),
+          );
+          await fileDb
+              .into(fileDb.activities)
+              .insert(
+                ActivitiesCompanion.insert(
+                  id: 'f$i',
+                  name: 'f$i',
+                  color: 1,
+                  updatedAt: deleted,
+                  deletedAt: Value(deleted),
+                ),
+              );
+        }
+        final report = (await fileService.run()).requireValue();
+        expect(report.deletedTotal, 5);
+        expect(report.vacuumed, isTrue, reason: '文件库 WAL 下 VACUUM 真实执行');
+        // VACUUM 后库仍可查询（重写未损坏）。
+        final left = await (fileDb.select(fileDb.activities)).get();
+        expect(left, isEmpty);
+      } finally {
+        await fileDb.close();
+        await dir.delete(recursive: true);
+      }
     });
   });
 }
