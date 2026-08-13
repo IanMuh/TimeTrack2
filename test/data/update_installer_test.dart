@@ -60,6 +60,10 @@ void main() {
         '/opt/timetrack',
         r'C:\app\.\bin', // 含 `.` 段（仅 `..` 段拒绝；`.bin` 非完整段）
         r'C:\foo\bar',
+        '//server/share/app', // r28/r29：普通 UNC 不误伤（?/. 后跟非分隔符）
+        r'\\server\share\app', // r29：反斜杠 UNC 形式
+        '/./foo', // r29：单前导分隔符 + . 段是普通相对段（非命名空间前缀）
+        r'\.\foo', // r29：单前导分隔符 + . 段（Windows 当前目录相对）
       ]) {
         expect(
           () => WindowsInstaller(programDir: ok, dataDir: '/data'),
