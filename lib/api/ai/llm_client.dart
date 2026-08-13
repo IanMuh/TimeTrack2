@@ -19,6 +19,10 @@ abstract interface class LlmClient {
   ///（本骨架只产出文本回复，指令解析归阶段 6）。
   Future<AppResult<String>> chat({
     required List<LlmMessage> messages,
-    LlmRequestOptions options = const LlmRequestOptions(),
+    LlmRequestOptions options = const LlmRequestOptions.none(),
   });
+
+  /// 释放底层资源（内部自建的 http client / 连接池）。注入外部 httpClient
+  /// 的调用方对注入对象的生命周期负责（实现不得关闭非自有对象）。
+  void close();
 }

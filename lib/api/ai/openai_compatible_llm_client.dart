@@ -20,18 +20,28 @@ class OpenAiCompatibleLlmClient implements LlmClient {
   OpenAiCompatibleLlmClient({
     required this.config,
     http.Client? httpClient,
-  }) : _http = httpClient ?? http.Client();
+  })  : _http = httpClient ?? http.Client(),
+        _ownsHttp = httpClient == null;
 
   final LlmConfig config;
   final http.Client _http;
+  /// 是否自建 http client（close 时释放；注入对象由调用方负责生命周期）。
+  final bool _ownsHttp;
 
   @override
   LlmCapability get capability => config.capability;
 
   @override
+  void close() {
+    if (_ownsHttp) {
+      _http.close();
+    }
+  }
+
+  @override
   Future<AppResult<String>> chat({
     required List<LlmMessage> messages,
-    LlmRequestOptions options = const LlmRequestOptions(),
+    LlmRequestOptions options = const LlmRequestOptions.none(),
   }) async {
     // 能力组合校验（错误早失败）：通义 tools+stream 不可并用等。
     final incompatible = capability.validateRequest(options);
@@ -86,7 +96,7 @@ class OpenAiCompatibleLlmClient implements LlmClient {
   static Map<String, Object?> buildChatRequestBody({
     required LlmConfig config,
     required List<LlmMessage> messages,
-    LlmRequestOptions options = const LlmRequestOptions(),
+    LlmRequestOptions options = const LlmRequestOptions.none(),
   }) {
     final body = <String, Object?>{
       'model': config.model,
@@ -110,7 +120,10 @@ class OpenAiCompatibleLlmClient implements LlmClient {
     if (options.stream && config.capability.supportsStreaming) {
       body['stream'] = true;
     }
-    if (options.stream &&
+    // **response_format 与 stream 正交（r1）**：JSON 模式是独立能力，由
+    // useJsonMode 显式请求——不与流式耦合（旧实现把 response_format 绑在
+    // stream 上：非流式永远无法请求结构化输出、流式被强制附带）。
+    if (options.useJsonMode &&
         config.capability.supportsResponseFormat) {
       body['response_format'] = {'type': 'json_object'};
     }

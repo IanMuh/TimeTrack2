@@ -25,16 +25,43 @@ void main() {
 
     test('tools + stream 并用拒绝（通义 DashScope 限制）', () {
       final error = LlmCapability.qwen.validateRequest(
-        const LlmRequestOptions(useTools: true, stream: true),
+        LlmRequestOptions(useTools: true, stream: true),
       );
       expect(error, isNotNull, reason: '通义 tools+stream 并用必须拒绝');
+    });
+
+    test('deepseek/kimi tools+stream 可并用（r1：能力声明与校验一致）', () {
+      // 旧实现无条件拒绝 useTools+stream——与 deepseek/kimi 预置声明"可并用"
+      // 矛盾。supportsToolsWithStream 独立标记后，可并用 provider 放行。
+      expect(
+        LlmCapability.deepseek.validateRequest(
+          LlmRequestOptions(useTools: true, stream: true),
+        ),
+        isNull,
+        reason: 'DeepSeek tools+stream 可并用',
+      );
+      expect(
+        LlmCapability.kimi.validateRequest(
+          LlmRequestOptions(useTools: true, stream: true),
+        ),
+        isNull,
+        reason: 'Kimi tools+stream 可并用',
+      );
+      // Ollama 无 tools：useTools+stream 先命中"不支持工具调用"文案
+      expect(
+        LlmCapability.ollama.validateRequest(
+          LlmRequestOptions(useTools: true, stream: true),
+        ),
+        '当前 provider 不支持工具调用',
+        reason: 'Ollama 先报单项不支持（校验顺序）',
+      );
     });
 
     test('单项能力不支持时拒绝', () {
       // Ollama 无 tools
       expect(
         LlmCapability.ollama.validateRequest(
-          const LlmRequestOptions(useTools: true),
+          LlmRequestOptions(useTools: true),
         ),
         isNotNull,
         reason: 'Ollama 不支持工具调用',
@@ -47,7 +74,7 @@ void main() {
         supportsResponseFormat: false,
       );
       expect(
-        noStream.validateRequest(const LlmRequestOptions(stream: true)),
+        noStream.validateRequest(LlmRequestOptions(stream: true)),
         isNotNull,
         reason: '不支持流式时请求流式拒绝',
       );
@@ -56,19 +83,19 @@ void main() {
     test('合法组合放行', () {
       expect(
         LlmCapability.deepseek.validateRequest(
-          const LlmRequestOptions(useTools: true),
+          LlmRequestOptions(useTools: true),
         ),
         isNull,
       );
       expect(
         LlmCapability.deepseek.validateRequest(
-          const LlmRequestOptions(stream: true),
+          LlmRequestOptions(stream: true),
         ),
         isNull,
       );
       expect(
         LlmCapability.qwen.validateRequest(
-          const LlmRequestOptions(useTools: true),
+          LlmRequestOptions(useTools: true),
         ),
         isNull,
         reason: '通义单独 tools 合法',
@@ -99,19 +126,44 @@ void main() {
       expect(config('http://localhost:11434/v1').baseUrl, 'http://localhost:11434/v1');
     });
 
-    test('非法：非 http(s)/子路径/query/fragment/userInfo/深层路径拒绝', () {
+    test('非法：非 http(s)/空主机/子路径/query/fragment/userInfo/深层路径/双斜杠拒绝', () {
       for (final bad in [
         'ftp://api.example.com',
         'not-a-url',
+        'http://', // 空主机
+        'http:///path', // 空主机带路径
         'https://api.example.com/v1/chat/completions', // 深层路径
         'https://api.example.com/v1/extra',
         'https://api.example.com?x=1',
         'https://api.example.com#frag',
         'https://user:pass@api.example.com',
+        'https://api.example.com//v1', // 双斜杠路径
       ]) {
         expect(() => config(bad), throwsArgumentError,
             reason: '非法 baseUrl 应拒绝：$bad');
       }
+    });
+
+    test('apiKey 空串/空白归一化为 null；timeout 非正运行时拒绝', () {
+      final blank = LlmConfig(
+        baseUrl: 'https://api.example.com',
+        apiKey: '   ',
+        model: 'm',
+        capability: LlmCapability.deepseek,
+      );
+      expect(blank.apiKey, isNull, reason: '空白 apiKey 归一化为 null');
+      expect(
+        () => LlmConfig(
+          baseUrl: 'https://api.example.com',
+          apiKey: null,
+          model: 'm',
+          capability: LlmCapability.deepseek,
+          timeout: Duration.zero,
+        ),
+        // debug 下 assert 先拦（AssertionError）；release 下运行时 throw 兜底
+        throwsA(anyOf(isA<AssertionError>(), isA<ArgumentError>())),
+        reason: 'timeout 非正拒绝（debug assert + release throw）',
+      );
     });
   });
 
@@ -147,7 +199,7 @@ void main() {
       final body = OpenAiCompatibleLlmClient.buildChatRequestBody(
         config: deepseekConfig,
         messages: const [LlmMessage(role: LlmRole.user, content: 'x')],
-        options: const LlmRequestOptions(
+        options: LlmRequestOptions(
           temperature: 0.7,
           maxTokens: 100,
           useTools: true,
@@ -158,8 +210,47 @@ void main() {
       expect(body['max_tokens'], 100);
       expect(body['tools'], isA<List>(), reason: '支持 tools 时携带占位');
       expect(body['stream'], isTrue);
+      // response_format 与 stream 正交（r1）：未请求 useJsonMode 不携带
+      expect(body.containsKey('response_format'), isFalse);
+    });
+
+    test('useJsonMode 独立请求 response_format（与 stream 正交，r1）', () {
+      // JSON 模式是独立能力——非流式请求也可请求结构化输出。
+      final body = OpenAiCompatibleLlmClient.buildChatRequestBody(
+        config: deepseekConfig,
+        messages: const [LlmMessage(role: LlmRole.user, content: 'x')],
+        options: LlmRequestOptions(useJsonMode: true),
+      );
       expect(body['response_format'], {'type': 'json_object'},
-          reason: 'DeepSeek 支持 response_format');
+          reason: 'DeepSeek 支持 response_format，useJsonMode 独立携带');
+      expect(body.containsKey('stream'), isFalse,
+          reason: 'JSON 模式不强制流式');
+      // 能力不支持时不携带（Ollama 无 response_format）
+      final ollamaBody = OpenAiCompatibleLlmClient.buildChatRequestBody(
+        config: LlmConfig(
+          baseUrl: 'http://localhost:11434/v1',
+          apiKey: null,
+          model: 'llama3',
+          capability: LlmCapability.ollama,
+        ),
+        messages: const [LlmMessage(role: LlmRole.user, content: 'x')],
+        options: LlmRequestOptions(useJsonMode: true),
+      );
+      expect(ollamaBody.containsKey('response_format'), isFalse,
+          reason: 'Ollama 无 response_format 不携带');
+    });
+
+    test('LlmRequestOptions 边界：temperature 越界 / maxTokens 非正拒绝', () {
+      // debug 下 assert 先拦（AssertionError）；release 下运行时 throw 兜底。
+      final rejects = throwsA(anyOf(isA<AssertionError>(), isA<ArgumentError>()));
+      expect(() => LlmRequestOptions(temperature: 3), rejects,
+          reason: 'temperature > 2 拒绝');
+      expect(() => LlmRequestOptions(temperature: -0.1), rejects,
+          reason: 'temperature < 0 拒绝');
+      expect(() => LlmRequestOptions(maxTokens: 0), rejects,
+          reason: 'maxTokens=0 拒绝');
+      expect(() => LlmRequestOptions(maxTokens: -5), rejects,
+          reason: 'maxTokens 负数拒绝');
     });
 
     test('能力不支持时不携带（Ollama：无 tools/response_format）', () {
@@ -172,7 +263,7 @@ void main() {
       final body = OpenAiCompatibleLlmClient.buildChatRequestBody(
         config: ollamaConfig,
         messages: const [LlmMessage(role: LlmRole.user, content: 'x')],
-        options: const LlmRequestOptions(
+        options: LlmRequestOptions(
           useTools: true,
           stream: true,
         ),
@@ -264,7 +355,7 @@ void main() {
       );
       final result = await client.chat(
         messages: const [LlmMessage(role: LlmRole.user, content: 'x')],
-        options: const LlmRequestOptions(useTools: true, stream: true),
+        options: LlmRequestOptions(useTools: true, stream: true),
       );
       expect(result.isSuccess, isFalse, reason: '通义 tools+stream 拒绝');
       expect(hit, isFalse, reason: '非法组合不触达网络');
