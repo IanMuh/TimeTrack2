@@ -107,6 +107,10 @@ class WindowsInstaller {
     var normalized = name;
     while (normalized.isNotEmpty &&
         (normalized.endsWith(' ') || normalized.endsWith('.'))) {
+      // **遇 `.`/`..` 即停（r18）**：Win32 规范化下这两个是特殊目录名、保留
+      // 折叠目标（`'.. .'`→`'..'`、`'. .'`→`'.'`），不继续裁成空串——使下方
+      // `.`/`..` 分支可达（全点号变体精确停在对应特殊目录名），与折叠语义一致。
+      if (normalized == '.' || normalized == '..') break;
       normalized = normalized.substring(0, normalized.length - 1);
     }
     if (normalized.isEmpty) return 'staging 目录名配置非法（裁剪后为空）';
