@@ -57,11 +57,13 @@ void main() {
   Future<void> seedSoftDeleted(
     String table,
     String id,
-    Duration deletedAge,
-  ) async {
+    Duration deletedAge, {
+    String? userId,
+  }) async {
     final deletedAt = mapping.utcString(DateTime.now().subtract(deletedAge));
     // FK 依赖：子表行引用 activities/activityCategories——先造对应父行（存活，
-    // 否则本用例的物理删除断言会受父行存在性干扰）。
+    // 否则本用例的物理删除断言会受父行存在性干扰）。父行 userId 与被删行一致
+    //（r9 分区谓词下同 userId 才匹配）。
     if (table == 'timeEntries' || table == 'trackingRules') {
       await db
           .into(db.activities)
@@ -71,6 +73,7 @@ void main() {
               name: 'parent-$id',
               color: 1,
               updatedAt: deletedAt,
+              userId: Value(userId),
             ),
             mode: InsertMode.insertOrIgnore,
           );
@@ -84,6 +87,7 @@ void main() {
               name: 'parent-$id',
               color: 1,
               updatedAt: deletedAt,
+              userId: Value(userId),
             ),
             mode: InsertMode.insertOrIgnore,
           );
@@ -95,6 +99,7 @@ void main() {
               name: 'parentcat-$id',
               color: 1,
               updatedAt: deletedAt,
+              userId: Value(userId),
             ),
             mode: InsertMode.insertOrIgnore,
           );
@@ -110,6 +115,7 @@ void main() {
                 color: 1,
                 updatedAt: deletedAt,
                 deletedAt: Value(deletedAt),
+                userId: Value(userId),
               ),
             );
       case 'timeEntries':
@@ -124,6 +130,7 @@ void main() {
                 deviceId: 'dev',
                 updatedAt: deletedAt,
                 deletedAt: Value(deletedAt),
+                userId: Value(userId),
               ),
             );
       case 'trackingRules':
@@ -137,6 +144,7 @@ void main() {
                 activityId: 'act-$id',
                 updatedAt: deletedAt,
                 deletedAt: Value(deletedAt),
+                userId: Value(userId),
               ),
             );
       case 'activityCategories':
@@ -150,6 +158,7 @@ void main() {
                 updatedAt: deletedAt,
                 deletedAt: Value(deletedAt),
                 parentId: const Value(null),
+                userId: Value(userId),
               ),
             );
       case 'activityCategoryLinks':
@@ -162,6 +171,7 @@ void main() {
                 categoryId: 'cat-$id',
                 updatedAt: deletedAt,
                 deletedAt: Value(deletedAt),
+                userId: Value(userId),
               ),
             );
       case 'actionLogs':
@@ -175,6 +185,7 @@ void main() {
                 deviceId: 'dev',
                 updatedAt: deletedAt,
                 deletedAt: Value(deletedAt),
+                userId: Value(userId),
               ),
             );
     }
@@ -229,18 +240,33 @@ void main() {
       expect(left, isEmpty, reason: '超期且已同步的软删行被物理删除');
     });
 
-    test('登录用户分区游标（r6）：run(userId) 读分区键、全局键不影响', () async {
+    test('登录用户分区游标（r6/r9）：run(userId) 读分区键、仅删同 userId 行', () async {
       // r6 关键缺陷回归锁定：SyncStatusStore 在登录用户下写分区键
       // `last_sync_at:<userId>`——守卫若只读全局键会恒判"从未同步"、物理清理
       // 静默失效。run(userId) 必须读分区键。
       await putMeta('${AppMetadataKeys.lastSyncAt}:alice', nowStr());
-      await seedSoftDeleted('activities', 'a-part', const Duration(days: 400));
-      // 传 alice：读分区游标 → 正常物理删除。
+      // alice 的超期墓碑（userId='alice'）→ 应删。
+      await seedSoftDeleted(
+        'activities',
+        'a-part',
+        const Duration(days: 400),
+        userId: 'alice',
+      );
+      // bob 的超期墓碑（userId='bob'，r9 分区隔离）→ 保留（alice 清理不能删
+      // bob 行——bob 分区游标无法证明已传播）。
+      await seedSoftDeleted(
+        'activities',
+        'b-part',
+        const Duration(days: 400),
+        userId: 'bob',
+      );
       final report = (await service.run(userId: 'alice')).requireValue();
       expect(report.skippedDueToNoSync, isFalse, reason: '分区游标读到');
-      expect(report.deletedByTable['activities'], 1);
+      expect(report.deletedByTable['activities'], 1, reason: '仅 alice 行删');
       final left = await (db.select(db.activities)).get();
-      expect(left, isEmpty);
+      expect(left.map((r) => r.id).toSet(), {
+        'b-part',
+      }, reason: 'bob 行保留（r9 分区隔离）');
     });
 
     test('登录用户无分区游标 → 跳过（即使全局键存在，r6）', () async {
@@ -431,8 +457,11 @@ void main() {
       }
       final report = (await service.run()).requireValue();
       expect(report.deletedTotal, 6);
-      expect(report.vacuumed, isTrue, reason: '超阈值触发 VACUUM');
-      // VACUUM 后库仍可用（重写未损坏）。
+      expect(
+        report.vacuumed,
+        isTrue,
+        reason: '超阈值触发 VACUUM',
+      ); // VACUUM 后库仍可用（重写未损坏）。
       final left = await (db.select(db.activities)).get();
       expect(left, isEmpty);
     });
@@ -474,6 +503,25 @@ void main() {
         db.appMetadata,
       )..where((t) => t.key.equals(AppMetadataKeys.lastCleanupAt))).get();
       expect(meta, isNotEmpty, reason: 'VACUUM 失败后仍记录清理时刻');
+    });
+
+    test('IN 分块跨块边界（r3）：501+ 行全量删除、残留精确', () async {
+      // 块大小 500——501 条强制触发多块迭代（末块截取/跨块 id 丢失/重复的
+      // off-by-one 回归锁定）。真空阈值注入 0 防超阈值干扰（实际 501 远大于
+      // 注入阈值也触发 VACUUM——无妨）。
+      final chunkService = CleanupService(database: db, vacuumThreshold: 0);
+      await putMeta(AppMetadataKeys.lastSyncAt, nowStr());
+      for (var i = 0; i < 501; i++) {
+        await seedSoftDeleted('activities', 'c$i', const Duration(days: 400));
+      }
+      final report = (await chunkService.run()).requireValue();
+      expect(
+        report.deletedByTable['activities'],
+        501,
+        reason: '501 条全删（跨 2 块）',
+      );
+      final left = await (db.select(db.activities)).get();
+      expect(left, isEmpty, reason: '跨块删除无残留');
     });
   });
 

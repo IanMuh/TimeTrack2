@@ -35,6 +35,8 @@
 /// VACUUM/checkpoint 在事务提交后执行。
 library;
 
+import 'dart:io' show stderr;
+
 import 'package:drift/drift.dart';
 
 import '../../constants/app_constants.dart';
@@ -92,6 +94,10 @@ class CleanupService with RepositoryMappings {
   /// 的缓解）；若 SyncStatusStore 侧调整须同步本值。
   static const _maxUserIdLength = 128;
 
+  /// 保留期上界（天，10 年）：防 `Duration(days:)` int64 微秒溢出回绕
+  ///（r10）——配置值超此钳制。
+  static const _maxRetentionDays = 3650;
+
   /// VACUUM 阈值（行）：物理删除超过此值才全库重建；测试注入小值。
   final int _vacuumThreshold;
 
@@ -108,6 +114,10 @@ class CleanupService with RepositoryMappings {
   /// 读取保留期（天）：`app_metadata[deletedRetentionDays]` 优先（阶段 4 设置
   /// UI 写入），无值/非法/DB 异常回退 [AppConstants.defaultDeletedRetentionDays]。
   /// **读侧最终形态**——阶段 4 加可配置只改写侧。
+  /// **上界钳制（r10）**：超大配置值使 `Duration(days: retention)` 在 int64
+  /// 微秒下溢出回绕（约 1.07 亿天）——retentionCutoff 变为未来时刻、cutoff
+  /// 退化为游标，软删未满保留期的墓碑被提前物理删除（数据丢失）。钳制到
+  /// 10 年（3650 天）内。
   Future<int> retentionDays() async {
     try {
       final row =
@@ -116,7 +126,9 @@ class CleanupService with RepositoryMappings {
               ))
               .getSingleOrNull();
       final parsed = row == null ? null : int.tryParse(row.value);
-      if (parsed != null && parsed > 0) return parsed;
+      if (parsed != null && parsed > 0) {
+        return parsed > _maxRetentionDays ? _maxRetentionDays : parsed;
+      }
       return AppConstants.defaultDeletedRetentionDays;
     } catch (_) {
       // DB 异常回退默认（清理不可因配置读取失败而崩溃）。
@@ -126,11 +138,17 @@ class CleanupService with RepositoryMappings {
 
   /// 执行一次保留期清理。
   ///
-  /// [userId]：**sync 守卫的游标分区（r6 修正）**——云同步的 `SyncStatusStore.
-  /// markSuccess` 在登录用户下写入**分区键** `last_sync_at:` + userId（共享设备
-  /// 各用户游标互不串扰）；传当前登录 userId 时守卫读分区游标（未同步跳过）、
-  /// null（未登录）读全局键。**不得用全局键判定登录用户**（分区游标读不到会
-  /// 恒判"从未同步"、物理清理静默失效；共享设备残留全局键会误判所有用户）。
+  /// [userId]：**sync 守卫与删除谓词的分区（r6/r9）**——云同步的
+  /// `SyncStatusStore.markSuccess` 在登录用户下写入**分区键** `last_sync_at:` +
+  /// userId（共享设备各用户游标互不串扰）；传当前登录 userId 时守卫读分区游标
+  ///（未同步跳过）、null（未登录/LAN/本地模式）读全局键。**不得用全局键判定
+  /// 登录用户**（分区游标读不到会恒判"从未同步"、物理清理静默失效；共享设备
+  /// 残留全局键会误判所有用户）。
+  ///
+  /// **删除谓词按同 userId 分区（r9 修正）**：物理删除仅作用于 `user_id ==
+  /// 当前 userId` 的行（null 传参仅清 `user_id IS NULL` 的本地/LAN 行）——
+  /// 共享设备上 B 用户的墓碑不得被 A 触发的清理（A 分区游标无法证明 B 已传播）
+  /// 误删，否则 B 下次同步时远端行"复活"破坏删除永远赢（保留不变式 #5）。
   ///
   /// 流程：读保留期 → 读同步游标（sync 守卫）→ 单事务物理删除（引用表软删行
   /// 清理 + 存活引用者跳过 + 分类悬空处理）→ 事务外阈值驱动 VACUUM →
@@ -170,6 +188,18 @@ class CleanupService with RepositoryMappings {
           ? null
           : DateTime.tryParse(syncRow.value);
       if (lastSyncAt == null) {
+        // **损坏游标区分（r10）**：syncRow 存在但 tryParse 失败 = 游标损坏
+        //（非 utcString 格式/无时区偏移）——与"从未同步（键不存在）"混同会
+        // 静默永久跳过且无日志。写 stderr 警告（清理不因日志失败崩溃）。
+        if (syncRow != null) {
+          try {
+            stderr.writeln(
+              '[cleanup] 同步游标损坏（$cursorKey）：${syncRow.value}——清理跳过',
+            );
+          } catch (_) {
+            // 日志写入失败不影响跳过结论。
+          }
+        }
         return AppSuccess(
           const CleanupReport(
             deletedByTable: {},
@@ -198,14 +228,30 @@ class CleanupService with RepositoryMappings {
       // 4. 最后删 activities（此时引用它的软删行已随通用清理移除）。
       final deleted = <String, int>{};
       await database.transaction(() async {
-        final deletableActivities = await _deletableActivityIds(cutoffStr);
-        deleted['activityCategoryLinks'] = await _deleteExpiredLinks(cutoffStr);
-        deleted['trackingRules'] = await _deleteExpiredTrackingRules(cutoffStr);
-        deleted['timeEntries'] = await _deleteExpiredTimeEntries(cutoffStr);
-        deleted['actionLogs'] = await _deleteExpiredActionLogs(cutoffStr);
+        final deletableActivities = await _deletableActivityIds(
+          cutoffStr,
+          normalized,
+        );
+        deleted['activityCategoryLinks'] = await _deleteExpiredLinks(
+          cutoffStr,
+          normalized,
+        );
+        deleted['trackingRules'] = await _deleteExpiredTrackingRules(
+          cutoffStr,
+          normalized,
+        );
+        deleted['timeEntries'] = await _deleteExpiredTimeEntries(
+          cutoffStr,
+          normalized,
+        );
+        deleted['actionLogs'] = await _deleteExpiredActionLogs(
+          cutoffStr,
+          normalized,
+        );
         deleted['activityCategories'] = await _deleteExpiredCategories(
           cutoffStr,
           now,
+          normalized,
         );
         deleted['activities'] = await _deleteActivitiesByIds(
           deletableActivities,
@@ -224,12 +270,22 @@ class CleanupService with RepositoryMappings {
           final runner = _vacuumRunner;
           if (runner != null) {
             await runner();
+            vacuumed = true; // 注入 runner 成功即视为 VACUUM 完成（测试路径）
           } else {
             await database.customStatement('VACUUM');
-            // TRUNCATE 模式把 WAL 截断回主库（比 PASSIVE 更彻底地归还空间）。
-            await database.customStatement('PRAGMA wal_checkpoint(TRUNCATE)');
+            // **checkpoint 结果校验（r10）**：PRAGMA wal_checkpoint(TRUNCATE)
+            // 不抛异常而是返回结果行——被其它连接占用时返回 busy（第 1 列
+            // 非 0），customStatement 丢弃结果会误报"空间已回收"。用
+            // customSelect 读 busy 字段，非 0 视为 checkpoint 未完成（如实
+            // 标记未回收；VACUUM 本身已执行，主流程不受影响）。
+            final cp =
+                (await database
+                        .customSelect('PRAGMA wal_checkpoint(TRUNCATE)')
+                        .getSingle())
+                    .data;
+            final busy = cp['busy'] ?? 0;
+            vacuumed = busy is int && busy != 0 ? false : true;
           }
-          vacuumed = true;
         } catch (_) {
           // VACUUM 失败不阻塞清理主流程（已完成的物理删除不回滚）。
           vacuumed = false;
@@ -263,23 +319,29 @@ class CleanupService with RepositoryMappings {
   /// **可删活动集**：超期软删 − 阻塞引用者（3 张引用表中 `deleted_at IS NULL
   /// OR deleted_at >= cutoff` 且 activity_id ∈ 待删的行——存活或软删未传播的
   /// 引用者在父被物理删除后制造悬空条目/FK 违约，宁可留待下一轮；软删已传播
-  /// 子行由各表通用 `< cutoff` 清理先行移除、不阻塞父）。
-  Future<List<String>> _deletableActivityIds(String cutoff) async {
-    final expired = await _expiredActivityIds(cutoff);
+  /// 子行由各表通用 `< cutoff` 清理先行移除、不阻塞父）。**按 userId 分区
+  ///（r9）**：仅处理 `user_id == [userId]` 的行（null 仅本地/LAN 行）。
+  Future<List<String>> _deletableActivityIds(
+    String cutoff,
+    String? userId,
+  ) async {
+    final expired = await _expiredActivityIds(cutoff, userId);
     if (expired.isEmpty) return const [];
     final blocked = <String>{}
-      ..addAll(await _blockingTimeEntryReferents(expired, cutoff))
-      ..addAll(await _blockingRuleReferents(expired, cutoff))
-      ..addAll(await _blockingLinkReferents(expired, cutoff));
+      ..addAll(await _blockingTimeEntryReferents(expired, cutoff, userId))
+      ..addAll(await _blockingRuleReferents(expired, cutoff, userId))
+      ..addAll(await _blockingLinkReferents(expired, cutoff, userId));
     return expired.where((id) => !blocked.contains(id)).toList();
   }
 
-  /// 阻塞父删除的 time_entries 引用者：`activity_id IN (ids) AND (deleted_at
-  /// IS NULL OR deleted_at >= cutoff)`（存活或软删未传播）。**IN 分块（r3）**：
-  /// 软删大量累积时单次 IN 逼近 SQLite 绑定参数上限——按块遍历合并。
+  /// 阻塞父删除的 time_entries 引用者：`user_id == userId AND activity_id IN
+  /// (ids) AND (deleted_at IS NULL OR deleted_at >= cutoff)`（存活或软删未
+  /// 传播）。**IN 分块（r3）**：软删大量累积时单次 IN 逼近 SQLite 绑定参数
+  /// 上限——按块遍历合并。
   Future<Set<String>> _blockingTimeEntryReferents(
     List<String> parentIds,
     String cutoff,
+    String? userId,
   ) async {
     final result = <String>{};
     for (final chunk in _chunks(parentIds)) {
@@ -287,7 +349,8 @@ class CleanupService with RepositoryMappings {
           await (database.selectOnly(database.timeEntries)
                 ..addColumns([database.timeEntries.activityId])
                 ..where(
-                  database.timeEntries.activityId.isIn(chunk) &
+                  _userIdMatches(database.timeEntries.userId, userId) &
+                      database.timeEntries.activityId.isIn(chunk) &
                       (database.timeEntries.deletedAt.isNull() |
                           database.timeEntries.deletedAt.isBiggerOrEqualValue(
                             cutoff,
@@ -303,6 +366,7 @@ class CleanupService with RepositoryMappings {
   Future<Set<String>> _blockingRuleReferents(
     List<String> parentIds,
     String cutoff,
+    String? userId,
   ) async {
     final result = <String>{};
     for (final chunk in _chunks(parentIds)) {
@@ -310,7 +374,8 @@ class CleanupService with RepositoryMappings {
           await (database.selectOnly(database.trackingRules)
                 ..addColumns([database.trackingRules.activityId])
                 ..where(
-                  database.trackingRules.activityId.isIn(chunk) &
+                  _userIdMatches(database.trackingRules.userId, userId) &
+                      database.trackingRules.activityId.isIn(chunk) &
                       (database.trackingRules.deletedAt.isNull() |
                           database.trackingRules.deletedAt.isBiggerOrEqualValue(
                             cutoff,
@@ -328,6 +393,7 @@ class CleanupService with RepositoryMappings {
   Future<Set<String>> _blockingLinkReferents(
     List<String> parentIds,
     String cutoff,
+    String? userId,
   ) async {
     final result = <String>{};
     for (final chunk in _chunks(parentIds)) {
@@ -335,7 +401,11 @@ class CleanupService with RepositoryMappings {
           await (database.selectOnly(database.activityCategoryLinks)
                 ..addColumns([database.activityCategoryLinks.activityId])
                 ..where(
-                  database.activityCategoryLinks.activityId.isIn(chunk) &
+                  _userIdMatches(
+                        database.activityCategoryLinks.userId,
+                        userId,
+                      ) &
+                      database.activityCategoryLinks.activityId.isIn(chunk) &
                       (database.activityCategoryLinks.deletedAt.isNull() |
                           database.activityCategoryLinks.deletedAt
                               .isBiggerOrEqualValue(cutoff)),
@@ -369,13 +439,24 @@ class CleanupService with RepositoryMappings {
     }
   }
 
-  /// 超期软删 activities 的 id 集（可删判定用）。
-  Future<List<String>> _expiredActivityIds(String cutoff) async {
+  /// **userId 匹配谓词（r9）**：`equals()` 不接受可空值——null 传参须匹配
+  /// `user_id IS NULL`（本地/LAN 行），非 null 匹配 `user_id == userId`。
+  Expression<bool> _userIdMatches(
+    GeneratedColumn<String> col,
+    String? userId,
+  ) => userId == null ? col.isNull() : col.equals(userId);
+
+  /// 超期软删 activities 的 id 集（可删判定用；按 userId 分区，r9）。
+  Future<List<String>> _expiredActivityIds(
+    String cutoff,
+    String? userId,
+  ) async {
     final rows =
         await (database.selectOnly(database.activities)
               ..addColumns([database.activities.id])
               ..where(
-                database.activities.deletedAt.isNotNull() &
+                _userIdMatches(database.activities.userId, userId) &
+                    database.activities.deletedAt.isNotNull() &
                     database.activities.deletedAt.isSmallerThanValue(cutoff),
               ))
             .get();
@@ -383,43 +464,57 @@ class CleanupService with RepositoryMappings {
   }
 
   /// timeEntries：只删通用 `< cutoff` 软删行（含引用将删父的——父是否真删
-  /// 不影响子自身清理合法性；未传播子行保留、阻塞父删除）。
-  Future<int> _deleteExpiredTimeEntries(String cutoff) async {
+  /// 不影响子自身清理合法性；未传播子行保留、阻塞父删除）。按 userId 分区。
+  Future<int> _deleteExpiredTimeEntries(String cutoff, String? userId) async {
     final query = database.delete(database.timeEntries)
       ..where(
-        (t) => t.deletedAt.isNotNull() & t.deletedAt.isSmallerThanValue(cutoff),
+        (t) =>
+            _userIdMatches(t.userId, userId) &
+            t.deletedAt.isNotNull() &
+            t.deletedAt.isSmallerThanValue(cutoff),
       );
     return query.go();
   }
 
   /// trackingRules：同上。
-  Future<int> _deleteExpiredTrackingRules(String cutoff) async {
+  Future<int> _deleteExpiredTrackingRules(String cutoff, String? userId) async {
     final query = database.delete(database.trackingRules)
       ..where(
-        (t) => t.deletedAt.isNotNull() & t.deletedAt.isSmallerThanValue(cutoff),
+        (t) =>
+            _userIdMatches(t.userId, userId) &
+            t.deletedAt.isNotNull() &
+            t.deletedAt.isSmallerThanValue(cutoff),
       );
     return query.go();
   }
 
   /// links：同上（activityId 与 categoryId 两方向引用将删父的软删已传播行
   /// 均被通用 `< cutoff` 覆盖）。
-  Future<int> _deleteExpiredLinks(String cutoff) async {
+  Future<int> _deleteExpiredLinks(String cutoff, String? userId) async {
     final query = database.delete(database.activityCategoryLinks)
       ..where(
-        (t) => t.deletedAt.isNotNull() & t.deletedAt.isSmallerThanValue(cutoff),
+        (t) =>
+            _userIdMatches(t.userId, userId) &
+            t.deletedAt.isNotNull() &
+            t.deletedAt.isSmallerThanValue(cutoff),
       );
     return query.go();
   }
 
   /// 分类：可删 = 超期 − 被 link.categoryId 引用（存活或软删未传播）者；
   /// 引用将删分类的行（**含软删**——父被物理删后引用悬空，防自引用 FK）
-  /// parent_id 置 NULL；再删可删分类。分块防 IN 超限。
-  Future<int> _deleteExpiredCategories(String cutoff, DateTime now) async {
+  /// parent_id 置 NULL；再删可删分类。分块防 IN 超限。按 userId 分区（r9）。
+  Future<int> _deleteExpiredCategories(
+    String cutoff,
+    DateTime now,
+    String? userId,
+  ) async {
     final expiredRows =
         await (database.selectOnly(database.activityCategories)
               ..addColumns([database.activityCategories.id])
               ..where(
-                database.activityCategories.deletedAt.isNotNull() &
+                _userIdMatches(database.activityCategories.userId, userId) &
+                    database.activityCategories.deletedAt.isNotNull() &
                     database.activityCategories.deletedAt.isSmallerThanValue(
                       cutoff,
                     ),
@@ -429,14 +524,19 @@ class CleanupService with RepositoryMappings {
         .map((r) => r.read(database.activityCategories.id)!)
         .toList();
     if (expired.isEmpty) return 0;
-    // 阻塞分类删除的 link 引用者（categoryId 方向，存活或软删未传播）。
+    // 阻塞分类删除的 link 引用者（categoryId 方向，存活或软删未传播；同
+    // userId 分区——共享设备上他用户 link 不阻塞本用户分类）。
     final blocked = <String>{};
     for (final chunk in _chunks(expired)) {
       final rows =
           await (database.selectOnly(database.activityCategoryLinks)
                 ..addColumns([database.activityCategoryLinks.categoryId])
                 ..where(
-                  database.activityCategoryLinks.categoryId.isIn(chunk) &
+                  _userIdMatches(
+                        database.activityCategoryLinks.userId,
+                        userId,
+                      ) &
+                      database.activityCategoryLinks.categoryId.isIn(chunk) &
                       (database.activityCategoryLinks.deletedAt.isNull() |
                           database.activityCategoryLinks.deletedAt
                               .isBiggerOrEqualValue(cutoff)),
@@ -469,11 +569,14 @@ class CleanupService with RepositoryMappings {
   }
 
   /// actionLogs：无 FK references（activityId/entryId 为 nullable 无外键），
-  /// 直接删超期软删行。
-  Future<int> _deleteExpiredActionLogs(String cutoff) async {
+  /// 直接删超期软删行。按 userId 分区（r9）。
+  Future<int> _deleteExpiredActionLogs(String cutoff, String? userId) async {
     final query = database.delete(database.actionLogs)
       ..where(
-        (t) => t.deletedAt.isNotNull() & t.deletedAt.isSmallerThanValue(cutoff),
+        (t) =>
+            _userIdMatches(t.userId, userId) &
+            t.deletedAt.isNotNull() &
+            t.deletedAt.isSmallerThanValue(cutoff),
       );
     return query.go();
   }
