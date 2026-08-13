@@ -40,6 +40,54 @@ Future<String> sha256File(
   return collector.digest!.toString();
 }
 
+/// 计算**任意字节流**的 SHA-256（hex 小写）——供"下载流边收边算"场景
+///（下载写临时文件的同时累计哈希，校验环节免二次读盘）。
+///
+/// **委托 [Sha256Sink]（r9）**：与下载器共用同一累积逻辑（单一事实来源——
+/// 哈希算法细节集中一处防漂移）。消费完 [stream]（含关闭）后返回；
+/// [stream] 中途出错（Error/异常）时错误向上传播（sink 在 finally 关闭，
+/// 哈希状态完整）。
+Future<String> sha256Stream(Stream<List<int>> stream) async {
+  final sink = Sha256Sink();
+  try {
+    await for (final chunk in stream) {
+      sink.add(chunk);
+    }
+  } finally {
+    // digest 幂等（_closed 标志只 close 一次）；正常/异常路径均保证关闭。
+    sink.digest();
+  }
+  return sink.digest();
+}
+
+/// 增量 SHA-256 累积器（**单一事实来源**）：`sha256Stream` 与下载器
+///（边写文件边算哈希）共用同一累积逻辑——哈希算法细节集中一处，防漂移。
+///
+/// 用法：逐块 [add]；全部完成后 [digest]（幂等，重复调用返回同一值）。
+class Sha256Sink {
+  final _collector = _DigestCollector();
+  late final ByteConversionSink _converter;
+  bool _closed = false;
+
+  Sha256Sink() {
+    _converter = crypto.sha256.startChunkedConversion(_collector);
+  }
+
+  /// 累计一块数据。
+  void add(List<int> chunk) => _converter.add(chunk);
+
+  /// 结束累积并返回 hex 小写摘要。**幂等（r2）**：显式 `_closed` 标志保证
+  /// 只 close 一次——不依赖底层 sink 对重复 close 的处理（Sink.close 契约是
+  /// 恰好一次）。
+  String digest() {
+    if (!_closed) {
+      _converter.close();
+      _closed = true;
+    }
+    return _collector.digest!.toString();
+  }
+}
+
 /// 收集流式哈希的最终 [crypto.Digest]。
 class _DigestCollector implements Sink<crypto.Digest> {
   crypto.Digest? digest;

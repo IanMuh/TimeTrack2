@@ -28,7 +28,10 @@ class UpdateManifest {
   final bool required;
   final String releaseNotes;
 
-  /// 各平台产物；缺平台则对应平台不可更新。
+  /// 各平台产物；**缺平台 = 对应平台不可安装**（该平台无产物可下载）。
+  /// 注意：`available` 判定只比较版本号、不检查平台产物（r14 契约明确）——
+  /// 消费侧（编排/UI）须自行按当前平台检查产物存在性，缺产物时提示"此平台
+  /// 暂不支持更新"而非误导用户有更新。
   final UpdatePlatformArtifact? windows;
   final UpdatePlatformArtifact? android;
 
@@ -44,7 +47,8 @@ class UpdateManifest {
           android == other.android;
 
   @override
-  int get hashCode => Object.hash(version, required, releaseNotes, windows, android);
+  int get hashCode =>
+      Object.hash(version, required, releaseNotes, windows, android);
 
   /// 严格 SemVer 格式：主版本号禁止前导零（`(0|[1-9]\d*)`），pre-release 段数字
   /// 标识符同样禁止前导零，build 段为 `[0-9A-Za-z-]` 点分段。**不允许 `v` 前缀**。
@@ -98,9 +102,7 @@ class UpdateManifest {
   ) {
     if (value == null) return null;
     if (value is! Map<String, Object?>) {
-      throw FormatException(
-        'UpdateManifest: $platform 平台产物必须是对象',
-      );
+      throw FormatException('UpdateManifest: $platform 平台产物必须是对象');
     }
     final url = _normalizeUrl(platform, value['url']);
     final sha256 = _normalizeSha256(platform, value['sha256']);
@@ -178,10 +180,6 @@ class UpdatePlatformArtifact {
   int get hashCode => Object.hash(url, sha256, size);
 
   Map<String, Object?> toMap() {
-    return {
-      'url': url,
-      'sha256': sha256,
-      'size': size,
-    };
+    return {'url': url, 'sha256': sha256, 'size': size};
   }
 }

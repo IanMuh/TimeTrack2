@@ -35,6 +35,7 @@ dependencies:
   sqlite3: ^3.5.1
   supabase_flutter: ^2.17.1
   uuid: ^4.6.0
+  archive: ^4.0.9
 
 dev_dependencies:
   flutter_test:

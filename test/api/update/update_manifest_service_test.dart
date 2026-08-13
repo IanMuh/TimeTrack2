@@ -1,0 +1,721 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io' show HttpException, TlsException;
+
+import 'package:drift/native.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:timetrack2/api/update/update_manifest_service.dart';
+import 'package:timetrack2/constants/storage_keys.dart';
+import 'package:timetrack2/constants/update_config.dart';
+import 'package:timetrack2/data/database/app_database.dart';
+import 'package:timetrack2/viewmodels/update/update_manifest.dart';
+
+void main() {
+  group('UpdateManifestService evaluate（纯逻辑）', () {
+    late AppDatabase db;
+    final createdServices = <UpdateManifestService>[];
+
+    setUp(() {
+      db = AppDatabase(NativeDatabase.memory());
+    });
+
+    tearDown(() {
+      // 资源卫生（r9）：service() 未注入 httpClient 会自建默认 client——统一
+      // close 释放（防 long-running 测试累积底层连接）。
+      for (final s in createdServices) {
+        s.close();
+      }
+      createdServices.clear();
+      db.close();
+    });
+
+    UpdateManifestService service(String currentVersion) {
+      final s = UpdateManifestService(
+        database: db,
+        currentVersion: currentVersion,
+      );
+      createdServices.add(s);
+      return s;
+    }
+
+    UpdateManifest manifest(String version, {bool required = false}) =>
+        UpdateManifest(
+          version: version,
+          required: required,
+          releaseNotes: 'notes',
+          windows: UpdatePlatformArtifact(
+            url: 'https://x.example/app.zip',
+            sha256: 'a' * 64,
+          ),
+        );
+
+    test('远端版本更新 → available + 缓存版本', () async {
+      final result = (await service(
+        '1.0.0',
+      ).evaluate(manifest('1.1.0'))).requireValue();
+      expect(result.available, isTrue);
+      expect(result.latestVersion, '1.1.0');
+      expect(result.required, isFalse);
+      expect(result.windows, isNotNull);
+      // 缓存供后续判断
+      final cached =
+          await (db.select(db.appMetadata)..where(
+                (t) => t.key.equals(AppMetadataKeys.lastCheckedManifestVersion),
+              ))
+              .getSingle();
+      expect(cached.value, '1.1.0');
+    });
+
+    test('远端版本 ≤ 当前版本 → 无更新（含 pre-release 规则）', () async {
+      // 1.0.0 == 1.0.0
+      expect(
+        (await service(
+          '1.0.0',
+        ).evaluate(manifest('1.0.0'))).requireValue().available,
+        isFalse,
+      );
+      // 0.9.0 < 1.0.0
+      expect(
+        (await service(
+          '1.0.0',
+        ).evaluate(manifest('0.9.0'))).requireValue().available,
+        isFalse,
+      );
+      // 1.1.0-pre.1 < 1.1.0（pre-release 不视为更新）
+      expect(
+        (await service(
+          '1.1.0',
+        ).evaluate(manifest('1.1.0-pre.1'))).requireValue().available,
+        isFalse,
+      );
+      // 1.1.0-pre.1 > 1.0.0（更高主版本 pre-release 算更新）
+      expect(
+        (await service(
+          '1.0.0',
+        ).evaluate(manifest('1.1.0-pre.1'))).requireValue().available,
+        isTrue,
+      );
+      // **pre-release → 正式版升级（r2）**：current=1.1.0-pre.1、remote=1.1.0
+      // ——SemVer 规则 pre-release 排序低于正式版，应判为更新（字符串比较会
+      // 得出相反结论，此用例锁定防误用字符串比较回归）。
+      expect(
+        (await service(
+          '1.1.0-pre.1',
+        ).evaluate(manifest('1.1.0'))).requireValue().available,
+        isTrue,
+        reason: 'pre-release 用户可升级到同版本正式版',
+      );
+    });
+
+    test('已忽略版本 → 无更新；忽略版本低于新远端版本 → 仍提示', () async {
+      // 忽略 1.1.0
+      await db
+          .into(db.appMetadata)
+          .insertOnConflictUpdate(
+            AppMetadataCompanion.insert(
+              key: AppMetadataKeys.ignoredUpdateVersion,
+              value: '1.1.0',
+            ),
+          );
+      expect(
+        (await service(
+          '1.0.0',
+        ).evaluate(manifest('1.1.0'))).requireValue().available,
+        isFalse,
+        reason: '已忽略版本不再提示',
+      );
+      // 忽略版本低于远端新版本 → 仍提示
+      expect(
+        (await service(
+          '1.0.0',
+        ).evaluate(manifest('1.2.0'))).requireValue().available,
+        isTrue,
+      );
+    });
+
+    test('远端版本数字段超 int 范围 → 可读失败（不崩溃，r2）', () async {
+      // UpdateManifest.fromMap 正则只校验格式不查 int 范围——超大数字段会
+      // 在 AppVersion.parse 抛 FormatException，须转 AppFailure。
+      final result = await service(
+        '1.0.0',
+      ).evaluate(manifest('9999999999999999999999.0.0'));
+      expect(result.isSuccess, isFalse, reason: '数字段超范围返回失败');
+      expect(
+        result.when(onSuccess: (_) => '', onFailure: (m) => m),
+        contains('版本号'),
+      );
+    });
+
+    test('忽略版本脏数据（非 SemVer）→ 不崩溃、继续走更新判定（r2）', () async {
+      await db
+          .into(db.appMetadata)
+          .insertOnConflictUpdate(
+            AppMetadataCompanion.insert(
+              key: AppMetadataKeys.ignoredUpdateVersion,
+              value: 'not-semver', // 本地脏数据
+            ),
+          );
+      final result = (await service(
+        '1.0.0',
+      ).evaluate(manifest('1.1.0'))).requireValue();
+      expect(result.available, isTrue, reason: '脏忽略版本视为未忽略，正常提示更新');
+    });
+
+    test('远端版本更高但无平台产物（windows/android 为 null，r9）', () async {
+      // UpdateManifest 模型注释"缺平台则对应平台不可更新"——_evaluate 当前
+      // 直接透传 manifest 不检查平台产物：available=true 且 windows=null。
+      // 该行为被显式锁定（防后续为 evaluate 增加平台过滤逻辑时无感知回归）。
+      final bare = UpdateManifest(version: '2.0.0'); // 无任何平台产物
+      final result = (await service('1.0.0').evaluate(bare)).requireValue();
+      expect(result.available, isTrue, reason: '版本更高即视为有更新');
+      expect(result.windows, isNull, reason: '无平台产物时 windows 为 null');
+      expect(result.android, isNull);
+    });
+
+    test('evaluate 入口复查：close 后返回可读失败且不写缓存（r9）', () async {
+      final client = service('1.0.0');
+      client.close();
+      final result = await client.evaluate(manifest('1.1.0'));
+      expect(result.isSuccess, isFalse, reason: '已关闭返回失败');
+      expect(
+        result.when(onSuccess: (_) => '', onFailure: (m) => m),
+        contains('已关闭'),
+      );
+      // 未进入 _evaluate 写库（"不做 DB 写"的保证——防复查被挪到写库后）。
+      final cached =
+          await (db.select(db.appMetadata)..where(
+                (t) => t.key.equals(AppMetadataKeys.lastCheckedManifestVersion),
+              ))
+              .get();
+      expect(cached, isEmpty, reason: 'close 后 evaluate 不写缓存');
+    });
+  });
+
+  group('UpdateManifestService 网络层（MockClient）', () {
+    late AppDatabase db;
+
+    setUp(() {
+      db = AppDatabase(NativeDatabase.memory());
+    });
+
+    tearDown(() => db.close());
+
+    test('成功拉取 + 解析 + 版本评估', () async {
+      final client = UpdateManifestService(
+        database: db,
+        currentVersion: '1.0.0',
+        manifestUrl: Uri.parse('https://x.example/update.json'),
+        httpClient: MockClient((request) async {
+          expect(request.url.toString(), 'https://x.example/update.json');
+          return http.Response(
+            jsonEncode({
+              'version': '2.0.0',
+              'required': 1,
+              'release_notes': 'big update',
+              'windows': {
+                'url': 'https://x.example/app.zip',
+                'sha256': 'b' * 64,
+              },
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+            request: request,
+          );
+        }),
+      );
+      final result = (await client.checkForUpdate()).requireValue();
+      expect(result.available, isTrue);
+      expect(result.latestVersion, '2.0.0');
+      expect(result.required, isTrue);
+      expect(result.releaseNotes, 'big update');
+    });
+
+    test('清单解析失败（非法 SemVer）→ 可读失败', () async {
+      final client = UpdateManifestService(
+        database: db,
+        currentVersion: '1.0.0',
+        manifestUrl: Uri.parse('https://x.example/update.json'),
+        httpClient: MockClient(
+          (request) async => http.Response(
+            jsonEncode({'version': 'not-semver'}),
+            200,
+            headers: {'content-type': 'application/json'},
+            request: request,
+          ),
+        ),
+      );
+      final result = await client.checkForUpdate();
+      expect(result.isSuccess, isFalse);
+      expect(
+        result.when(onSuccess: (_) => '', onFailure: (m) => m),
+        contains('解析失败'),
+        reason: '可读失败消息',
+      );
+    });
+
+    test('非 200 / 网络异常 → 可读失败（脱敏）', () async {
+      final client404 = UpdateManifestService(
+        database: db,
+        currentVersion: '1.0.0',
+        manifestUrl: Uri.parse('https://x.example/update.json'),
+        httpClient: MockClient(
+          (request) async => http.Response('nf', 404, request: request),
+        ),
+      );
+      expect(
+        (await client404.checkForUpdate()).isSuccess,
+        isFalse,
+        reason: '404 失败',
+      );
+
+      final clientNet = UpdateManifestService(
+        database: db,
+        currentVersion: '1.0.0',
+        manifestUrl: Uri.parse('https://x.example/update.json'),
+        httpClient: MockClient(
+          (_) async => throw http.ClientException('reset'),
+        ),
+      );
+      final result = await clientNet.checkForUpdate();
+      expect(result.isSuccess, isFalse);
+      final msg = result.when(onSuccess: (_) => '', onFailure: (m) => m);
+      expect(
+        msg.contains('ClientException') || msg.contains('SocketException'),
+        isFalse,
+        reason: '不泄露底层异常类型',
+      );
+    });
+
+    test('非关闭 StateError 重新抛出（不包装成"已关闭"，r14/r16）', () async {
+      // 核心语义：仅 `_closed` 或消息匹配（'Client is already closed'）才归因
+      // "已关闭"——其它 StateError（编程错误）必须 rethrow，不能吞成误导性
+      // 可读失败（掩盖真实缺陷）。
+      final client = UpdateManifestService(
+        database: db,
+        currentVersion: '1.0.0',
+        manifestUrl: Uri.parse('https://x.example/update.json'),
+        httpClient: MockClient(
+          (_) async => throw StateError('programming bug'),
+        ),
+      );
+      // **核心断言**：checkForUpdate **抛出**非关闭 StateError（而非返回
+      // AppFailure）——rethrow 语义由 expectLater 锁定。
+      await expectLater(
+        client.checkForUpdate(),
+        throwsA(isA<StateError>()),
+        reason: '非关闭 StateError 重新抛出',
+      );
+    });
+
+    test('StateError 消息匹配（already closed）→ 归因"已关闭"返回可读失败（r14/r19）', () async {
+      // r14 精准归因的正向路径：`_closed=false` 但底层客户端抛
+      // `StateError('Client is already closed')`（调用方未调 close() 而在外部
+      // 关闭了注入的 http.Client）——按消息匹配归因"已关闭"返回 AppFailure，
+      // 而非 rethrow。
+      final client = UpdateManifestService(
+        database: db,
+        currentVersion: '1.0.0',
+        manifestUrl: Uri.parse('https://x.example/update.json'),
+        httpClient: MockClient(
+          (_) async => throw StateError('Client is already closed'),
+        ),
+      );
+      final result = await client.checkForUpdate();
+      expect(result.isSuccess, isFalse);
+      expect(
+        result.when(onSuccess: (_) => '', onFailure: (m) => m),
+        contains('已关闭'),
+        reason: '消息匹配归因已关闭',
+      );
+    });
+
+    test('HttpException/TlsException → 可读失败（r19 补测）', () async {
+      // http 包仅把 send 阶段与部分流中错误包装为 ClientException、其余透传
+      // ——dart:io 的 HttpException/TlsException（握手失败/证书校验失败）须被
+      // 捕获返回可读失败而非逃逸。
+      final clientHttp = UpdateManifestService(
+        database: db,
+        currentVersion: '1.0.0',
+        manifestUrl: Uri.parse('https://x.example/update.json'),
+        httpClient: MockClient(
+          (_) async => throw HttpException('connection reset by peer'),
+        ),
+      );
+      final resultHttp = await clientHttp.checkForUpdate();
+      expect(resultHttp.isSuccess, isFalse, reason: 'HttpException 返回可读失败');
+      expect(
+        resultHttp.when(onSuccess: (_) => '', onFailure: (m) => m),
+        contains('网络不可用'),
+      );
+
+      final clientTls = UpdateManifestService(
+        database: db,
+        currentVersion: '1.0.0',
+        manifestUrl: Uri.parse('https://x.example/update.json'),
+        httpClient: MockClient(
+          (_) async => throw const TlsException('handshake failed'),
+        ),
+      );
+      final resultTls = await clientTls.checkForUpdate();
+      expect(resultTls.isSuccess, isFalse, reason: 'TlsException 返回可读失败');
+      expect(
+        resultTls.when(onSuccess: (_) => '', onFailure: (m) => m),
+        contains('网络不可用'),
+      );
+
+      // _closed=true 时归因"已关闭"（与其它网络分支一致）。
+      final clientTlsClosed = UpdateManifestService(
+        database: db,
+        currentVersion: '1.0.0',
+        manifestUrl: Uri.parse('https://x.example/update.json'),
+        httpClient: MockClient(
+          (_) async => throw const TlsException('handshake failed'),
+        ),
+      );
+      clientTlsClosed.close();
+      final resultClosed = await clientTlsClosed.checkForUpdate();
+      expect(resultClosed.isSuccess, isFalse);
+      expect(
+        resultClosed.when(onSuccess: (_) => '', onFailure: (m) => m),
+        contains('已关闭'),
+        reason: '已关闭归因关闭而非网络',
+      );
+    });
+
+    test('强制更新不受忽略版本影响（r19）：required + 已忽略 → 仍提示', () async {
+      // r19：required=true 语义为"不可跳过"——用户此前忽略过 ≥ 远端版本时
+      // 仍须判为可用更新（防强制/安全更新被静默跳过）。
+      await db
+          .into(db.appMetadata)
+          .insertOnConflictUpdate(
+            AppMetadataCompanion.insert(
+              key: AppMetadataKeys.ignoredUpdateVersion,
+              value: '1.1.0',
+            ),
+          );
+      final client = UpdateManifestService(
+        database: db,
+        currentVersion: '1.0.0',
+        manifestUrl: Uri.parse('https://x.example/update.json'),
+        httpClient: MockClient(
+          (_) async => http.Response(
+            jsonEncode({
+              'version': '1.1.0',
+              'required': 1,
+              'windows': {
+                'url': 'https://x.example/app.zip',
+                'sha256': 'b' * 64,
+              },
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          ),
+        ),
+      );
+      final result = (await client.checkForUpdate()).requireValue();
+      expect(result.available, isTrue, reason: '强制更新不被忽略版本压制');
+      expect(result.required, isTrue);
+    });
+
+    test('UTF-8 清单无 charset（r19）：中文 releaseNotes 不乱码', () async {
+      // response.body 按响应头 charset 解码、未指定默认 latin-1——JSON 规范
+      // 要求 UTF-8；显式 utf8.decode(bodyBytes) 后中文应正确解析。
+      final client = UpdateManifestService(
+        database: db,
+        currentVersion: '1.0.0',
+        manifestUrl: Uri.parse('https://x.example/update.json'),
+        httpClient: MockClient(
+          (_) async => http.Response.bytes(
+            utf8.encode(
+              jsonEncode({
+                'version': '2.0.0',
+                'release_notes': '更新日志：支持中文',
+                'windows': {
+                  'url': 'https://x.example/app.zip',
+                  'sha256': 'b' * 64,
+                },
+              }),
+            ),
+            200,
+            // 无 charset=utf-8（只发 application/json）——response.body 会按
+            // latin1 解码乱码；显式 utf8.decode(bodyBytes) 必须正确。
+            headers: {'content-type': 'application/json'},
+          ),
+        ),
+      );
+      final result = (await client.checkForUpdate()).requireValue();
+      expect(result.releaseNotes, '更新日志：支持中文', reason: 'UTF-8 显式解码不乱码');
+    });
+
+    test('close 后 checkForUpdate 返回可读失败且不发网络请求（r3，网络层归位）', () async {
+      var hit = false;
+      final client = UpdateManifestService(
+        database: db,
+        currentVersion: '1.0.0',
+        manifestUrl: Uri.parse('https://x.example/update.json'),
+        httpClient: MockClient((request) async {
+          hit = true;
+          return http.Response('{}', 200, request: request);
+        }),
+      );
+      client.close();
+      final result = await client.checkForUpdate();
+      expect(result.isSuccess, isFalse, reason: '已关闭返回失败');
+      expect(
+        result.when(onSuccess: (_) => '', onFailure: (m) => m),
+        contains('已关闭'),
+      );
+      expect(hit, isFalse, reason: '已关闭不再发起网络请求');
+      // 重复 close 幂等（不抛错）。
+      client.close();
+    });
+
+    test('请求 await 期间 close → 复查返回"已关闭"且不写库（r4）', () async {
+      // 核心竞态：checkForUpdate 已进入 await（网络挂起）后 close 被并发调用——
+      // await 后复查 _closed 返回"已关闭"，不进入 _evaluate 写库。
+      // **显式等待回调入口（r5）**：`started` Completer 确认 MockClient 回调
+      // 已执行并停在 gate.future——不依赖 pumpEventQueue 隐含时序（防重构
+      // 改变请求派发后 close 实际发生在请求发出前、退化为 r3 前置路径）。
+      final started = Completer<void>();
+      final gate = Completer<void>();
+      final client = UpdateManifestService(
+        database: db,
+        currentVersion: '1.0.0',
+        manifestUrl: Uri.parse('https://x.example/update.json'),
+        httpClient: MockClient((request) async {
+          started.complete(); // 请求已进入挂起
+          await gate.future; // 挂起响应
+          return http.Response(
+            jsonEncode({
+              'version': '2.0.0',
+              'windows': {
+                'url': 'https://x.example/app.zip',
+                'sha256': 'b' * 64,
+              },
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+            request: request,
+          );
+        }),
+      );
+      final future = client.checkForUpdate();
+      await started.future; // 显式等待请求进入挂起（回调入口）
+      client.close();
+      gate.complete(); // 释放响应
+      final result = await future;
+      expect(result.isSuccess, isFalse, reason: 'await 期间关闭返回失败');
+      expect(
+        result.when(onSuccess: (_) => '', onFailure: (m) => m),
+        contains('已关闭'),
+      );
+      // 未写缓存（不进入 _evaluate）
+      final cached =
+          await (db.select(db.appMetadata)..where(
+                (t) => t.key.equals(AppMetadataKeys.lastCheckedManifestVersion),
+              ))
+              .get();
+      expect(cached, isEmpty, reason: '已关闭不写缓存');
+      // **覆盖边界注明（r5）**：本用例触发的是**网络 await 后的 _closed 复查**
+      //（返回时未进 _evaluate）；`_evaluate` 内"写库前复查"（DB await 期间
+      // close 不落缓存）需可控数据库注入挂起点，现有 drift 架构无此注入——
+      // 该分支仅由代码评审 + 本复查逻辑守护，属已知覆盖边界。
+    });
+
+    test('清单体积上限（r23 流式）：声明超限拒绝 / 分块流超限中断 / 恰好等于上限放行', () async {
+      // r23：_http.send + 流式消费（防 http.get 先整体缓冲再检查的 OOM）——
+      // contentLength 前置拦截 + 流式累计超限中断；上限语义"严格大于才拒绝"。
+      final max = UpdateConfig.maxManifestBytes; // 2 MB
+      final good = utf8.encode(
+        jsonEncode({
+          'version': '2.0.0',
+          'windows': {'url': 'https://x.example/app.zip', 'sha256': 'b' * 64},
+        }),
+      );
+      // 场景 A：contentLength 声明超限 → send 后前置拒绝（不消费流）。
+      final clientA = UpdateManifestService(
+        database: db,
+        currentVersion: '1.0.0',
+        manifestUrl: Uri.parse('https://x.example/update.json'),
+        httpClient: _ManifestStreamClient(<List<int>>[
+          good,
+        ], contentLength: max + 1),
+      );
+      final resultA = await clientA.checkForUpdate();
+      expect(resultA.isSuccess, isFalse, reason: '声明超限拒绝');
+      expect(
+        resultA.when(onSuccess: (_) => '', onFailure: (m) => m),
+        contains('体积超上限'),
+      );
+
+      // 场景 B：无 Content-Length、分块流实际超限 → 流式累计检查中断。
+      // **提前取消观测（r24）**：锁定"流式逐块累计超限即中断"——若实现退化为
+      // 先整体缓冲再检查（toBytes），订阅不会被提前取消（cancelled == false），
+      // 用例失败（防 OOM 防护回归为"缓冲后检查"时无感知）。
+      final streamClientB = _ManifestStreamClient(
+        [good, List<int>.filled(max, 1)], // 总计 > 2MB
+        contentLength: null,
+      );
+      final clientB = UpdateManifestService(
+        database: db,
+        currentVersion: '1.0.0',
+        manifestUrl: Uri.parse('https://x.example/update.json'),
+        httpClient: streamClientB,
+      );
+      final resultB = await clientB.checkForUpdate();
+      expect(resultB.isSuccess, isFalse, reason: '分块流超限中断');
+      expect(
+        resultB.when(onSuccess: (_) => '', onFailure: (m) => m),
+        contains('体积超上限'),
+      );
+      expect(streamClientB.cancelled, isTrue, reason: '超限中断提前取消订阅（非整体缓冲后检查）');
+
+      // 场景 C：恰好等于上限（严格大于语义）——2MB 合法清单放行。
+      final padded = <int>[
+        ...utf8.encode(
+          jsonEncode({
+            'version': '2.0.0',
+            'windows': {'url': 'https://x.example/app.zip', 'sha256': 'b' * 64},
+          }),
+        ),
+      ];
+      // 补齐到恰好 max 字节（尾部空格不影响 jsonDecode）。
+      // **前提断言（r24）**：配置常量调小到小于 JSON 载荷时 setRange 越界抛
+      // RangeError（晦涩失败）——显式断言前提使失败信息可读。
+      expect(
+        padded.length,
+        lessThanOrEqualTo(max),
+        reason: 'maxManifestBytes 须大于等于 JSON 载荷（配置被调小？）',
+      );
+      final atLimit = List<int>.filled(max, 32);
+      atLimit.setRange(0, padded.length, padded);
+      final clientC = UpdateManifestService(
+        database: db,
+        currentVersion: '1.0.0',
+        manifestUrl: Uri.parse('https://x.example/update.json'),
+        httpClient: _ManifestStreamClient(<List<int>>[
+          atLimit,
+        ], contentLength: max),
+      );
+      final resultC = (await clientC.checkForUpdate()).requireValue();
+      expect(resultC.available, isTrue, reason: '恰好等于上限的合法清单放行');
+    });
+
+    test('流式消费期间 close → 循环内复查返回"已关闭"（r25）', () async {
+      // r24/r25 核心防御：`await for` 循环内每块后的 `_closed` 复查——注入
+      // client 不由本服务关闭、底层流不被中断，close() 后循环须立即返回
+      // "已关闭"（r4 用例只覆盖响应 await 后的复查分支，未触达循环内分支）。
+      // **阻塞式 fake（r25/r26）**：send 立即返回、onListen 推首块——服务消费
+      // 第一块后**真正停在循环内**（等待下一块）；此时 close() 并发触发；释放
+      // gate 后循环顶复查 `_closed` 返回"已关闭"（不消费剩余块、不写库）。
+      //（r25 版在 send 内 await gate——close 落在 send 阶段、走 r4 分支，未触达
+      // 循环内复查，r26 已修正。）
+      final started = Completer<void>();
+      final gate = Completer<void>();
+      final client = UpdateManifestService(
+        database: db,
+        currentVersion: '1.0.0',
+        manifestUrl: Uri.parse('https://x.example/update.json'),
+        httpClient: _BlockingStreamClient(started, gate),
+      );
+      final future = client.checkForUpdate();
+      await started.future; // 第一块已到达、服务停在循环内
+      client.close();
+      gate.complete(); // 释放第二块
+      final result = await future;
+      expect(result.isSuccess, isFalse, reason: '流式期间关闭返回失败');
+      expect(
+        result.when(onSuccess: (_) => '', onFailure: (m) => m),
+        contains('已关闭'),
+      );
+      // 未写缓存（不进入 _evaluate）。
+      final cached =
+          await (db.select(db.appMetadata)..where(
+                (t) => t.key.equals(AppMetadataKeys.lastCheckedManifestVersion),
+              ))
+              .get();
+      expect(cached, isEmpty, reason: '流式期间关闭不写缓存');
+      // **覆盖边界注明（r25）**：总时限超时（Stopwatch > checkTimeout 抛超时）
+      // 需真实等待 8s（checkTimeout 为 const 不可注入）——测试成本不成比例，
+      // 该分支由代码评审 + deadline 检查守护，属已知覆盖边界（与 r4 注释一致）。
+    });
+  });
+}
+
+/// 流式清单响应 client（r23/r24）：逐块发射 + 可选 contentLength（null 模拟无
+/// Content-Length 的分块响应）。**订阅取消观测（r24）**：`onCancel` 记录监听者
+/// 提前取消——用于断言流式超限中断确实取消订阅（防实现退化为整体缓冲后检查）。
+class _ManifestStreamClient extends http.BaseClient {
+  _ManifestStreamClient(this.chunks, {this.contentLength});
+
+  final List<List<int>> chunks;
+  final int? contentLength;
+
+  /// 监听者提前取消订阅（流式中断/前置拒绝路径）——正常消费完成不置位。
+  bool cancelled = false;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    final controller = StreamController<List<int>>(
+      onCancel: () {
+        cancelled = true;
+      },
+    );
+    for (final c in chunks) {
+      controller.add(c);
+    }
+    controller.close();
+    return http.StreamedResponse(
+      controller.stream,
+      200,
+      contentLength: contentLength,
+      headers: {'content-type': 'application/json'},
+      request: request,
+    );
+  }
+}
+
+/// 阻塞式流式 client（r25/r26）：**send 立即返回 StreamedResponse**、推流挂在
+/// gate 上——`onListen` 推首块并 complete(started)，gate 释放后推剩余块并
+/// close。用于"流式消费期间 close() → **循环内** `_closed` 复查"的竞态测试：
+/// started 确认服务已消费首块、停在 `await for` 循环内等待下一块（r25 版在
+/// send 内 await gate——close 落在 send 阶段、走 r4 的 send 返回后复查分支、
+/// 未触达循环内复查，r26 修正）。
+class _BlockingStreamClient extends http.BaseClient {
+  _BlockingStreamClient(this.started, this.gate);
+
+  final Completer<void> started;
+  final Completer<void> gate;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    // **late 声明（r26）**：onListen 回调引用 controller 自身——须先声明再赋值。
+    late final StreamController<List<int>> controller;
+    controller = StreamController<List<int>>(
+      onListen: () {
+        // 首块（合法清单的一部分）先到——服务消费后停在循环内等待下一块。
+        controller.add('{'.codeUnits);
+        started.complete();
+      },
+    );
+    // gate 释放后推剩余块（此时 close() 已并发触发，循环内复查须返回"已关闭"
+    // 且不再消费这些块）。
+    unawaited(() async {
+      await gate.future;
+      controller.add('"version":"2.0.0","windows":'.codeUnits);
+      controller.add('{"url":"https://x.example/app.zip","sha256":"'.codeUnits);
+      controller.add(('b' * 64).codeUnits);
+      controller.add('"}}'.codeUnits);
+      await controller.close();
+    }());
+    return http.StreamedResponse(
+      controller.stream,
+      200,
+      contentLength: null,
+      headers: {'content-type': 'application/json'},
+      request: request,
+    );
+  }
+}

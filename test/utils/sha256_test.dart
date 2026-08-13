@@ -1,7 +1,12 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timetrack2/utils/sha256.dart';
+
+/// 'abc' 的 SHA-256 已知向量（RFC 6234）——多处用例共享，防向量调整漏改。
+const _sha256Abc =
+    'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad';
 
 void main() {
   // 已知向量（RFC 6234 / 常见校验值）。
@@ -14,10 +19,7 @@ void main() {
     });
 
     test('abc', () {
-      expect(
-        sha256String('abc'),
-        'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
-      );
+      expect(sha256String('abc'), _sha256Abc);
     });
 
     test('中文 UTF-8', () {
@@ -53,8 +55,11 @@ void main() {
       final size = 64 * 1024;
       for (final n in [size - 1, size, size + 1]) {
         final data = List<int>.generate(n, (i) => i % 251);
-        expect(await hashTempFile(data), sha256Bytes(data),
-            reason: '$n 字节应与一次性哈希一致');
+        expect(
+          await hashTempFile(data),
+          sha256Bytes(data),
+          reason: '$n 字节应与一次性哈希一致',
+        );
       }
     });
 
@@ -68,14 +73,16 @@ void main() {
       try {
         // 200KB > openRead 默认 64KB 块，确保至少触发多次回调
         final file = File('${dir.path}/p.bin');
-        await file.writeAsBytes(
-            List<int>.generate(200 * 1024, (i) => i % 251));
+        await file.writeAsBytes(List<int>.generate(200 * 1024, (i) => i % 251));
         final total = await file.length();
         final seen = <int>[];
-        await sha256File(file.path, onProgress: (bytes, totalBytes) {
-          seen.add(bytes);
-          expect(totalBytes, total);
-        });
+        await sha256File(
+          file.path,
+          onProgress: (bytes, totalBytes) {
+            seen.add(bytes);
+            expect(totalBytes, total);
+          },
+        );
         expect(seen.length, greaterThan(1), reason: '多块应触发多次回调');
         // 首回调为 0（初始化），之后单调递增
         expect(seen.first, 0);
@@ -89,14 +96,19 @@ void main() {
     });
 
     test('onProgress：空文件先回调 (0, 0) 初始化进度', () async {
-      final dir = await Directory.systemTemp.createTemp('sha256_empty_progress');
+      final dir = await Directory.systemTemp.createTemp(
+        'sha256_empty_progress',
+      );
       try {
         final file = File('${dir.path}/empty.bin');
         await file.writeAsBytes(const []);
         final seen = <(int, int)>[];
-        await sha256File(file.path, onProgress: (bytes, totalBytes) {
-          seen.add((bytes, totalBytes));
-        });
+        await sha256File(
+          file.path,
+          onProgress: (bytes, totalBytes) {
+            seen.add((bytes, totalBytes));
+          },
+        );
         expect(seen, [(0, 0)], reason: '空文件仅回调一次 (0, 0)');
       } finally {
         await dir.delete(recursive: true);
@@ -114,6 +126,95 @@ void main() {
       } finally {
         await dir.delete(recursive: true);
       }
+    });
+  });
+
+  group('sha256Stream', () {
+    test('与 sha256Bytes 一致（分块累积，含空流）', () async {
+      final payload = List<int>.generate(100000, (i) => i % 251);
+      expect(
+        await sha256Stream(Stream.value(payload)),
+        sha256Bytes(payload),
+        reason: '单块流与字节数组哈希一致',
+      );
+      // 分块累积（模拟下载流逐块到达）。
+      final chunks = <List<int>>[];
+      for (var i = 0; i < payload.length; i += 7000) {
+        chunks.add(
+          payload.sublist(
+            i,
+            (i + 7000) < payload.length ? i + 7000 : payload.length,
+          ),
+        );
+      }
+      expect(
+        await sha256Stream(Stream.fromIterable(chunks)),
+        sha256Bytes(payload),
+        reason: '分块流与整块哈希一致（分块不影响结果）',
+      );
+      expect(
+        await sha256Stream(const Stream.empty()),
+        sha256Bytes(const []),
+        reason: '空流哈希',
+      );
+    });
+
+    test('已知向量（abc）', () async {
+      expect(await sha256Stream(Stream.value('abc'.codeUnits)), _sha256Abc);
+    });
+
+    test('Sha256Sink digest 幂等（r3）：重复调用不抛错且返回同一摘要', () {
+      final sink = Sha256Sink()..add('abc'.codeUnits);
+      final first = sink.digest();
+      // 第二次调用不抛 StateError（显式 _closed 标志只 close 一次）、值一致。
+      final second = sink.digest();
+      expect(second, first);
+      expect(first, _sha256Abc);
+    });
+
+    test('流中途出错：异常向上传播（下载流中断关键路径，r2）', () async {
+      // 文档承诺"流中途出错时错误向上传播、converter 在 finally 中关闭"——
+      // 下载流中断/网络异常时哈希状态完整、不泄漏。
+      final controller = StreamController<List<int>>();
+      controller
+        ..add([1, 2, 3])
+        ..addError(StateError('stream interrupted'))
+        ..close();
+      await expectLater(
+        sha256Stream(controller.stream),
+        throwsA(isA<StateError>()),
+        reason: '中途错误向上传播',
+      );
+      // 错误后仍可用（converter 关闭不泄漏）：新流哈希与已知向量精确一致。
+      expect(
+        await sha256Stream(Stream.value('abc'.codeUnits)),
+        _sha256Abc,
+        reason: '错误后新流哈希仍与已知向量一致',
+      );
+    });
+
+    test('零长度块不影响哈希（下载流强相关边界，r15/r19 拆分）', () async {
+      // HTTP chunked 传输可能产出空块——`sink.add([])` 不影响累积结果。
+      expect(
+        await sha256Stream(
+          Stream.fromIterable(['ab'.codeUnits, const <int>[], 'c'.codeUnits]),
+        ),
+        _sha256Abc,
+        reason: '零长度块不影响哈希',
+      );
+    });
+
+    test('首块前出错向上传播（下载流强相关边界，r15/r19 拆分）', () async {
+      // 首块数据前即出错（连接立即失败）——异常路径在空哈希状态也能正确关闭。
+      final earlyFail = StreamController<List<int>>();
+      earlyFail
+        ..addError(const SocketException('connection refused'))
+        ..close(); // 级联 close（r16）：错误 + 完成语义明确，控制器资源不泄漏。
+      await expectLater(
+        sha256Stream(earlyFail.stream),
+        throwsA(isA<SocketException>()),
+        reason: '首块前出错向上传播',
+      );
     });
   });
 }

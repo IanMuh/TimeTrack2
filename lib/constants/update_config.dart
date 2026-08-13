@@ -47,11 +47,21 @@ class UpdateConfig {
   /// 检查超时（网络请求）。
   static const checkTimeout = Duration(seconds: 8);
 
+  /// **下载响应头等待超时（r19）**：独立于 checkTimeout（后者面向清单检查
+  /// 场景、8s 偏紧）——大更新包服务器生成响应可能更慢。与 downloadStreamTimeout
+  /// （体超时）配套：头超时 / 体超时语义分离。
+  static const downloadHeaderTimeout = Duration(seconds: 30);
+
   /// 下载失败指数退避重试次数（校验失败删重下，不占此次数）。
   static const downloadRetryCount = 3;
 
   /// 首次重试等待基时；每次失败等待 `base * 2^n`。
   static const retryBaseDelay = Duration(seconds: 2);
+
+  /// **响应体流读取超时（r1）**：响应头已返回但流挂起/断流不报错会无限等待
+  /// ——给整个流消费过程设独立超时（与检查超时语义区分：检查是头超时、
+  /// 下载是体超时；慢网络下流式按块推进不会误触）。
+  static const downloadStreamTimeout = Duration(seconds: 60);
 
   /// 下载分块大小（流式写临时目录）。
   static const downloadChunkBytes = 64 * 1024;
@@ -64,4 +74,21 @@ class UpdateConfig {
 
   /// 校验失败后的重下次数（先删本地文件再重下）。
   static const redownloadAfterVerificationFailure = 1;
+
+  /// **zip bomb 防护上限（r9）**：单条目解压后体积上限（500 MB）。
+  static const maxUncompressedEntryBytes = 500 * 1024 * 1024;
+
+  /// **zip bomb 防护上限（r9）**：累计解压总体积上限（1 GB）。
+  static const maxTotalUncompressedBytes = 1024 * 1024 * 1024;
+
+  /// **zip bomb 防护上限（r13）**：压缩后文件大小上限（200 MB）。
+  static const maxCompressedBytes = 200 * 1024 * 1024;
+
+  /// **zip bomb 防护上限（r13）**：zip 条目数上限（10 万，防海量小条目攻击）。
+  static const maxEntryCount = 100000;
+
+  /// **清单响应体大小上限（r22）**：`_http.get` 将整个清单缓冲进内存——被入侵/
+  /// 恶意服务器高速推流超大 update.json 会 OOM（与下载路径的 _maxBytes 双层
+  /// 上限补齐不对称）。contentLength 前置 + 实际字节数双检。
+  static const maxManifestBytes = 2 * 1024 * 1024; // 2 MB（正常清单远小于此）
 }
