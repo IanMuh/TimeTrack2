@@ -98,10 +98,15 @@ class UpdateManifestService {
         return const AppFailure('更新服务已关闭，请重新创建');
       }
     } on TimeoutException {
+      // 请求期间可能已被 close（自建 client 强关/超时都可能）——先判 _closed
+      // 归因"已关闭"（防误导性"网络不可用/超时"）。
+      if (_closed) return const AppFailure('更新服务已关闭，请重新创建');
       return const AppFailure('更新检查超时，请稍后重试');
     } on SocketException {
+      if (_closed) return const AppFailure('更新服务已关闭，请重新创建');
       return const AppFailure('网络不可用，请稍后重试');
     } on http.ClientException {
+      if (_closed) return const AppFailure('更新服务已关闭，请重新创建');
       return const AppFailure('网络不可用，请稍后重试');
     } on StateError {
       // 自建 client 在请求期间被 close 强关时可能抛 StateError('Client is
@@ -160,6 +165,11 @@ class UpdateManifestService {
       }
     }
     // 可用更新：缓存远端版本（供"检查过但未装"的后续判断）。
+    // **写库前复查（r4）**：_evaluate 的 DB await 期间若被 close，不再落缓存
+    //（严格"已关闭语义"——不写入状态）。
+    if (_closed) {
+      return const AppFailure('更新服务已关闭，请重新创建');
+    }
     await _writeString(AppMetadataKeys.lastCheckedManifestVersion, manifest.version);
     return AppSuccess(UpdateCheckResult(
       available: true,

@@ -201,6 +201,41 @@ void main() {
       }
     });
 
+    test('applyStaging 备份阶段失败（r4）：复制抛错 → 程序目录原样保留 + 备份清理', () async {
+      // r3 核心保证：备份阶段 _copyDirectory 抛错（文件被占用/只读）时程序
+      // 目录原样保留、绝不进清空路径（无完整备份可恢复时清空会造空壳）。
+      final root = await Directory.systemTemp.createTemp('win_backup_fail');
+      final program = Directory('${root.path}/program')..createSync();
+      final data = Directory('${root.path}/data')..createSync();
+      File('${program.path}/app.exe').writeAsStringSync('old');
+      final staging = Directory('${program.path}/staging')..createSync();
+      File('${staging.path}/app.exe').writeAsStringSync('new');
+      try {
+        final installer = WindowsInstaller(
+          programDir: program.path,
+          dataDir: data.path,
+          // 注入复制失败（模拟备份阶段文件被占用）。
+          copyFileOverride: (from, to) =>
+              throw const FileSystemException('copy blocked'),
+        );
+        final result = await installer.applyStaging(staging.path);
+        expect(result.isSuccess, isFalse, reason: '备份阶段失败返回失败');
+        // 程序目录原样保留（未被清空）
+        expect(File('${program.path}/app.exe').readAsStringSync(), 'old',
+            reason: '备份失败不进入清空路径，程序目录原样保留');
+        // 残留备份已清理（.backup-* 不残留）
+        expect(
+          program
+              .listSync()
+              .where((e) => e.path.contains('.backup-'))
+              .toList(),
+          isEmpty,
+          reason: '备份阶段失败后残留备份已清理',
+        );
+      } finally {
+        await root.delete(recursive: true);
+      }
+    });
     test('applyStaging 备份阶段保护（r3）：staging 仅含空子目录 → 拒绝且程序未动', () async {
       // 防"仅含空子目录的 staging 通过守卫后清空程序目录成空壳"——递归文件
       // 守卫须拒绝；程序目录在备份阶段失败时**绝不进清空路径**（无备份可恢复

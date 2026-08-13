@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:drift/native.dart';
@@ -101,29 +102,6 @@ void main() {
       expect(result.available, isTrue,
           reason: '脏忽略版本视为未忽略，正常提示更新');
     });
-
-    test('close 后 checkForUpdate 返回可读失败且不发网络请求（r3）', () async {
-      var hit = false;
-      final client = UpdateManifestService(
-        database: db,
-        currentVersion: '1.0.0',
-        manifestUrl: Uri.parse('https://x.example/update.json'),
-        httpClient: MockClient((request) async {
-          hit = true;
-          return http.Response('{}', 200, request: request);
-        }),
-      );
-      client.close();
-      final result = await client.checkForUpdate();
-      expect(result.isSuccess, isFalse, reason: '已关闭返回失败');
-      expect(
-        result.when(onSuccess: (_) => '', onFailure: (m) => m),
-        contains('已关闭'),
-      );
-      expect(hit, isFalse, reason: '已关闭不再发起网络请求');
-      // 重复 close 幂等（不抛错）。
-      client.close();
-    });
   });
 
   group('UpdateManifestService 网络层（MockClient）', () {
@@ -214,6 +192,70 @@ void main() {
         isFalse,
         reason: '不泄露底层异常类型',
       );
+    });
+
+    test('close 后 checkForUpdate 返回可读失败且不发网络请求（r3，网络层归位）', () async {
+      var hit = false;
+      final client = UpdateManifestService(
+        database: db,
+        currentVersion: '1.0.0',
+        manifestUrl: Uri.parse('https://x.example/update.json'),
+        httpClient: MockClient((request) async {
+          hit = true;
+          return http.Response('{}', 200, request: request);
+        }),
+      );
+      client.close();
+      final result = await client.checkForUpdate();
+      expect(result.isSuccess, isFalse, reason: '已关闭返回失败');
+      expect(
+        result.when(onSuccess: (_) => '', onFailure: (m) => m),
+        contains('已关闭'),
+      );
+      expect(hit, isFalse, reason: '已关闭不再发起网络请求');
+      // 重复 close 幂等（不抛错）。
+      client.close();
+    });
+
+    test('请求 await 期间 close → 复查返回"已关闭"且不写库（r4）', () async {
+      // 核心竞态：checkForUpdate 已进入 await（网络挂起）后 close 被并发调用——
+      // await 后复查 _closed 返回"已关闭"，不进入 _evaluate 写库。
+      final gate = Completer<void>();
+      final client = UpdateManifestService(
+        database: db,
+        currentVersion: '1.0.0',
+        manifestUrl: Uri.parse('https://x.example/update.json'),
+        httpClient: MockClient((request) async {
+          await gate.future; // 挂起响应
+          return http.Response(
+            jsonEncode({
+              'version': '2.0.0',
+              'windows': {
+                'url': 'https://x.example/app.zip',
+                'sha256': 'b' * 64,
+              },
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+            request: request,
+          );
+        }),
+      );
+      final future = client.checkForUpdate();
+      await pumpEventQueue(); // 让请求进入挂起
+      client.close();
+      gate.complete(); // 释放响应
+      final result = await future;
+      expect(result.isSuccess, isFalse, reason: 'await 期间关闭返回失败');
+      expect(
+        result.when(onSuccess: (_) => '', onFailure: (m) => m),
+        contains('已关闭'),
+      );
+      // 未写缓存（不进入 _evaluate）
+      final cached = await (db.select(db.appMetadata)
+            ..where((t) => t.key.equals('last_checked_manifest_version')))
+          .get();
+      expect(cached, isEmpty, reason: '已关闭不写缓存');
     });
   });
 }

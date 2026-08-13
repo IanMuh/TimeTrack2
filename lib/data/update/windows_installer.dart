@@ -25,8 +25,8 @@ class WindowsInstaller {
     required this.programDir,
     required this.dataDir,
     ZipDecoder? zipCodec,
+    this._copyFileOverride,
   }) : zipCodec = zipCodec ?? ZipDecoder();
-
   /// 程序目录（exe 所在，安装目标）。
   final String programDir;
 
@@ -35,6 +35,9 @@ class WindowsInstaller {
 
   /// zip 解码器（可注入替换，测试用）。
   final ZipDecoder zipCodec;
+
+  /// 文件复制钩子（测试注入失败场景——备份阶段复制抛错时程序目录须原样保留）。
+  final void Function(String from, String to)? _copyFileOverride;
 
   /// 程序目录是否可写（安装前提）。
   bool checkWritable() {
@@ -146,6 +149,16 @@ class WindowsInstaller {
       backupOk = false;
     }
     if (!backupOk) {
+      // **清理残留备份（r4）**：备份为空/校验 IO 异常时 partial 备份目录会
+      // 残留（后续备份/清空都排除 .backup-*，多次失败会累积占用磁盘）——
+      // 与 catch 分支的清理保持一致。
+      try {
+        if (backupDir.existsSync()) {
+          backupDir.deleteSync(recursive: true);
+        }
+      } on FileSystemException {
+        // 清理失败不影响失败结论。
+      }
       return const AppFailure('创建备份失败，已中止（程序目录未改动）');
     }
 
@@ -245,7 +258,12 @@ class WindowsInstaller {
         _copyDirectory(entry, Directory(target.path), exclude: const {});
       } else if (entry is File) {
         target.createSync(recursive: true);
-        entry.copySync(target.path);
+        final override = _copyFileOverride;
+        if (override != null) {
+          override(entry.path, target.path);
+        } else {
+          entry.copySync(target.path);
+        }
       }
     }
   }
