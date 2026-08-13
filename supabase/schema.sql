@@ -150,7 +150,11 @@ CREATE TABLE IF NOT EXISTS tracking_rules (
   user_id     uuid REFERENCES auth.users(id) ON DELETE CASCADE,
   pattern     text NOT NULL,
   match_kind  text NOT NULL,           -- 'process' / 'title'
-  activity_id text NOT NULL,           -- 映射到的活动（必填：无活动映射的规则无意义）
+  activity_id text NOT NULL,           -- 映射到的活动（必填）；引用校验走
+                                       -- validate_tracking_rule_ref 触发器
+                                       --（与 time_entries 同模式：软删感知 +
+                                       -- 归属校验，不设裸 REFERENCES——物理
+                                       -- FK 与未来归档物理清理冲突）
   sync_enabled boolean NOT NULL DEFAULT true,
   updated_at  text NOT NULL,
   deleted_at  text
@@ -398,6 +402,26 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER trg_activity_categories_parent_ref_check
 BEFORE INSERT OR UPDATE ON activity_categories
 FOR EACH ROW EXECUTE FUNCTION validate_category_parent_ref();
+
+-- tracking_rules 引用校验（模块 2c'，与 validate_time_entry_ref 同构）：
+-- 软删放行 + 仅引用字段变更时校验（活动软删后规则保留为活跃行、改
+-- 非引用字段的更新应放行）+ assert_ref_exists 归属校验（防指向他人活动）。
+CREATE OR REPLACE FUNCTION validate_tracking_rule_ref()
+RETURNS trigger AS $$
+BEGIN
+  IF NEW.deleted_at IS NOT NULL THEN
+    RETURN NEW;
+  END IF;
+  IF TG_OP = 'INSERT' OR OLD.activity_id IS DISTINCT FROM NEW.activity_id THEN
+    PERFORM assert_ref_exists('activities', NEW.activity_id);
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_tracking_rules_ref_check
+BEFORE INSERT OR UPDATE ON tracking_rules
+FOR EACH ROW EXECUTE FUNCTION validate_tracking_rule_ref();
 
 -- =============================================================
 -- RLS（行级安全：每行 user_id = auth.uid()）

@@ -16,7 +16,6 @@ library;
 
 import 'package:drift/drift.dart';
 import 'package:drift_flutter/drift_flutter.dart';
-
 part 'app_database.g.dart';
 
 /// 数据类：活动（事项）。
@@ -66,6 +65,8 @@ class TimeEntries extends Table {
 /// - 软删统一 `deleted_at`（LWW 删除永远赢）；`user_id` 归属（同步表模式与
 ///   5 张业务表一致）。
 @DataClassName('TrackingRuleRow')
+@TableIndex(name: 'idx_tracking_rules_sync', columns: {#userId, #updatedAt})
+@TableIndex(name: 'idx_tracking_rules_activity', columns: {#activityId})
 class TrackingRules extends Table {
   TextColumn get id => text()();
   TextColumn get userId => text().nullable()();

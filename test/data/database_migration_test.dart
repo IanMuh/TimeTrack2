@@ -110,6 +110,31 @@ void main() {
       // createTable tracking_rules）。
       final appDb = AppDatabase(NativeDatabase(file));
       try {
+        // **迁移后 schema 不变量（r1）**：仅"能读写"不足以证明迁移正确——
+        // 显式校验结构（防手工 ALTER 列静默不生效/约束缺失类回归）。
+        final version = (await appDb.customSelect('PRAGMA user_version')
+                .getSingle())
+            .data['user_version'];
+        expect(version, 2, reason: '迁移后 user_version 必须为 2');
+        final teCols = await appDb.customSelect(
+                'PRAGMA table_info(time_entries)')
+            .get();
+        final isAuto = teCols.firstWhere((c) => c.data['name'] == 'is_auto');
+        expect(isAuto.data['notnull'], 1,
+            reason: 'is_auto 列 notnull=1（非空）');
+        // SQLite 原样存 DDL 中的默认值字面量（手工 ALTER 写 `DEFAULT false`
+        // → 报告 'false'；新库生成 DDL 写 `DEFAULT 0` → 报告 '0'）——两种
+        // 均须为非空（非 null），断言"有默认值"而非绑定具体字面量。
+        expect(isAuto.data['dflt_value'], isNotNull,
+            reason: 'is_auto 列必须带默认值（旧行补默认 false）');
+        final trCols = await appDb.customSelect(
+                'PRAGMA table_info(tracking_rules)')
+            .get();
+        final syncEnabled =
+            trCols.firstWhere((c) => c.data['name'] == 'sync_enabled');
+        expect(syncEnabled.data['dflt_value'], '1',
+            reason: 'tracking_rules.sync_enabled 默认 true（新建规则默认进云）');
+
         // 旧数据保留
         final rows = await (appDb.select(appDb.timeEntries)).get();
         expect(rows, hasLength(1), reason: '旧数据跨版本保留');
@@ -136,10 +161,15 @@ void main() {
         await appDb.close();
       }
     } finally {
-      try {
-        dir.deleteSync(recursive: true);
-      } on FileSystemException {
-        // 临时目录清理失败不影响测试结论
+      // WAL 模式可能残留 -wal/-shm 句柄占用：显式删三类文件 + 有限次重试，
+      // 防临时目录残留污染测试环境。
+      for (var attempt = 0; attempt < 3; attempt++) {
+        try {
+          dir.deleteSync(recursive: true);
+          break;
+        } on FileSystemException {
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+        }
       }
     }
   });

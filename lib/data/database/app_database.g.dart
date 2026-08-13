@@ -4650,6 +4650,14 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $AppMetadataTable appMetadata = $AppMetadataTable(this);
   late final $SyncPeersTable syncPeers = $SyncPeersTable(this);
   late final $TrackingRulesTable trackingRules = $TrackingRulesTable(this);
+  late final Index idxTrackingRulesSync = Index(
+    'idx_tracking_rules_sync',
+    'CREATE INDEX idx_tracking_rules_sync ON tracking_rules (user_id, updated_at)',
+  );
+  late final Index idxTrackingRulesActivity = Index(
+    'idx_tracking_rules_activity',
+    'CREATE INDEX idx_tracking_rules_activity ON tracking_rules (activity_id)',
+  );
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -4664,6 +4672,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     appMetadata,
     syncPeers,
     trackingRules,
+    idxTrackingRulesSync,
+    idxTrackingRulesActivity,
   ];
 }
 

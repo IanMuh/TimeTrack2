@@ -591,6 +591,8 @@ void main() {
         'VALIDATE_TIME_ENTRY_REF',
         'VALIDATE_LINK_REF',
         'VALIDATE_CATEGORY_PARENT_REF',
+        // 模块 2c'：tracking_rules 引用校验触发器
+        'VALIDATE_TRACKING_RULE_REF',
       ]) {
         expect(has("FUNCTION $fn\\("), isTrue, reason: '缺少函数 $fn');
       }
@@ -601,6 +603,7 @@ void main() {
         'VALIDATE_TIME_ENTRY_REF',
         'VALIDATE_LINK_REF',
         'VALIDATE_CATEGORY_PARENT_REF',
+        'VALIDATE_TRACKING_RULE_REF',
       ]) {
         expect(
           has('FUNCTION $fn\\(\\)' // 插值函数名 + 正则转义括号
@@ -635,6 +638,15 @@ void main() {
             r'EXECUTE FUNCTION VALIDATE_CATEGORY_PARENT_REF\(\)'),
         isTrue,
         reason: '分类 parent 引用校验触发器必须挂载（FOR EACH ROW）',
+      );
+      // 模块 2c'：tracking_rules 引用校验触发器挂载（同构锁定——防活动引用
+      // 完整性回归未被发现）。
+      expect(
+        has(r'CREATE TRIGGER TRG_TRACKING_RULES_REF_CHECK [^;]*'
+            r'FOR EACH ROW [^;]*'
+            r'EXECUTE FUNCTION VALIDATE_TRACKING_RULE_REF\(\)'),
+        isTrue,
+        reason: 'tracking_rules 引用校验触发器必须挂载（FOR EACH ROW）',
       );
     });
   });

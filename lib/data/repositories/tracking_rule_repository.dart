@@ -33,11 +33,13 @@ class TrackingRuleRepository with RepositoryMappings {
     }
   }
 
-  /// 活跃规则（未删除；规则匹配器用）。
+  /// 活跃规则（未删除；规则匹配器用）——**按 updated_at 升序**（结果确定：
+  /// 后续"首个命中规则生效"的匹配器依赖稳定顺序，SQLite 默认不保证行序）。
   Future<AppResult<List<TrackingRule>>> activeRules() async {
     try {
       final query = database.select(database.trackingRules)
-        ..where((t) => t.deletedAt.isNull());
+        ..where((t) => t.deletedAt.isNull())
+        ..orderBy([(t) => OrderingTerm.asc(t.updatedAt)]);
       final rows = await query.get();
       return AppSuccess(rows.map(trackingRuleFromRow).toList());
     } catch (e) {
@@ -48,12 +50,18 @@ class TrackingRuleRepository with RepositoryMappings {
   /// 增量查询（云同步拉取用）：`updated_at >= since`（含已删除行）。
   /// **只返回 `sync_enabled = true` 的规则**（进同步的规则）——本地-only
   /// 规则不参与远端交换（防本地偏好泄漏/被远端覆盖）。
+  /// **过滤 unknown 匹配类型（r1）**：match_kind=unknown 的规则是反序列化
+  /// 兜底（未知值不落库），若放行进同步会在各端永久循环传播、且未来新增
+  /// 匹配类型时当前版本拉取会降级为 unknown 再推回覆盖远端原值（跨版本
+  /// 数据退化）——同步入口排除，未知规则仅存本地。
   Future<AppResult<List<TrackingRule>>> rulesSince(DateTime since) async {
     try {
       final query = database.select(database.trackingRules)
         ..where((t) =>
             t.updatedAt.isBiggerOrEqualValue(utcString(since)) &
-            t.syncEnabled.equals(true))
+            t.syncEnabled.equals(true) &
+            (t.matchKind.equals(TrackingRuleMatchKind.process.storageValue) |
+                t.matchKind.equals(TrackingRuleMatchKind.title.storageValue)))
         ..orderBy([(t) => OrderingTerm.asc(t.updatedAt)]);
       final rows = await query.get();
       return AppSuccess(rows.map(trackingRuleFromRow).toList());
@@ -94,13 +102,26 @@ class TrackingRuleRepository with RepositoryMappings {
   /// 软删规则（LWW 删除永远赢）。
   Future<AppResult<void>> deleteRule(TrackingRule rule) async {
     try {
-      final now = DateTime.now().toUtc();
-      final tombstone =
-          rule.copyWith(deletedAt: now, updatedAt: now);
-      await database.into(database.trackingRules).insert(
-            trackingRuleToCompanion(tombstone),
-            mode: InsertMode.insertOrReplace,
-          );
+      // **事务内重读 + 单调时间（r1，对齐 ActivityRepository.deleteActivity）**：
+      // 墓碑时间必须单调推进（max(now, 当前 updatedAt + 1ms)）——若库内行
+      // updatedAt 来自远端偏未来时间戳（设备时钟不同步），now 会早于原值形成
+      // "时间倒退"，下次 LWW 判定墓碑为陈旧数据而被远端覆盖、删除丢失、规则
+      // 复活。事务内重读拿权威行（防并发写入后拿陈旧副本写墓碑）。
+      await database.transaction(() async {
+        final current = await ruleById(rule.id);
+        if (current == null || current.isDeleted) {
+          return; // 幂等：不存在/已删
+        }
+        final now = DateTime.now().toUtc();
+        final ts = now.isAfter(current.updatedAt)
+            ? now
+            : current.updatedAt.add(const Duration(milliseconds: 1));
+        final tombstone = current.copyWith(deletedAt: ts, updatedAt: ts);
+        await database.into(database.trackingRules).insert(
+              trackingRuleToCompanion(tombstone),
+              mode: InsertMode.insertOrReplace,
+            );
+      });
       return const AppSuccess(null);
     } catch (e) {
       return AppFailure('删除映射规则失败：$e');
@@ -116,6 +137,13 @@ class TrackingRuleRepository with RepositoryMappings {
     try {
       await database.transaction(() async {
         final local = await ruleById(remote.id);
+        // **本地-only 规则短路（r1 修复）**：sync_enabled=false 的规则永不接受
+        // 远端覆盖——远端行恒为 sync_enabled=true，LWW 直接覆盖会把本地偏好
+        //（含用户关闭同步的意图）改回同步，甚至被远端墓碑删除（删除丢失、
+        // 规则复活）。远端表只承载同步规则，与本地-only 规则无交集。
+        if (local != null && !local.syncEnabled) {
+          return;
+        }
         // **平局决胜分支**：updated_at 相等时远端删除墓碑仍应用（删除永远赢）——
         // 与 ActivityRepository 的 tie-break 对齐。规则可更新/可删除（不同于
         // 不可变的 action log），平局场景真实可达，须显式处理。

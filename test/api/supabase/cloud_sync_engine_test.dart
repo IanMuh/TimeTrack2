@@ -1257,13 +1257,33 @@ void main() {
         final localOnly = await h.trackingRules.ruleById('r-local');
         expect(localOnly, isNotNull, reason: '本地-only 规则不被远端影响');
         expect(localOnly!.syncEnabled, isFalse);
+
+        // **同 id 远端残留副本不覆盖本地-only 规则（r1）**：用户曾同步过该
+        // 规则（远端残留副本）、随后本地关闭同步，另一设备仍编辑该规则（远端
+        // updated_at 更晚）——拉取不得把本地已关闭的规则覆盖回 sync_enabled=
+        // true（防本地偏好被远端静默改回同步后重新上云）。
+        final remoteStale = TrackingRule(
+          id: 'r-local', // 与本地-only 规则同 id
+          pattern: 'secret-app.exe',
+          matchKind: TrackingRuleMatchKind.process,
+          activityId: 'rule-activity',
+          syncEnabled: true,
+          userId: CloudHarness.userId,
+          updatedAt: DateTime.now().toUtc().add(const Duration(minutes: 2)),
+        );
+        h.remote.seed(RemoteTables.trackingRules, remoteStale.toMap());
+        await h.engine.syncNow(userId: CloudHarness.userId);
+        final preserved = await h.trackingRules.ruleById('r-local');
+        expect(preserved, isNotNull, reason: '同 id 远端残留不得删除本地-only 规则');
+        expect(preserved!.syncEnabled, isFalse,
+            reason: '远端更晚副本不得把本地-only 规则覆盖回同步（本地偏好保留）');
       } finally {
         await h.close();
       }
     });
   });
 
-  group('CloudSyncEngine 推送（其余表冒烟）', () {
+  group('CloudSyncEngine 推送（分类/规则）', () {
     test('分类推送：本地新分类（含 parentId）推送且补填 user_id', () async {
       final h = CloudHarness.create();
       try {

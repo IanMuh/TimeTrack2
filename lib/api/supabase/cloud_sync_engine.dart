@@ -213,11 +213,20 @@ class CloudSyncEngine {
       // tracking_rules（第 7 张同步表，模块 2c'）：仅同步 sync_enabled=true 的
       // 规则。拉取侧：远端表只承载同步规则（sync_enabled=false 永不推送），
       // 逐行 LWW 应用（规则 activity_id 引用 activities，置于其拉取之后）。
+      // **skipWhen 双层防线（r1）**：本地已有 sync_enabled=false 的规则时跳过
+      // 远端行——仓储 replaceIfRemoteNewer 也有同款短路（防仓储被其他调用方
+      // 绕过引擎时失效），此处引擎层再挡一道：远端编辑/墓碑均不触碰本地-only
+      // 规则（防远端残留副本把本地偏好改回同步/删除）。
       final rulesPull =
           await _pullTable(
             table: RemoteTables.trackingRules,
             userId: userId,
             since: since,
+            skipWhen: (row) async {
+              final local = await trackingRules
+                  .ruleById(TrackingRule.fromMap(row).id);
+              return local?.syncEnabled == false;
+            },
             apply: (row) => trackingRules
                 .replaceIfRemoteNewer(TrackingRule.fromMap(row)),
           );

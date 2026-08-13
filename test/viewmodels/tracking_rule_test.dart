@@ -88,6 +88,44 @@ void main() {
       );
       expect(same == rule, isTrue, reason: '同 id 视为同一规则');
       expect(same.hashCode, rule.hashCode);
+      // 负例边界：不同 id 必须不相等、hashCode 不同（防比较逻辑退化为恒等
+      // 或误删 id 之外的比较）。
+      final other = TrackingRule(
+        id: 'r2',
+        pattern: 'chrome.exe',
+        matchKind: TrackingRuleMatchKind.process,
+        activityId: 'a1',
+        updatedAt: t0,
+      );
+      expect(other == rule, isFalse, reason: '不同 id 视为不同规则');
+      expect(other.hashCode == rule.hashCode, isFalse,
+          reason: '不同 id hashCode 不同');
+    });
+
+    test('updated_at 严格校验：缺失/无时区偏移/非法 → FormatException（不伪造时间戳）', () {
+      // readDateTime 契约：updated_at 是 LWW 决胜字段，缺键/无偏移/非法一律
+      // 抛错、绝不回退伪造时间戳（防损坏数据在 LWW 冲突中胜出）。
+      expect(
+        () => TrackingRule.fromMap({'id': 'r'}),
+        throwsFormatException,
+        reason: 'updated_at 缺失',
+      );
+      expect(
+        () => TrackingRule.fromMap({
+          'id': 'r',
+          'updated_at': '2026-08-12T04:00:00', // 无时区偏移
+        }),
+        throwsFormatException,
+        reason: 'updated_at 无时区偏移',
+      );
+      expect(
+        () => TrackingRule.fromMap({
+          'id': 'r',
+          'updated_at': 'not-a-date',
+        }),
+        throwsFormatException,
+        reason: 'updated_at 非法',
+      );
     });
   });
 }
