@@ -86,6 +86,12 @@ class CleanupService with RepositoryMappings {
   /// "恰等于保留截止"等时间边界精确可测（两次 now() 微秒漂移会破坏 == 断言）。
   final DateTime Function()? _now;
 
+  /// userId 长度上限（**与 SyncStatusStore._maxUserIdLength=128 保持一致的
+  /// 本地副本，r8**）：cleanup 属 data 层、不可依赖 api 层（SyncStatusStore）
+  /// 违反依赖方向——此处本地常量 + 两侧均有超长抛错测试锁定行为（防静默漂移
+  /// 的缓解）；若 SyncStatusStore 侧调整须同步本值。
+  static const _maxUserIdLength = 128;
+
   /// VACUUM 阈值（行）：物理删除超过此值才全库重建；测试注入小值。
   final int _vacuumThreshold;
 
@@ -133,10 +139,17 @@ class CleanupService with RepositoryMappings {
     // 空白/超长 userId 属调用方编程错误（与 SyncStatusStore._normalizeUserId
     // 契约一致：超长防生成 SyncStatusStore 永远写不出的脏分区键导致恒判
     // "从未同步"）——try 外抛（async 函数内抛错进入返回 Future，由 expectLater
-    // 捕获）。
+    // 捕获）。**文案拆分（r8）**：空白/超长各自独立（与 SyncStatusStore 口径
+    // 一致，防超长触发时误导排查）。
     final normalized = userId?.trim();
-    if (userId != null && (normalized!.isEmpty || normalized.length > 128)) {
-      throw ArgumentError('userId 不能为空字符串，需显式传 null 使用全局游标');
+    if (userId != null) {
+      final trimmed = normalized!; // userId 非 null 时必非空（trim 结果）
+      if (trimmed.isEmpty) {
+        throw ArgumentError('userId 不能为空字符串，需显式传 null 使用全局游标');
+      }
+      if (trimmed.length > _maxUserIdLength) {
+        throw ArgumentError('userId 过长，无法生成游标分区键');
+      }
     }
     try {
       final retention = await retentionDays();
