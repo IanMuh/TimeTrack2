@@ -253,8 +253,19 @@ void main() {
       expect(report.deletedTotal, 0);
     });
 
-    test('空白 userId → ArgumentError（调用方编程错误，r6）', () async {
-      expect(() => service.run(userId: '  '), throwsArgumentError);
+    test('空白/超长 userId → ArgumentError（调用方编程错误，r6/r7）', () async {
+      // async 函数内 throw 进入返回 Future——须 await expectLater 捕获
+      //（同步 throwsA 匹配不了，r7 修正）。
+      await expectLater(
+        service.run(userId: '  '),
+        throwsArgumentError,
+        reason: '空白 userId 拒绝',
+      );
+      await expectLater(
+        service.run(userId: 'x' * 200),
+        throwsArgumentError,
+        reason: '超长 userId 拒绝（与 SyncStatusStore._maxUserIdLength=128 对齐）',
+      );
     });
   });
 
@@ -439,17 +450,21 @@ void main() {
     test('VACUUM 失败隔离（r3）：vacuumed=false、删除不回滚、last_cleanup_at 照写', () async {
       // 注入抛错 vacuumRunner——验证 r2 修复的关键失败路径（旧缺陷：未 await
       // 时标志被同步置位、VACUUM 实际失败无感知）。
+      var vacuumCalled = false;
       final failService = CleanupService(
         database: db,
         vacuumThreshold: 3,
-        vacuumRunner: () async =>
-            throw const FileSystemException('vacuum blocked'),
+        vacuumRunner: () async {
+          vacuumCalled = true; // 调用标记：区分"被调且抛错"与"未触发 VACUUM"（r7）
+          throw const FileSystemException('vacuum blocked');
+        },
       );
       await putMeta(AppMetadataKeys.lastSyncAt, nowStr());
       for (var i = 0; i < 5; i++) {
         await seedSoftDeleted('activities', 'v$i', const Duration(days: 400));
       }
       final report = (await failService.run()).requireValue();
+      expect(vacuumCalled, isTrue, reason: 'VACUUM 确实被触发（非阈值未达）');
       expect(report.deletedTotal, 5, reason: '物理删除不回滚');
       expect(report.vacuumed, isFalse, reason: 'VACUUM 失败如实标记未执行');
       final left = await (db.select(db.activities)).get();
@@ -896,18 +911,11 @@ void main() {
       expect(links.map((r) => r.id).toSet(), {'linkZ'});
     });
 
-    test('事务原子性：FK 违约整体回滚 + last_cleanup_at 不推进（r3）', () async {
-      // run() 将 6 表删除包在单事务——任一步 FK 违约须整体回滚（不留部分表
-      // 已删的半提交状态）。构造场景：超期活动 P + 软删已传播条目 e-del
-      //（引用 P，可删）；再用**引用 FK 违约**强制某步失败——最直接：先造
-      // 无 FK 引用关系的问题数据不可行，改为验证事务回滚可见性：让分类删除
-      // 因 blocked 集不足而 FK 违约。**简化为验证 run() 抛错时数据原样**：
-      // 直接执行含违约的等价操作序列不可注入——本用例改为验证**删除中途
-      // 违约场景**：插入 time_entry 引用一个**将被物理删除的活动**（软删子
-      // 已传播、随父清理）不构成违约；违约需存活引用——已被 blocked 集
-      // 提前跳过。故 FK 违约不可自然触发（blocked 集正是为此设计）——
-      // **此用例锁定"设计上无违约路径"**：含存活引用的父必被跳过，事务
-      // 永不因 FK 违约回滚。
+    test('blocked 集防 FK 违约路径：父跳过、软删已传播子清理、last_cleanup_at 照写（r3/r7）', () async {
+      // 用例名如实反映验证内容（r7 修正）：blocked 集使 FK 违约**不可自然触发**
+      //——含存活引用的父必被跳过（设计上无违约路径），事务永不因 FK 违约
+      // 回滚；故验证的是"父跳过 + 软删已传播子清理 + 事务成功提交（清理时刻
+      // 照写）"而非"回滚 + 不推进"。
       await putMeta(AppMetadataKeys.lastSyncAt, nowStr());
       final deleted = mapping.utcString(
         DateTime.now().subtract(const Duration(days: 400)),

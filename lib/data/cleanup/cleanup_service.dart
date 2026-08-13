@@ -130,9 +130,12 @@ class CleanupService with RepositoryMappings {
   /// 清理 + 存活引用者跳过 + 分类悬空处理）→ 事务外阈值驱动 VACUUM →
   /// 写 last_cleanup_at。
   Future<AppResult<CleanupReport>> run({String? userId}) async {
-    // 空白 userId 属调用方编程错误（与 SyncStatusStore 契约一致）——try 外抛。
+    // 空白/超长 userId 属调用方编程错误（与 SyncStatusStore._normalizeUserId
+    // 契约一致：超长防生成 SyncStatusStore 永远写不出的脏分区键导致恒判
+    // "从未同步"）——try 外抛（async 函数内抛错进入返回 Future，由 expectLater
+    // 捕获）。
     final normalized = userId?.trim();
-    if (userId != null && (normalized!.isEmpty)) {
+    if (userId != null && (normalized!.isEmpty || normalized.length > 128)) {
       throw ArgumentError('userId 不能为空字符串，需显式传 null 使用全局游标');
     }
     try {
