@@ -52,6 +52,37 @@ void main() {
           reason: '合法 staging 目录名放行：$ok',
         );
       }
+      // **折叠目标精确锁定（r18）**：isNotNull 无法区分「折叠为 '.'/'..' 命中
+      // 特殊目录名分支」与「折叠为空串命中空分支」——若 r18 的 break 被移除
+      //（回退到 r17 全裁行为）`'...'`/`'... '` 会走空分支而 isNotNull 依然
+      // 成立、死代码回归无感知。逐用例锁定错误消息。
+      final toDotOrDotDot = {
+        '...': '..', // 裁点 → '..'（break）
+        '. .': '.', // 裁空格 → '.'（break）
+        '.. .': '..', // 裁点 → '.. ' → 裁空格 → '..'（break）
+        '... ': '..', // 裁空格 → '...' → '..'（break）
+        '. ': '.', // 裁空格 → '.'（break）
+        '... . ..': '..', // 连续裁点 → '..'（break）
+      };
+      for (final entry in toDotOrDotDot.entries) {
+        final err = WindowsInstaller.stagingNameError(entry.key);
+        expect(err, isNotNull, reason: '${entry.key} 非法');
+        expect(
+          err,
+          contains('裁剪后为 `.`/`..`'),
+          reason: '${entry.key} 折叠为 ${entry.value}，须命中特殊目录名分支而非空分支',
+        );
+      }
+      // 纯空白/点号折叠为空串 → 命中「裁剪后为空」分支（另一死代码分支锁定）。
+      for (final toEmpty in [' ', ' . ']) {
+        final err = WindowsInstaller.stagingNameError(toEmpty);
+        expect(err, isNotNull, reason: '$toEmpty 非法');
+        expect(
+          err,
+          contains('裁剪后为空'),
+          reason: '$toEmpty 折叠为空串，须命中空分支',
+        );
+      }
     });
 
     test('zip 解压 staging：文件落位（zip-slip 防护放行合法路径）', () async {
