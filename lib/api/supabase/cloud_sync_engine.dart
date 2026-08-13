@@ -21,12 +21,14 @@ import '../../data/repositories/activity_repository.dart';
 import '../../data/repositories/category_repository.dart';
 import '../../data/repositories/settings_repository.dart';
 import '../../data/repositories/time_entry_repository.dart';
+import '../../data/repositories/tracking_rule_repository.dart';
 import '../../utils/result.dart';
 import '../../viewmodels/action_log.dart';
 import '../../viewmodels/activity.dart';
 import '../../viewmodels/activity_category.dart';
 import '../../viewmodels/profile_settings.dart';
 import '../../viewmodels/time_entry.dart';
+import '../../viewmodels/tracking_rule.dart';
 import 'remote_tables.dart';
 import 'sync_backend.dart';
 import 'sync_status_store.dart';
@@ -39,6 +41,10 @@ abstract final class RemoteTables {
   static const timeEntries = 'time_entries';
   static const actionLogs = 'action_logs';
   static const profileSettings = 'profile_settings';
+  /// 后台自动记录映射规则（第 7 张同步表，模块 2c'）：
+  /// 仅 `sync_enabled = true` 的规则参与云同步（推送侧 rulesSince 行级过滤，
+  /// 远端表只承载同步规则）。
+  static const trackingRules = 'tracking_rules';
 }
 
 /// 云同步引擎（依赖 [RemoteTableGateway] 与本地仓储，可注入 mock 网关测试）。
@@ -52,6 +58,7 @@ class CloudSyncEngine {
     required this.timeEntries,
     required this.actionLogs,
     required this.settings,
+    required this.trackingRules,
     this.pageSize = 999, // 与网关上限对齐（hasMore +1 探测不被服务端截断）
     this.pushBatchSize = 100,
   })  : assert(pageSize > 0, 'pageSize 必须为正'),
@@ -66,6 +73,7 @@ class CloudSyncEngine {
   final TimeEntryRepository timeEntries;
   final ActionLogRepository actionLogs;
   final SettingsRepository settings;
+  final TrackingRuleRepository trackingRules;
 
   final int pageSize;
   final int pushBatchSize;
@@ -202,6 +210,40 @@ class CloudSyncEngine {
           );
       pulledRows += settingsPull.count;
       maxSeen = _laterOf(maxSeen, settingsPull.maxSeen);
+      // tracking_rules（第 7 张同步表，模块 2c'）：仅同步 sync_enabled=true 的
+      // 规则。拉取侧：远端表只承载同步规则（sync_enabled=false 永不推送），
+      // 逐行 LWW 应用（规则 activity_id 引用 activities，置于其拉取之后）。
+      // **skipWhen 双层防线**：本地已有 sync_enabled=false 的规则时跳过远端行
+      // ——仓储 replaceIfRemoteNewer 也有同款短路（防仓储被其他调用方绕过引擎
+      // 时失效），此处引擎层再挡一道：远端编辑/墓碑均不触碰本地-only 规则。
+      // **批量预载**：先一次性加载本地规则 id→syncEnabled 映射，skipWhen
+      // 内存判定（防逐行 ruleById 的 N+1 查询；全量同步时远端规则数与本地
+      // 查询次数线性增长）。
+      // **快照语义（并发权衡）**：预载是拉取开始前的快照，同步进行中若用户
+      // 把某规则 sync_enabled 从 false 改 true（或新建同 id 规则），本应被
+      // 应用的远端行会被这份过期快照跳过。安全方向（远端覆盖本地-only）已由
+      // replaceIfRemoteNewer 的本地-only 短路兜底；被跳过的远端编辑若被本轮
+      // 其他行推进的游标越过（尤其全量同步 fallback=startedAt），可能延迟到
+      // 下次规则变更才恢复——概率极低且大部分可自愈，接受该权衡。
+      final localRules = await trackingRules.allRules();
+      if (localRules case AppFailure<List<TrackingRule>> failure) {
+        throw StateError('查询映射规则失败：${failure.message}');
+      }
+      final localSyncFlags = {
+        for (final r in localRules.requireValue()) r.id: r.syncEnabled,
+      };
+      final rulesPull =
+          await _pullTable(
+            table: RemoteTables.trackingRules,
+            userId: userId,
+            since: since,
+            skipWhen: (row) async =>
+                localSyncFlags[TrackingRule.fromMap(row).id] == false,
+            apply: (row) => trackingRules
+                .replaceIfRemoteNewer(TrackingRule.fromMap(row)),
+          );
+      pulledRows += rulesPull.count;
+      maxSeen = _laterOf(maxSeen, rulesPull.maxSeen);
 
       // ---- 推送（后推）----
       // 只推送属于当前用户（含未归属 null）的行：共享设备上前一用户遗留的
@@ -294,6 +336,25 @@ class CloudSyncEngine {
           pushedMax = _laterOf(pushedMax, settingsPush.maxUpdatedAt);
         }
       }
+      // tracking_rules：**rulesSince 已在仓储层按 sync_enabled=true 行级过滤**
+      //（sync_enabled=false 的本地-only 规则不进远端、不被远端覆盖——本地
+      // 偏好不泄漏到云）。关闭同步的规则在远端残留的旧行不主动删除：用户
+      // 再次打开开关时 updatedAt 更新、重新推送覆盖即可（残留副本无害）。
+      final rulesResult = await trackingRules.rulesSince(since ?? DateTime(0));
+      if (rulesResult case AppFailure<List<TrackingRule>> failure) {
+        throw StateError('查询映射规则失败：${failure.message}');
+      }
+      final rulesPush = await _pushTable(
+        userId: userId,
+        since: since,
+        table: RemoteTables.trackingRules,
+        localRows: rulesResult.requireValue()
+            .where((r) => r.userId == null || r.userId == userId)
+            .map((r) => _withUserId(r, userId).toMap())
+            .toList(),
+      );
+      pushedRows += rulesPush.count;
+      pushedMax = _laterOf(pushedMax, rulesPush.maxUpdatedAt);
 
       // 全部成功 → 推进游标 + 清错误 + 记目标。
       // 游标须覆盖本轮**实际处理**的最大行 updated_at（拉取 maxSeen 与
@@ -480,6 +541,8 @@ class CloudSyncEngine {
         l.copyWith(userId: userId) as T,
       final ProfileSettings s when s.userId == null =>
         s.copyWith(userId: userId) as T,
+      final TrackingRule r when r.userId == null =>
+        r.copyWith(userId: userId) as T,
       _ => model,
     };
   }

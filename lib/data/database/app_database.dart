@@ -16,7 +16,6 @@ library;
 
 import 'package:drift/drift.dart';
 import 'package:drift_flutter/drift_flutter.dart';
-
 part 'app_database.g.dart';
 
 /// 数据类：活动（事项）。
@@ -48,6 +47,37 @@ class TimeEntries extends Table {
   TextColumn get endAt => text().nullable()();
   TextColumn get note => text().withDefault(const Constant(''))();
   TextColumn get deviceId => text()();
+  TextColumn get updatedAt => text()();
+  TextColumn get deletedAt => text().nullable()();
+  /// 自动生成标记（后台前台检测自动记录 vs 手动计时）：统计排除/批量清理/
+  /// 防误编辑的判定依据；随行 LWW 同步（并入 time_entries 行）。
+  BoolColumn get isAuto => boolean().withDefault(const Constant(false))();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// 数据类：后台自动记录映射规则（进程/窗口标题模式 → 活动）。
+///
+/// - `sync_enabled`：**per-rule 同步开关**——true 的规则参与云同步（schema.sql
+///   tracking_rules 表 + RLS + 引擎行级过滤），false 仅存本地（不进远端、
+///   不被远端覆盖）；
+/// - 软删统一 `deleted_at`（LWW 删除永远赢）；`user_id` 归属（同步表模式与
+///   5 张业务表一致）。
+@DataClassName('TrackingRuleRow')
+@TableIndex(name: 'idx_tracking_rules_sync', columns: {#userId, #updatedAt})
+@TableIndex(name: 'idx_tracking_rules_activity', columns: {#activityId})
+class TrackingRules extends Table {
+  TextColumn get id => text()();
+  TextColumn get userId => text().nullable()();
+  /// 匹配模式（进程名如 `chrome.exe` / 窗口标题模式）。
+  TextColumn get pattern => text()();
+  /// 匹配类型（process/title，存储值见 TrackingRuleMatchKind.storageValue）。
+  TextColumn get matchKind => text()();
+  /// 映射到的活动 id（必填：规则匹配到活动是映射的落点，无匹配活动的规则
+  /// 无意义）。
+  TextColumn get activityId => text().references(Activities, #id)();
+  BoolColumn get syncEnabled => boolean().withDefault(const Constant(true))();
   TextColumn get updatedAt => text()();
   TextColumn get deletedAt => text().nullable()();
 
@@ -163,6 +193,7 @@ class SyncPeers extends Table {
     ActionLogs,
     AppMetadata,
     SyncPeers,
+    TrackingRules,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -172,7 +203,7 @@ class AppDatabase extends _$AppDatabase {
   factory AppDatabase.open() => AppDatabase(driftDatabase(name: 'timetrack'));
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -190,6 +221,26 @@ class AppDatabase extends _$AppDatabase {
         },
         onCreate: (m) async {
           await m.createAll();
+        },
+        onUpgrade: (m, from, to) async {
+          // 模块 2c'：TimeEntries 加 is_auto 列 + 新增 tracking_rules 表。
+          if (from < 2) {
+            // 不用 drift 的 addColumn：其对带 CHECK 约束/默认值的列生成的
+            // `ADD COLUMN ... CHECK (...)` 会被 SQLite 拒绝（ADD COLUMN 禁止
+            // CHECK 约束），列静默不生效（旧行读取 is_auto 为 NULL 崩溃）。
+            // 手工 ALTER（经本类 customStatement——迁移回调内可用，之前失败
+            // 是夹具没设 user_version、迁移未触发所致）省略 CHECK（bool 亲和
+            // 类型 0/1，drift 写入恒 0/1；CHECK 仅为生成层的保险约束，缺失
+            // 不影响读写正确性）。
+            await customStatement(
+              'ALTER TABLE time_entries ADD COLUMN is_auto '
+              'BOOLEAN NOT NULL DEFAULT false',
+            );
+            await m.createTable(trackingRules);
+            // 迁移路径：tracking_rules 索引由 beforeOpen 的 [_ensureIndexes]
+            // 无条件补齐（@TableIndex 仅 onCreate 的 createAll 建，m.createTable
+            // 不建），此处不重复。
+          }
         },
       );
 
@@ -252,6 +303,18 @@ class AppDatabase extends _$AppDatabase {
     await customStatement(
       'CREATE INDEX IF NOT EXISTS idx_action_logs_entry_active '
       'ON action_logs (entry_id, occurred_at) WHERE deleted_at IS NULL',
+    );
+    // tracking_rules 同步索引（每次打开无条件补齐）：@TableIndex 仅在 onCreate
+    // 的 createAll() 建索引、迁移库 m.createTable 不建——放这里幂等补齐，覆盖
+    // 新建库 / v1→v2 升级 / 已升级但缺索引的存量库三类路径；同步引擎
+    // rulesSince 的 (user_id, updated_at) 查询与 activity_id 反查依赖。
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_tracking_rules_sync '
+      'ON tracking_rules (user_id, updated_at)',
+    );
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_tracking_rules_activity '
+      'ON tracking_rules (activity_id)',
     );
   }
 }

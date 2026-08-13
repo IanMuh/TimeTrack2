@@ -107,9 +107,16 @@ CREATE TABLE IF NOT EXISTS time_entries (
   end_at         text,
   note           text NOT NULL DEFAULT '',
   device_id      text NOT NULL,
+  is_auto        boolean NOT NULL DEFAULT false, -- 后台自动记录 vs 手动计时（模块 2c'）
   updated_at     text NOT NULL,
   deleted_at     text
 );
+
+-- 存量库补齐列（模块 2c'）：CREATE TABLE IF NOT EXISTS 对已存在表是 no-op——
+-- 重跑本 schema 不会给存量 time_entries 补 is_auto 列，导致新库与存量库漂移
+--（存量库推送携带 is_auto 被 PostgREST 拒绝、LWW 整行替换丢标记）。与本地
+-- drift 迁移（onUpgrade 手工 ALTER）等价，ADD COLUMN IF NOT EXISTS 幂等。
+ALTER TABLE time_entries ADD COLUMN IF NOT EXISTS is_auto boolean NOT NULL DEFAULT false;
 
 -- 操作日志
 -- 注意：activity_id / entry_id 为可空的归档性引用，**有意不做存在性校验**
@@ -141,6 +148,24 @@ CREATE TABLE IF NOT EXISTS profile_settings (
   updated_at text NOT NULL
 );
 
+-- 后台自动记录映射规则（模块 2c' 第 7 张同步表）
+-- 客户端按 sync_enabled=true 行级过滤：本表只承载参与同步的规则（本地-only
+-- 规则 sync_enabled=false 永不推送、不被远端覆盖）。软删统一 deleted_at。
+CREATE TABLE IF NOT EXISTS tracking_rules (
+  id          text PRIMARY KEY,
+  user_id     uuid REFERENCES auth.users(id) ON DELETE CASCADE,
+  pattern     text NOT NULL,
+  match_kind  text NOT NULL,           -- 'process' / 'title'
+  activity_id text NOT NULL,           -- 映射到的活动（必填）；引用校验走
+                                       -- validate_tracking_rule_ref 触发器
+                                       --（与 time_entries 同模式：软删感知 +
+                                       -- 归属校验，不设裸 REFERENCES——物理
+                                       -- FK 与未来归档物理清理冲突）
+  sync_enabled boolean NOT NULL DEFAULT true,
+  updated_at  text NOT NULL,
+  deleted_at  text
+);
+
 -- =============================================================
 -- 增量索引（云同步 since 游标查询）
 -- =============================================================
@@ -156,6 +181,8 @@ CREATE INDEX IF NOT EXISTS idx_action_logs_sync
   ON action_logs (user_id, updated_at);
 CREATE INDEX IF NOT EXISTS idx_profile_settings_sync
   ON profile_settings (user_id, updated_at);
+CREATE INDEX IF NOT EXISTS idx_tracking_rules_sync
+  ON tracking_rules (user_id, updated_at);
 
 -- 分类 parent_id 递归查询索引（穿透已删节点）
 CREATE INDEX IF NOT EXISTS idx_activity_categories_parent
@@ -382,6 +409,26 @@ CREATE TRIGGER trg_activity_categories_parent_ref_check
 BEFORE INSERT OR UPDATE ON activity_categories
 FOR EACH ROW EXECUTE FUNCTION validate_category_parent_ref();
 
+-- tracking_rules 引用校验（模块 2c'，与 validate_time_entry_ref 同构）：
+-- 软删放行 + 仅引用字段变更时校验（活动软删后规则保留为活跃行、改
+-- 非引用字段的更新应放行）+ assert_ref_exists 归属校验（防指向他人活动）。
+CREATE OR REPLACE FUNCTION validate_tracking_rule_ref()
+RETURNS trigger AS $$
+BEGIN
+  IF NEW.deleted_at IS NOT NULL THEN
+    RETURN NEW;
+  END IF;
+  IF TG_OP = 'INSERT' OR OLD.activity_id IS DISTINCT FROM NEW.activity_id THEN
+    PERFORM assert_ref_exists('activities', NEW.activity_id);
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_tracking_rules_ref_check
+BEFORE INSERT OR UPDATE ON tracking_rules
+FOR EACH ROW EXECUTE FUNCTION validate_tracking_rule_ref();
+
 -- =============================================================
 -- RLS（行级安全：每行 user_id = auth.uid()）
 -- =============================================================
@@ -392,6 +439,7 @@ ALTER TABLE activity_category_links ENABLE ROW LEVEL SECURITY;
 ALTER TABLE time_entries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE action_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE profile_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tracking_rules ENABLE ROW LEVEL SECURITY;
 
 -- 策略：用户只能读写自己的行（写入强制 user_id = auth.uid()，防越权写他人数据）。
 -- 按命令类型拆分 SELECT/INSERT/UPDATE（**不建 FOR DELETE 策略**）：禁止客户端
@@ -437,5 +485,12 @@ CREATE POLICY profile_settings_select_own ON profile_settings
 CREATE POLICY profile_settings_insert_own ON profile_settings
   FOR INSERT TO authenticated WITH CHECK (user_id = auth.uid());
 CREATE POLICY profile_settings_update_own ON profile_settings
+  FOR UPDATE TO authenticated USING (user_id = auth.uid())
+  WITH CHECK (user_id = auth.uid());
+CREATE POLICY tracking_rules_select_own ON tracking_rules
+  FOR SELECT TO authenticated USING (user_id = auth.uid());
+CREATE POLICY tracking_rules_insert_own ON tracking_rules
+  FOR INSERT TO authenticated WITH CHECK (user_id = auth.uid());
+CREATE POLICY tracking_rules_update_own ON tracking_rules
   FOR UPDATE TO authenticated USING (user_id = auth.uid())
   WITH CHECK (user_id = auth.uid());

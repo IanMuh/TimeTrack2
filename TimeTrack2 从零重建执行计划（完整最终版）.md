@@ -1,18 +1,18 @@
 # TimeTrack2 从零重建执行计划（完整最终版 · 含执行注意事项）
 
 ## 目标
-在 `D:\MyAPP\TimeTrack2` 从零重建 TimeTrack，功能与现项目等价，并实现：**完整应用更新系统**（检查→下载/进度→校验→安装→重启）、**层级分类系统**（分类可嵌套 + 树统计/显示选项，分类管理与事项选择合并交互）、**CLI 风格指令系统**、**AI 二期预留**。技术栈保留、模块化架构保留、导航用 go_router、数据层用 drift + SQLite（单一新 schema）。现有项目仅作参照，**不修改**。具体实现方式在开发各模块时与你确认，不逐行照抄。
+在 `D:\MyAPP\TimeTrack2` 从零重建 TimeTrack，功能与现项目等价，并实现：**完整应用更新系统**（检查→下载/进度→校验→安装→重启）、**层级分类系统**（分类可嵌套 + 树统计/显示选项，分类管理与事项选择合并交互）、**CLI 风格指令系统**、**AI 二期预留**、**后台自动记录**（Windows/Android 检测前台应用，按规则全自动记录事项，规则可配置进/不进云同步）。技术栈保留、模块化架构保留、导航用 go_router、数据层用 drift + SQLite（单一新 schema）。现有项目仅作参照，**不修改**。具体实现方式在开发各模块时与你确认，不逐行照抄。
 
 ## 目录结构（10 目录 + 职责）
 ```
 TimeTrack2/lib/
 ├── main.dart          # 依赖组装 + 入口
 ├── app.dart           # MaterialApp + 主题 + 路由
-├── api/               # 存放请求：supabase（云同步+认证）、lan（协议/服务器/客户端）、update（清单/下载器/校验器）、ai/（LlmClient 接口预留）
+├── api/               # 存放请求：supabase（云同步+认证）、lan（协议/服务器/客户端）、update（清单/下载器/校验器）、foreground（前台应用检测：Windows FFI / Android UsageStats 适配）、ai/（LlmClient 接口预留）
 ├── assets/            # 存放资源：图标、图片、ARB 文案源文件
 ├── components/        # 存放公共组件（无业务状态，参数注入；含分类树选择器、更新进度卡、对话框）
 ├── constants/         # 存放常量：编译配置、默认值/阈值/端口、存储键、枚举存储值、主题令牌、指令定义、更新配置
-├── data/              # 存放本地数据访问层：drift 数据库、仓储、同步包合并、文件互通、清理、平台更新安装器
+├── data/              # 存放本地数据访问层：drift 数据库、仓储、同步包合并、文件互通、清理、平台更新安装器、前台检测状态机（轮询/规则匹配/生成记录）
 ├── pages/             # 存放页面：壳、计时、今日、时间线、统计、设置、登录
 ├── routes/            # 存放路由配置：go_router（5 主页面壳保活 + 深链预留）
 ├── stores/            # 存放全局状态组件：各功能状态类 + AppStore 聚合 + 刷新编排 + 时钟 + undo 栈 + 命令分发器 + 更新状态机
@@ -31,6 +31,7 @@ TimeTrack2/lib/
 7. **AI 预留**：LlmClient 单接口（OpenAI 兼容覆盖 DeepSeek/Kimi/通义/Ollama）；密钥安全存储（flutter_secure_storage）；总结本地缓存表；AI 产出指令交命令分发器执行（不直接写库）
 8. **更新系统**：update.json 清单源（raw.githubusercontent）；Windows staging+下次启动应用；Android FileProvider/ACTION_VIEW；强制/可选+忽略版本；下载安装自研
 9. **层级分类（一期全量）**：ActivityCategory 含 parentId 自引用；删除分类递归软删子孙及 links；分类管理与事项选择合并交互（无独立管理页）
+10. **后台自动记录**：Windows/Android 双平台检测前台应用，按映射规则**全自动**记录事项；规则（`tracking_rules` 表）带 per-rule 同步开关（可进/可不进云同步）；自动生成的时间条目带 `is_auto` 标记（与手动条目区分，供统计排除/批量清理/防误编辑）
 
 ## 层级分类系统设计
 - **数据层**：drift 表 `parent_id` 自引用 FK（`deleted_at` 沿用软删体系）；`ActivityCategory` 模型加 parentId（序列化缺键容错）；supabase schema 同步加 parent_id + 递归软删触发器（`WITH RECURSIVE`，`updated_at` 用 `greatest()` 保持 LWW 语义）
@@ -74,6 +75,25 @@ TimeTrack2/lib/
 - 总结：只读查询 + 独立缓存表
 - LlmClient 接口 + OpenAI 兼容（baseUrl/key/model 可配）+ 能力标记处理 provider 差异（通义 tools+stream 不可并用、Ollama 缺字段等）；密钥设置页输入存 flutter_secure_storage；启用时披露数据出境 + 提供本地 Ollama 选项；离线/失败禁用 AI 入口；总结结果本地缓存
 
+## 后台自动记录设计（新增模块）
+### 数据层
+- **TimeEntry 加 `is_auto` 标记**（bool，默认 false）：区分自动生成与手动条目——统计排除/批量清理（如清掉自动误记）/防误编辑的判定依据；随行 LWW 同步（`is_auto` 并入 time_entries 行）
+- **新增 `tracking_rules` 表**（第 7 张同步表）：`id`、`pattern`（进程名/窗口标题模式）、`match_kind`（process/title）、`activity_id`（映射到活动）、**`sync_enabled`**（per-rule 同步开关，对应"规则可进可不进云同步"）、`user_id`、`updated_at`/`deleted_at`（软删 LWW）
+  - `sync_enabled = true` 的规则参与云同步（schema.sql + RLS + RemoteTables 白名单 + memory_remote + 引擎测试同步扩展）；`false` 仅存本地
+- 本地库时间列与云端 6 表镜像不变式保持不变（字典序=时间序）
+### 平台检测层（api/foreground/，纯 Dart，无原生代码）
+- 统一抽象：`ForegroundDetector`（平台适配器）→ `ForegroundSnapshot`（平台无关值对象）→ 规则匹配 → 生成/续接记录
+- **Windows**：dart:ffi + `win32` 包（唯一新增依赖，Dart 生态最活跃 Windows 包）——`GetForegroundWindow` → `GetWindowTextW`（标题）+ `GetWindowThreadProcessId`/`OpenProcess`/`QueryFullProcessImageNameW`（进程名）；**轮询 1–2 秒**（前台窗口无事件订阅，秒级粒度足够；单次微秒级、无磁盘/网络 I/O，功耗可忽略）；`IsWindowVisible` 过滤隐藏窗口 + `GetClassName` 过滤系统壳（桌面/任务栏）；进程名作主 key（稳定）、窗口标题作辅助匹配（区分同应用内任务）
+- **Android**：`usage_stats` 插件（^2.0.1，与 Flutter 3.44.2/Dart 3.12.2 兼容）包装 `UsageStatsManager`——`PACKAGE_USAGE_STATS` 特殊权限（**不能弹运行时对话框**，须跳 `Settings.ACTION_USAGE_ACCESS_SETTINGS` 手动开）+ 前台服务（Android 14+ 强制 `foregroundServiceType="specialUse"` + `FOREGROUND_SERVICE_SPECIAL_USE` 权限 + 常驻低优先级通知）；前台服务内定时（15–60s）`queryEvents(now-5min, now)` 按 `ACTIVITY_RESUMED/PAUSED` 推导当前前台；**锁屏（Android 11+）返回 null 须处理**（保持上一快照）；**不申请** `QUERY_ALL_PACKAGES`、不读屏幕内容
+- **Play 合规**（发布前必做，记入阶段 5 验收）：Play Console 受限权限声明（用途=核心功能：自动记录各应用使用时长）+ 隐私政策 + Data safety 声明 + 用户知情授权引导；**绝不使用 AccessibilityService 做追踪**（Play 明令禁止非无障碍用途，会拒审/下架）
+### 记录管线（data/foreground_tracker/）
+- 轮询 → 快照归一化（进程名/标题 → 活动 key）→ 规则匹配 → 状态变化时生成/续接 TimeEntry（`is_auto=true`）；未匹配到规则 → 按"不匹配则忽略"策略（可配），不产生碎片条目
+- **指令系统接入**：自动记录作为指令源（铁律 7——全部操作经 CLI 指令系统统一分发），`switch <活动>`（自动）/ `stop` 等复用现有写路径，自动继承撤销/日志/同步
+- 规则配置 UI（阶段 4）：规则增删改、匹配优先级（精确 > 通配 > 标题）、per-rule 同步开关
+### 平台驻留
+- Windows：系统托盘 + 关窗不退出（`tray_manager`/`window_manager` `preventClose`）+ 开机自启可选
+- Android：前台服务保活 + 常驻通知（提供停止开关）
+
 ## 技术选型
 | 关注点 | 方案 |
 |---|---|
@@ -83,6 +103,7 @@ TimeTrack2/lib/
 | 数据库 | drift + sqlite3 3.x（**默认捆绑**，Windows 用包自带 sqlite3.dll；不配置 winsqlite3 钩子；去掉 sqlite3_flutter_libs） |
 | 云同步/认证 | supabase_flutter |
 | LAN | dart:io HttpServer/HttpClient + JSON 协议 |
+| 前台检测 | Windows：dart:ffi + `win32`（GetForegroundWindow 轮询）；Android：`usage_stats`（UsageStatsManager）+ 前台服务（specialUse） |
 | 更新 | http 流式下载 + crypto(SHA-256) + 平台安装器（自研） |
 | 图表/文件选择 | fl_chart / file_selector |
 | 本地化 | flutter_localizations + ARB |
@@ -93,9 +114,10 @@ TimeTrack2/lib/
 - **阶段 0 骨架**：flutter create（windows+android）→ 配置依赖（drift/drift_flutter/build_runner 等，不含 sqlite3_flutter_libs）→ 建 10 目录 → 可运行空壳
 - **阶段 1 底层**：viewmodels 领域类型（含 deleted_at、parentId）+ 指令/更新清单类型 → utils（CLI 解析器、SHA-256）→ constants（指令定义、更新配置、主题令牌）→ data（drift 单一 schema + 仓储：软删/事务递归级联/跨天拆分/重叠裁剪/滚转）
 - **阶段 2 请求与更新**：api 云同步（删除永远赢）/LAN/AI 接口预留 + api/update（清单/下载/校验）+ data/update（平台安装器）+ 同步包合并/文件互通/清理 + supabase schema（含层级分类）
-- **阶段 3 全局状态**：stores 各功能状态类（含分类树缓存/变更→dataRevision）+ AppStore 编排 + undo 栈 + CommandDispatcher + UpdateStore（扩展状态机+策略）
-- **阶段 4 UI**：components（分类树选择器、更新进度卡等）→ pages（计时器/当前状态卡分类事项合并选择、统计树维度与显示选项、更新设置卡片）→ routes → 本地化 → Android Manifest/FileProvider
-- **阶段 5 收尾**：`flutter analyze` + `flutter test` 全绿 → Windows/Android 双平台构建与冒烟（含更新流程人工验证）
+  - **2c' 后台自动记录数据层（新增，衔接 2c）**：TimeEntry 加 `is_auto` 列 + 新增 `tracking_rules` 表（含 `sync_enabled` 开关）+ 同步引擎行级过滤（`sync_enabled = true` 的规则进云同步：schema.sql + RLS + RemoteTables 白名单 + memory_remote + 引擎测试同步扩展）——趁 2c 刚合并、schema 最便宜窗口完成
+- **阶段 3 全局状态**：stores 各功能状态类（含分类树缓存/变更→dataRevision）+ AppStore 编排 + undo 栈 + CommandDispatcher + UpdateStore（扩展状态机+策略）+ **前台检测状态机**（ForegroundDetector 接口 + 规则匹配 + 生成记录指令，指令源接入 CommandDispatcher；平台轮询/保活由检测层提供）
+- **阶段 4 UI**：components（分类树选择器、更新进度卡等）→ pages（计时器/当前状态卡分类事项合并选择、统计树维度与显示选项、更新设置卡片）→ routes → 本地化 → Android Manifest/FileProvider → **后台自动记录 UI/平台层**（规则配置页、授权引导页（Android 使用情况访问 + Windows 说明）、托盘驻留与关窗不退出、Android 前台服务 + 常驻通知；Windows FFI 检测器接状态机）
+- **阶段 5 收尾**：`flutter analyze` + `flutter test` 全绿 → Windows/Android 双平台构建与冒烟（含更新流程人工验证）→ **后台自动记录验收**（Windows 前台检测冒烟：切应用自动记/规则命中/不匹配忽略；Android 授权引导 + 前台服务常驻 + 锁屏 null 处理；Play 受限权限声明 + 隐私政策 + Data safety 声明落文档）
 - **阶段 6（二期）**：AI 解析自然语言→命令分发执行 + AI 总结缓存
 
 ## 执行注意事项（全阶段遵守）
@@ -121,6 +143,11 @@ TimeTrack2/lib/
 15. **CLI 解析器边界**：--note 含空格/引号、时间解析（下午3点/15:00）、活动名重名歧义、中英混合——解析器返回明确失败原因
 16. **Windows staging 安装前提是目录可写**：程序目录不可写（如 Program Files）时需可写性检查并降级提示（或降级"打开下载页"）；数据目录（%APPDATA%）与程序目录分离是铁律，待安装标记文件放数据目录
 17. **go_router 版本锁定**：StatefulShellRoute API 在各大版本差异大，先定版本再写路由，避免中途升级重构
+23. **win32 6.x 语法**：SetLastError 类 API 返回 `Win32Result<T>`、句柄是 extension type（`HWND`/`HANDLE`）、`GetWindowText` 绑定 `W` 版本、`OpenProcess` 句柄必须 `CloseHandle`——按 6.x 写，勿参考旧 5.x 风格
+24. **Android 使用情况访问授权**：`PACKAGE_USAGE_STATS` 是特殊权限，**走不了运行时对话框**——必须跳 `Settings.ACTION_USAGE_ACCESS_SETTINGS` 手动开；未授权前不得启动检测（用户知情第一道关）
+25. **Android 14 前台服务类型强制**：target 34+ 未声明 `foregroundServiceType` 直接抛 `MissingForegroundServiceTypeException`——用 `specialUse` + 子类型说明（时间追踪属标准类型外合法场景）+ 常驻低优先级通知
+26. **锁屏/灭屏返回 null**：Android 11+ 未解锁时 `queryEvents`/`queryUsageStats` 返回 null——轮询必须处理（保持上一快照，不计入"无前台"）
+27. **Play 政策红线**：受限权限须声明 + 隐私政策 + Data safety + 用户知情授权；**绝不使用 AccessibilityService 做追踪**（非无障碍用途直接拒审/下架）
 
 ### 配置与安全
 18. **.gitignore 提前写好**：不提交 SUPABASE_URL/ANON_KEY、AI key、本地 *.sqlite、dist/ 构建产物
@@ -130,6 +157,7 @@ TimeTrack2/lib/
 20. **功能等价对照**：计时/跨天/撤销/同步/分类/更新六类核心行为逐项打勾验收
 21. **更新流程人工冒烟**（阶段 5 必做）：检查→下载进度→SHA-256 校验→Windows staging→重启生效 / Android ACTION_VIEW→失败兜底浏览器打开 Releases
 22. **双平台布局验证**：分类树选择器、统计树维度、更新进度卡在 compact/medium/expanded 三宽度无溢出（沿用老项目 adaptive_layout_test 思路）
+28. **后台自动记录验收**（阶段 5 必做）：Windows 前台检测冒烟（切应用自动记/规则命中/不匹配忽略）、Android 授权引导 + 前台服务常驻 + 锁屏 null 处理；Play 受限权限声明 + 隐私政策 + Data safety 落文档
 
 ## 保留不变式（行为级）
 1. 离线优先：读写先落本地 SQLite，云/LAN 异步不阻塞
@@ -143,6 +171,7 @@ TimeTrack2/lib/
 9. dataRevision 驱动 UI 缓存失效（分类变更必须递增）
 10. LAN 主机手动启动
 11. 保留期清理 + 定期 VACUUM 控制数据增长
-12. 全部操作经 CLI 指令系统统一分发（UI/快捷键/AI 收敛同一通道）
+12. 全部操作经 CLI 指令系统统一分发（UI/快捷键/AI/自动记录收敛同一通道）
 13. 更新系统：数据与程序目录分离；下载校验一致才安装；失败逐层降级兜底浏览器；强制更新不可跳过
 14. 分类层级：删除父分类递归软删子孙；分类/事项选择合并交互；树统计覆盖全屏宽
+15. 后台自动记录：不破坏手动计时（自动条目带 is_auto 标记可区分/可清理）；未匹配规则不产生碎片条目；Android 未授权不采集

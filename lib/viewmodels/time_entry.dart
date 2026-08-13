@@ -19,6 +19,7 @@ class TimeEntry {
     required this.deviceId,
     required this.updatedAt,
     this.deletedAt,
+    this.isAuto = false,
   }) : assert(
           endAt == null || !endAt.isBefore(startAt),
           'end_at 不能早于 start_at',
@@ -49,6 +50,10 @@ class TimeEntry {
   final String deviceId;
   final DateTime updatedAt;
   final DateTime? deletedAt;
+
+  /// 自动生成标记（后台前台检测自动记录 vs 手动计时）：统计排除/批量清理/
+  /// 防误编辑的判定依据。缺键容错回退 false（旧数据/旧 bundle 无此字段）。
+  final bool isAuto;
 
   bool get isRunning => endAt == null;
 
@@ -122,6 +127,7 @@ class TimeEntry {
     DateTime? updatedAt,
     DateTime? deletedAt,
     bool clearDeletedAt = false,
+    bool? isAuto,
   }) {
     return TimeEntry(
       id: id ?? this.id,
@@ -137,6 +143,7 @@ class TimeEntry {
       deviceId: deviceId ?? this.deviceId,
       updatedAt: updatedAt ?? this.updatedAt,
       deletedAt: clearDeletedAt ? null : deletedAt ?? this.deletedAt,
+      isAuto: isAuto ?? this.isAuto,
     );
   }
 
@@ -153,6 +160,7 @@ class TimeEntry {
       'device_id': deviceId,
       'updated_at': updatedAt.toUtc().toIso8601String(),
       'deleted_at': deletedAt?.toUtc().toIso8601String(),
+      'is_auto': isAuto,
     };
   }
 
@@ -188,6 +196,7 @@ class TimeEntry {
       deviceId: readString(map['device_id'], fallback: 'unknown'),
       updatedAt: readDateTime(map['updated_at']),
       deletedAt: readNullableDateTime(map['deleted_at']),
+      isAuto: readBool(map['is_auto']),
     );
   }
 }

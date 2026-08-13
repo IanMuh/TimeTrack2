@@ -10,18 +10,21 @@ import 'package:timetrack2/data/repositories/activity_repository.dart';
 import 'package:timetrack2/data/repositories/category_repository.dart';
 import 'package:timetrack2/data/repositories/settings_repository.dart';
 import 'package:timetrack2/data/repositories/time_entry_repository.dart';
+import 'package:timetrack2/data/repositories/tracking_rule_repository.dart';
 import 'package:timetrack2/viewmodels/action_log.dart';
 import 'package:timetrack2/viewmodels/activity.dart';
 import 'package:timetrack2/viewmodels/activity_category.dart';
 import 'package:timetrack2/viewmodels/profile_settings.dart' as settings_vm;
 import 'package:timetrack2/viewmodels/time_entry.dart';
+import 'package:timetrack2/viewmodels/tracking_rule.dart';
 
 import 'memory_remote.dart';
 
 /// 云同步测试环境：内存库 + 内存远端 + 引擎。
 class CloudHarness {
   CloudHarness._(this.db, this.activities, this.categories, this.settings,
-      this.actionLogs, this.entries, this.statusStore, this.remote, this.engine);
+      this.actionLogs, this.entries, this.statusStore, this.remote, this.engine,
+      this.trackingRules);
 
   static CloudHarness create({int pageSize = 999}) {
     final remote = MemoryRemote();
@@ -50,6 +53,7 @@ class CloudHarness {
       settingsRepository: settings,
     );
     final statusStore = SyncStatusStore(database: db);
+    final trackingRules = TrackingRuleRepository(database: db);
     final engine = CloudSyncEngine(
       database: db,
       gateway: remote,
@@ -59,10 +63,11 @@ class CloudHarness {
       timeEntries: entries,
       actionLogs: actionLogs,
       settings: settings,
+      trackingRules: trackingRules,
       pageSize: pageSize,
     );
     return CloudHarness._(db, activities, categories, settings, actionLogs,
-        entries, statusStore, remote, engine);
+        entries, statusStore, remote, engine, trackingRules);
   }
 
   final AppDatabase db;
@@ -74,6 +79,7 @@ class CloudHarness {
   final SyncStatusStore statusStore;
   final MemoryRemote remote;
   final CloudSyncEngine engine;
+  final TrackingRuleRepository trackingRules;
 
   /// 引擎单用户测试的约定用户：与 memory_remote 的 seed 默认归属同源
   ///（seed 未显式带 user_id 的行注入该值；两处共享单一事实来源防漂移）。
@@ -1162,6 +1168,128 @@ void main() {
           expect(row['user_id'], CloudHarness.userId,
               reason: '日志推送补填 user_id');
         }
+      } finally {
+        await h.close();
+      }
+    });
+  });
+
+  group('CloudSyncEngine 推送（分类/规则）', () {
+    test('tracking_rules：sync_enabled=true 规则推送/拉取，false 仅存本地（模块 2c-foreground）', () async {
+      final h = CloudHarness.create();
+      try {
+        // 规则 activity_id 引用 activities（本地 FK ON）——先落本地活动，
+        // 否则本地 saveRule 因 FK 悬挂失败。**不做远端 seed**：远端活动由
+        // 首轮同步的 activities 推送建立（引擎表顺序 activities → … →
+        // tracking_rules 与 FK 依赖方向一致）；云端引用完整性由
+        // validate_tracking_rule_ref 触发器兜底（mock 不模拟触发器，顺序
+        // 契约由本用例的活动先推送 + 引擎表序隐式保证）。
+        await h.db.into(h.db.activities).insert(
+              ActivitiesCompanion.insert(
+                id: 'rule-activity',
+                userId: const Value(null),
+                name: '规则活动',
+                color: 0xff2563eb,
+                isFavorite: const Value(false),
+                // 固定 UTC 时刻（与远端活动同刻，防首轮 LWW 冲突随机器时区
+                // 胜负不定——DateTime.utc 与 toMap 归一化一致）。
+                updatedAt: '2026-08-12T10:00:00.000000Z',
+              ),
+            );
+        // 本地同步规则（sync_enabled=true）+ 本地-only 规则（sync_enabled=false）
+        final t0 = DateTime.utc(2026, 8, 12, 4);
+        await h.trackingRules.saveRule(
+          TrackingRule(
+            id: 'r-sync',
+            pattern: 'chrome.exe',
+            matchKind: TrackingRuleMatchKind.process,
+            activityId: 'rule-activity',
+            syncEnabled: true,
+            updatedAt: t0,
+          ),
+        );
+        await h.trackingRules.saveRule(
+          TrackingRule(
+            id: 'r-local',
+            pattern: 'secret-app.exe',
+            matchKind: TrackingRuleMatchKind.process,
+            activityId: 'rule-activity',
+            syncEnabled: false,
+            updatedAt: t0.add(const Duration(minutes: 1)),
+          ),
+        );
+
+        await h.engine.syncNow(userId: CloudHarness.userId);
+
+        // 推送：sync_enabled=true 的规则上云并补填 user_id；false 的规则不进远端
+        final remoteRules = h.remote.tables[RemoteTables.trackingRules];
+        expect(remoteRules, isNotNull, reason: 'tracking_rules 应推送到远端');
+        expect(remoteRules!.containsKey('r-sync'), isTrue,
+            reason: 'sync_enabled=true 规则上云');
+        expect(remoteRules['r-sync']!['user_id'], CloudHarness.userId,
+            reason: '规则推送补填 user_id');
+        expect(remoteRules['r-sync']!['sync_enabled'], true,
+            reason: 'sync_enabled 字段保真');
+        // **字段级往返一致性（r8）**：防推送时字段截断/改写/归一化错误
+        //（如 match_kind 序列化丢失、activity_id 缺失）被忽略。
+        final pushedRule = remoteRules['r-sync']!;
+        expect(pushedRule['pattern'], 'chrome.exe',
+            reason: 'pattern 推送保真');
+        expect(pushedRule['match_kind'], 'process',
+            reason: 'match_kind 推送保真（storageValue）');
+        expect(pushedRule['activity_id'], 'rule-activity',
+            reason: 'activity_id 推送保真');
+        expect(
+          pushedRule['updated_at'],
+          t0.toUtc().toIso8601String(),
+          reason: 'updated_at 推送保真（toMap 归一化与本地一致）',
+        );
+        expect(remoteRules.containsKey('r-local'), isFalse,
+            reason: 'sync_enabled=false 规则不进远端（本地偏好不泄漏到云）');
+
+        // 拉取：远端规则 → 本地 LWW 应用（含补填归属 + 快照）。
+        // updatedAt 须**晚于**第一次同步推进的游标（增量窗口 >= since），
+        // 且落在 markSuccess 合理性容差内（now+2min < now+5min）——与
+        // profile_settings 拉回用例同模式。
+        final remoteRule = TrackingRule(
+          id: 'r-remote',
+          pattern: 'code.exe',
+          matchKind: TrackingRuleMatchKind.process,
+          activityId: 'rule-activity',
+          syncEnabled: true,
+          userId: CloudHarness.userId,
+          updatedAt: DateTime.now().toUtc().add(const Duration(minutes: 2)),
+        );
+        h.remote.seed(RemoteTables.trackingRules, remoteRule.toMap());
+        await h.engine.syncNow(userId: CloudHarness.userId);
+        final localRule = await h.trackingRules.ruleById('r-remote');
+        expect(localRule, isNotNull, reason: '远端规则拉回本地');
+        expect(localRule!.pattern, 'code.exe');
+        expect(localRule.syncEnabled, isTrue);
+        // 本地-only 规则仍保留（拉取不覆盖本地 sync_enabled=false 的规则）
+        final localOnly = await h.trackingRules.ruleById('r-local');
+        expect(localOnly, isNotNull, reason: '本地-only 规则不被远端影响');
+        expect(localOnly!.syncEnabled, isFalse);
+
+        // **同 id 远端残留副本不覆盖本地-only 规则（r1）**：用户曾同步过该
+        // 规则（远端残留副本）、随后本地关闭同步，另一设备仍编辑该规则（远端
+        // updated_at 更晚）——拉取不得把本地已关闭的规则覆盖回 sync_enabled=
+        // true（防本地偏好被远端静默改回同步后重新上云）。
+        final remoteStale = TrackingRule(
+          id: 'r-local', // 与本地-only 规则同 id
+          pattern: 'secret-app.exe',
+          matchKind: TrackingRuleMatchKind.process,
+          activityId: 'rule-activity',
+          syncEnabled: true,
+          userId: CloudHarness.userId,
+          updatedAt: DateTime.now().toUtc().add(const Duration(minutes: 2)),
+        );
+        h.remote.seed(RemoteTables.trackingRules, remoteStale.toMap());
+        await h.engine.syncNow(userId: CloudHarness.userId);
+        final preserved = await h.trackingRules.ruleById('r-local');
+        expect(preserved, isNotNull, reason: '同 id 远端残留不得删除本地-only 规则');
+        expect(preserved!.syncEnabled, isFalse,
+            reason: '远端更晚副本不得把本地-only 规则覆盖回同步（本地偏好保留）');
       } finally {
         await h.close();
       }
