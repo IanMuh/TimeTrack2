@@ -77,11 +77,7 @@ void main() {
       for (final toEmpty in [' ', ' . ']) {
         final err = WindowsInstaller.stagingNameError(toEmpty);
         expect(err, isNotNull, reason: '$toEmpty 非法');
-        expect(
-          err,
-          contains('裁剪后为空'),
-          reason: '$toEmpty 折叠为空串，须命中空分支',
-        );
+        expect(err, contains('裁剪后为空'), reason: '$toEmpty 折叠为空串，须命中空分支');
       }
     });
 
@@ -429,6 +425,67 @@ void main() {
       }
     });
 
+    test('zip bomb 防护：目录条目也计入条目数上限（r19）', () async {
+      // r19 修正：只计文件条目会让"海量目录条目"包在 decodeBytes 阶段物化
+      // 海量 ArchiveFile 对象而 fileCount 恒为 0——上限形同虚设（OOM 风险）。
+      // 目录条目统一计数且检查在任何 content 解压前。
+      final root = await Directory.systemTemp.createTemp('win_dircount');
+      final program = Directory('${root.path}/program')..createSync();
+      final data = Directory('${root.path}/data')..createSync();
+      try {
+        // 3 个目录条目 + 1 个文件 = 4 条 > maxEntryCount(3) → 拒绝。
+        final dirHeavy = Archive();
+        for (var i = 0; i < 3; i++) {
+          dirHeavy.addFile(ArchiveFile('d$i/', 0, const <int>[])); // 目录条目
+        }
+        dirHeavy.addFile(ArchiveFile.string('f.txt', 'x'));
+        final zipPath = '${root.path}/dirs.zip';
+        File(zipPath).writeAsBytesSync(ZipEncoder().encode(dirHeavy));
+        final result = await WindowsInstaller(
+          programDir: program.path,
+          dataDir: data.path,
+          maxEntryCount: 3,
+        ).prepareStaging(zipPath);
+        expect(result.isSuccess, isFalse, reason: '目录条目计入条目数上限');
+      } finally {
+        await root.delete(recursive: true);
+      }
+    });
+
+    test('applyStaging：误传 programDir 本身 → 拒绝且未改动程序目录（r19）', () async {
+      // r19 防御性校验：applyStaging 须严格接收 prepareStaging 返回的 staging
+      // 路径。若误传 programDir 本身，旧逻辑会清空程序目录、renameSync 到自身
+      // no-op、deleteSync 连备份一并删除并返回成功（不可恢复灾难）——现按
+      // 规范化绝对路径校验直接拒绝。
+      final root = await Directory.systemTemp.createTemp('win_misuse');
+      final program = Directory('${root.path}/program')..createSync();
+      final data = Directory('${root.path}/data')..createSync();
+      File('${program.path}/app.exe').writeAsStringSync('old');
+      final staging = Directory('${program.path}/staging')..createSync();
+      File('${staging.path}/app.exe').writeAsStringSync('new');
+      try {
+        final installer = WindowsInstaller(
+          programDir: program.path,
+          dataDir: data.path,
+        );
+        final result = await installer.applyStaging(program.path);
+        expect(result.isSuccess, isFalse, reason: '误传程序目录拒绝');
+        expect(
+          File('${program.path}/app.exe').readAsStringSync(),
+          'old',
+          reason: '程序目录未改动（未清空/未删除）',
+        );
+        // 残留 staging 目录在拒绝路径未被动过（仍存在，可正常安装）。
+        expect(
+          Directory('${program.path}/staging').existsSync(),
+          isTrue,
+          reason: '拒绝路径不清理 staging（调用方仍可修复后重试）',
+        );
+      } finally {
+        await root.delete(recursive: true);
+      }
+    });
+
     test('applyStaging：备份 → 清空 → 移入 → 删备份（安装成功）', () async {
       final root = await Directory.systemTemp.createTemp('win_apply');
       final program = Directory('${root.path}/program')..createSync();
@@ -663,6 +720,35 @@ void main() {
         throwsArgumentError,
         reason: '`%2E%2E%2F` 编码穿越段拒绝',
       );
+      // **r19**：Dart Uri 把 authority 的 host 部分规范化为小写——同一实例产出
+      // 的 URI 经自身校验必须通过（往返不断裂）。
+      expect(
+        installer.installIntentFor(installer.apkContentUri('app.apk')),
+        isNotNull,
+        reason: '同一实例产出的 URI 通过自身校验',
+      );
+    });
+
+    test('installValidatedApk 单一安全入口（r19）：校验→URI→Intent 一体', () async {
+      // 单一入口：内部依次 ensureApkValid → apkContentUri → installIntentFor，
+      // 防调用方绕过校验直接构造 GRANT 意图暴露 cache 根之外的文件。
+      final dir = await Directory.systemTemp.createTemp('android_validated');
+      const installer = AndroidInstaller();
+      try {
+        File('${dir.path}/app.apk').writeAsBytesSync([1, 2, 3]);
+        final ok = installer.installValidatedApk('${dir.path}/app.apk');
+        expect(ok.isSuccess, isTrue, reason: '有效 APK 产出安装意图');
+        final intent = ok.requireValue();
+        expect(intent.action, 'android.intent.action.VIEW');
+        expect(intent.dataUri, startsWith('content://'));
+        expect(intent.flags, 0x00000001);
+
+        // 缺失文件 → 可读失败（不产出部分结果）
+        final missing = installer.installValidatedApk('${dir.path}/nope.apk');
+        expect(missing.isSuccess, isFalse, reason: '缺失文件失败');
+      } finally {
+        await dir.delete(recursive: true);
+      }
     });
 
     test('content URI 文件名编码（r2）：特殊字符编码 / `..` 拒绝', () {

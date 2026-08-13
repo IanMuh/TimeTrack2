@@ -13,7 +13,7 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show SocketException, stderr;
+import 'dart:io' show HttpException, SocketException, TlsException, stderr;
 
 import 'package:http/http.dart' as http;
 
@@ -108,6 +108,15 @@ class UpdateManifestService {
     } on SocketException {
       if (_closed) return const AppFailure('更新服务已关闭，请重新创建');
       return const AppFailure('网络不可用，请稍后重试');
+    } on HttpException {
+      // **r19 补充**：http 包仅把 send 阶段与部分流中错误包装为 ClientException、
+      // 其余透传——dart:io 的 HttpException/TlsException（含握手失败、证书校验
+      // 失败）会直接逃逸（与下载器/supabase_remote_tables 既有处理一致）。
+      if (_closed) return const AppFailure('更新服务已关闭，请重新创建');
+      return const AppFailure('网络不可用，请稍后重试');
+    } on TlsException {
+      if (_closed) return const AppFailure('更新服务已关闭，请重新创建');
+      return const AppFailure('网络不可用，请稍后重试');
     } on http.ClientException {
       if (_closed) return const AppFailure('更新服务已关闭，请重新创建');
       return const AppFailure('网络不可用，请稍后重试');
@@ -126,8 +135,12 @@ class UpdateManifestService {
     }
     final UpdateManifest manifest;
     try {
+      // **显式 UTF-8 解码（r19）**：response.body 按响应头 charset 解码、未
+      // 指定时默认 latin-1（JSON 规范要求 UTF-8）——清单服务器只发
+      // application/json 无 charset 时中文 releaseNotes 会乱码。按 bodyBytes
+      // 显式 utf8 解码。
       manifest = UpdateManifest.fromMap(
-        jsonDecode(response.body) as Map<String, Object?>,
+        jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, Object?>,
       );
     } on FormatException catch (e) {
       return AppFailure('更新清单解析失败：${e.message}');
@@ -166,9 +179,14 @@ class UpdateManifestService {
       return AppSuccess(_none(manifest));
     }
     // "忽略此版本"：用户选择忽略的版本不再提示（远端 ≤ 已忽略版本即跳过）。
+    // **强制更新不受忽略影响（r19）**：required=true 语义为"不可跳过"——强制/
+    // 安全更新若被用户此前忽略过会静默跳过，违背设计。required 时不读忽略
+    // 版本、直接判为可用更新。
     // **脏数据容错**：本地忽略版本可能被写入非 SemVer（旧数据/手动改库）——
     // 解析失败视为"未忽略"，继续走更新判定（不崩溃）。
-    final ignored = await _readString(AppMetadataKeys.ignoredUpdateVersion);
+    final ignored = manifest.required
+        ? null
+        : await _readString(AppMetadataKeys.ignoredUpdateVersion);
     if (ignored != null) {
       try {
         if (!(AppVersion.parse(ignored) < remote)) {

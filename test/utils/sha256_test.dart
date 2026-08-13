@@ -193,7 +193,7 @@ void main() {
       );
     });
 
-    test('零长度块与首块前出错（下载流强相关边界，r15）', () async {
+    test('零长度块不影响哈希（下载流强相关边界，r15/r19 拆分）', () async {
       // HTTP chunked 传输可能产出空块——`sink.add([])` 不影响累积结果。
       expect(
         await sha256Stream(
@@ -202,6 +202,9 @@ void main() {
         _sha256Abc,
         reason: '零长度块不影响哈希',
       );
+    });
+
+    test('首块前出错向上传播（下载流强相关边界，r15/r19 拆分）', () async {
       // 首块数据前即出错（连接立即失败）——异常路径在空哈希状态也能正确关闭。
       final earlyFail = StreamController<List<int>>();
       earlyFail

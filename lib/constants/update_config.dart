@@ -47,6 +47,11 @@ class UpdateConfig {
   /// 检查超时（网络请求）。
   static const checkTimeout = Duration(seconds: 8);
 
+  /// **下载响应头等待超时（r19）**：独立于 checkTimeout（后者面向清单检查
+  /// 场景、8s 偏紧）——大更新包服务器生成响应可能更慢。与 downloadStreamTimeout
+  /// （体超时）配套：头超时 / 体超时语义分离。
+  static const downloadHeaderTimeout = Duration(seconds: 30);
+
   /// 下载失败指数退避重试次数（校验失败删重下，不占此次数）。
   static const downloadRetryCount = 3;
 

@@ -204,13 +204,22 @@ class UpdateDownloader {
       throw const FormatException('仅支持 http/https');
     }
     final request = http.Request('GET', uri);
-    // **超时边界（r9 注明）**：`Future.timeout` 不取消底层 send——超时后原始
-    // 请求仍可能稍后返回 StreamedResponse，本方法已返回失败/进入重试、无法
-    // 消费该迟到响应；连接由 http 包 idle 超时兜底回收（已知边界，慢网络 +
-    // 重试场景可堆积少量连接，属可接受权衡）。
+    // **显式请求 identity 编码（r19）**：dart:io HttpClient 默认
+    // autoUncompress=true——若服务器对产物加 `Content-Encoding: gzip`，流内
+    // 是解压后字节（与清单 SHA-256 口径一致）而 contentLength 是压缩后大小，
+    // 进度回调出现 received > totalBytes、DownloadResult.totalBytes 与真实文件
+    // 字节数不一致。zip/apk 产物本已压缩、二次压缩无意义——显式 Accept-Encoding:
+    // identity 使 dart:io 不自动解压（该头被显式提供时 HttpClient 尊重客户端）。
+    request.headers['accept-encoding'] = 'identity';
+    // **下载超时边界（r11/r19）**：`Future.timeout` 不取消底层 send——超时后
+    // 原始请求仍可能稍后返回 StreamedResponse，本方法已返回失败/进入重试、
+    // 无法消费该迟到响应；连接由 http 包 idle 超时兜底回收（已知边界，慢网络
+    // + 重试场景可堆积少量连接，属可接受权衡）。**独立超时常量（r19）**：响应
+    // 头等待超时用 downloadHeaderTimeout 而非 checkTimeout（后者面向清单检查
+    // 场景、8s 偏紧——大更新包服务器生成响应可能更慢）。
     final response = await _http
         .send(request)
-        .timeout(UpdateConfig.checkTimeout);
+        .timeout(UpdateConfig.downloadHeaderTimeout);
     // **4xx 不重试**（永久性错误）：抛专用异常，download() 直接失败带状态码。
     // 5xx 也先不重试（本模块传输层保守——调用方编排层可整体重试）。
     if (response.statusCode != 200) {
@@ -219,6 +228,19 @@ class UpdateDownloader {
       // 未捕获的异步异常（Flutter 全局错误/测试直接失败）；异步进行、不阻塞抛错。
       response.stream.drain<void>().ignore();
       throw HttpStatusException(response.statusCode);
+    }
+    // **下载总字节上限（r19）**：`downloadStreamTimeout` 只是相邻 chunk 间的
+    // 空闲超时——恶意/被入侵服务器可持续以不触顶超时的速率流式发送，写满
+    // 系统临时目录造成磁盘耗尽。**响应头前置检查**：contentLength 已知即先拒
+    //（超限直接失败，不等流消费）；流式消费中累计 received 超过上限即中断
+    //（覆盖无 Content-Length 的分块响应）。上限复用
+    // [UpdateConfig.maxCompressedBytes]（与安装器"压缩后大小上限"同口径——
+    // 传输层先于解压层拦截）。
+    final declaredTotal = response.contentLength;
+    if (declaredTotal != null &&
+        declaredTotal > UpdateConfig.maxCompressedBytes) {
+      response.stream.drain<void>().ignore();
+      throw const FormatException('更新包体积超上限');
     }
     final sink = file.openWrite();
     var received = 0;
@@ -229,25 +251,36 @@ class UpdateDownloader {
     try {
       // **流读取超时**：响应头已返回但流挂起/断流不报错会无限等待——
       // 给整个流消费过程设独立超时（.timeout 包住 await for 的 future）。
-      await response.stream.timeout(UpdateConfig.downloadStreamTimeout).forEach(
-        (chunk) {
-          sink.add(chunk);
-          received += chunk.length;
-          shaBuilder.add(chunk);
-          // **onProgress 异常隔离（r14/r16）**：UI 层回调抛错不应归因下载失败/
-          // 触发重试——只记录不中断；stderr 写自身保护（已关闭/管道断开时
-          // writeln 再抛——包一层防逃逸，保"恒返回 AppResult"）。
+      // **用 await for 而非 forEach（r19）**：forEach 回调内 throw 不进入返回
+      // 的 future（逃逸为未捕获异步异常）——上限检查须在循环体（await for
+      // 的异常正常传播）执行。
+      await for (final chunk in response.stream.timeout(
+        UpdateConfig.downloadStreamTimeout,
+      )) {
+        sink.add(chunk);
+        received += chunk.length;
+        shaBuilder.add(chunk);
+        // **总字节上限流式检查（r19）**：超出即中断下载（防分块响应无
+        // Content-Length 时绕过前置检查写满磁盘）。**抛 FormatException（与
+        // 前置检查同类型）而非 StateError（r19）**：StateError 是 Error 非
+        // Exception——catch(_) rethrow 后 download() 的 `on Exception` 分类
+        // 分支不匹配、直接从 download() 逃逸破坏"恒返回 AppResult"契约。
+        if (received > UpdateConfig.maxCompressedBytes) {
+          throw const FormatException('更新包体积超上限');
+        }
+        // **onProgress 异常隔离（r14/r16）**：UI 层回调抛错不应归因下载失败/
+        // 触发重试——只记录不中断；stderr 写自身保护（已关闭/管道断开时
+        // writeln 再抛——包一层防逃逸，保"恒返回 AppResult"）。
+        try {
+          onProgress?.call(received, declaredTotal);
+        } catch (e) {
           try {
-            onProgress?.call(received, response.contentLength);
-          } catch (e) {
-            try {
-              stderr.writeln('[update] 进度回调异常（忽略）：$e');
-            } catch (_) {
-              // 日志写入失败不影响下载。
-            }
+            stderr.writeln('[update] 进度回调异常（忽略）：$e');
+          } catch (_) {
+            // 日志写入失败不影响下载。
           }
-        },
-      );
+        }
+      }
       await sink.close();
       closed = true;
     } catch (_) {

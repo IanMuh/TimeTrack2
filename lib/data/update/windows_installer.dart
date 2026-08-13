@@ -153,12 +153,15 @@ class WindowsInstaller {
       var fileCount = 0;
       var totalUncompressed = 0;
       for (final file in archive.files) {
+        // **条目数对全部条目计数（r19）**：只计文件条目会让"几十万条 d0/、
+        // d1/… 目录条目"的包在 decodeBytes 阶段即物化海量 ArchiveFile 对象、
+        // fileCount 恒为 0——上限形同虚设（OOM 风险）。文件+目录统一计数，
+        // 且检查位于任何 content 解压之前（上限检查先于惰性解压）。
+        fileCount += 1;
+        if (fileCount > maxEntryCount) {
+          throw StateError('更新包条目数超上限');
+        }
         if (file.isFile) {
-          fileCount += 1;
-          // 条目数上限（r13）：海量小条目攻击（每条目小、条目极多耗内存/CPU）。
-          if (fileCount > maxEntryCount) {
-            throw StateError('更新包条目数超上限');
-          }
           final name = file.name;
           // zip-slip 防护：拒绝路径穿越（`..` 段/绝对路径/盘符路径/尾部空格
           // 规范化绕过/保留设备名）——否则恶意 zip 可把文件写入 staging 之外
@@ -195,7 +198,10 @@ class WindowsInstaller {
         }
       }
       if (fileCount == 0) {
-        throw StateError('更新包为空（无任何文件）');
+        // **空包判定（r19）**：无任何条目（文件或目录）——防 applyStaging
+        // 把程序目录清空成空壳；仅含目录条目的包 fileCount>0 不在此拦截
+        //（staging 无文件可写，applyStaging 的"递归含普通文件"守卫会拒绝）。
+        throw StateError('更新包为空（无任何条目）');
       }
       return AppSuccess(staging.path);
     } catch (e) {
@@ -221,6 +227,19 @@ class WindowsInstaller {
   /// - **安装阶段**（清空 + 移入 + 删备份）：备份已确认完整后才开始，失败才
   ///   走回滚（清空与恢复各自独立 try）。
   Future<AppResult<void>> applyStaging(String stagingPath) async {
+    // **staging 路径防御性校验（r19）**：入参必须严格等于
+    // `$programDir/<windowsStagingDirName>`（prepareStaging 的返回值）——若
+    // 阶段 3/4 启动逻辑误传 programDir 本身，前置守卫照样通过（其含普通文件），
+    // 随后 _clearProgramDir 清空程序目录、staging.listSync 仅剩备份、renameSync
+    // 到自身为 no-op、deleteSync(recursive) 连备份一并删除并返回成功——程序
+    // 目录被清空且备份销毁、不可恢复。按规范化绝对路径比较（防相对路径/尾斜杠
+    // 差异绕过），不符直接失败（未改动程序目录）。
+    final expectedStaging = Directory(
+      '$programDir/${UpdateConfig.windowsStagingDirName}',
+    ).absolute.path;
+    if (Directory(stagingPath).absolute.path != expectedStaging) {
+      return const AppFailure('安装暂存路径非法（须为程序目录下的 staging 目录），已中止（未改动程序目录）');
+    }
     final staging = Directory(stagingPath);
     final backupDir = Directory(
       '$programDir/.backup-${DateTime.now().millisecondsSinceEpoch}',
@@ -296,6 +315,33 @@ class WindowsInstaller {
       } on FileSystemException {
         // 备份保留（供手动清理/回滚），安装成功结论不变。
       }
+      // **陈旧备份清理（r19）**：历史上回滚失败/清理失败残留的 `.backup-*`
+      // 永不被回收（备份/清空都排除之、本次只删当前 backupDir）——多次失败
+      // 长期累积陈旧备份占用磁盘。成功安装后 best-effort 清理其它 `.backup-*`
+      //（仅保留最新一个供短窗口内手动回滚，防误删仍在用的最新备份）。
+      try {
+        final stale =
+            Directory(programDir)
+                .listSync(followLinks: false)
+                .where(
+                  (e) =>
+                      e is Directory &&
+                      e.path.startsWith('$programDir/.backup-'),
+                )
+                .where((e) => e.path != backupDir.path)
+                .toList()
+              ..sort(
+                (a, b) =>
+                    b.uri.pathSegments.last.compareTo(a.uri.pathSegments.last),
+              );
+        if (stale.isNotEmpty) {
+          for (final old in stale.skip(1)) {
+            old.deleteSync(recursive: true);
+          }
+        }
+      } on FileSystemException {
+        // 清理失败不影响安装成功结论。
+      }
       return const AppSuccess(null);
     } catch (e) {
       // **安装阶段回滚（r2 修正）**：清空与恢复各自独立 try——清空失败
@@ -336,10 +382,14 @@ class WindowsInstaller {
   }
 
   /// 目录是否**递归含至少一个普通文件**（防仅含空子目录的 staging 通过守卫）。
+  /// `followLinks: false`（r19）：目录符号链接/联接不被视为目录递归（防指向
+  /// 外部目录的链接被递归扫描/跟随），**Link 条目不算普通文件**（staging 仅含
+  /// 链接+空目录时守卫须拒绝——链接不是可安装内容）。
   static bool _containsRegularFile(Directory dir) {
-    for (final entry in dir.listSync()) {
+    for (final entry in dir.listSync(followLinks: false)) {
       if (entry is File) return true;
       if (entry is Directory && _containsRegularFile(entry)) return true;
+      // Link：跳过（不跟随、不算普通文件）。
     }
     return false;
   }
@@ -397,7 +447,7 @@ class WindowsInstaller {
   static String _basename(String path) => path.split(RegExp(r'[\\/]')).last;
 
   void _clearProgramDir() {
-    for (final entry in Directory(programDir).listSync()) {
+    for (final entry in Directory(programDir).listSync(followLinks: false)) {
       final name = _basename(entry.path);
       if (name == UpdateConfig.windowsStagingDirName) continue;
       if (name.startsWith('.backup-')) continue;
@@ -411,7 +461,7 @@ class WindowsInstaller {
     required Set<String> exclude,
   }) {
     to.createSync(recursive: true);
-    for (final entry in from.listSync()) {
+    for (final entry in from.listSync(followLinks: false)) {
       final name = _basename(entry.path);
       // 备份目录本身在源（programDir）内——复制时必须排除（否则备份被递归
       // 复制进自己形成无限嵌套，且误删最深副本时抛 PathNotFound）。
@@ -427,6 +477,22 @@ class WindowsInstaller {
           override(entry.path, target.path);
         } else {
           entry.copySync(target.path);
+        }
+      } else if (entry is Link) {
+        // **备份链接本身而非指向目标（r19）**：默认跟随会复制链接目标内容
+        //（程序目录内指向外部的联接把整个外部目录拷入备份）、循环联接无限
+        // 递归；备份链接本身使回滚重建链接（保持原状语义）。
+        if (!_isUnsafePath(name)) {
+          final fromLink = Link(entry.path);
+          final toLink = Link(target.path);
+          try {
+            final targetPath = fromLink.targetSync();
+            toLink.parent.createSync(recursive: true);
+            toLink.createSync(targetPath);
+          } on FileSystemException {
+            // 链接目标读取/创建失败：跳过备份（链接丢失经回滚恢复不了该条目
+            // ——与"损坏链接静默跳过"一致，此处显式不中断安装）。
+          }
         }
       }
     }

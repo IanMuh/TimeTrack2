@@ -184,6 +184,35 @@ void main() {
       }
     });
 
+    test('下载总字节上限（r19）：声明超限前置拒绝 / 分块流超限流式中断且无残留', () async {
+      final dir = await Directory.systemTemp.createTemp('dl_cap');
+      try {
+        // 场景 A：响应头 contentLength 超 maxCompressedBytes → send 后立即
+        // 前置拒绝（不写盘）。
+        final declaredOver = _DeclaredOverLimitClient();
+        final downloaderA = UpdateDownloader(
+          tempDirectory: dir,
+          retryCount: 3,
+          httpClient: declaredOver,
+        );
+        final resultA = await downloaderA.download('https://x.example/app.zip');
+        expect(resultA.isSuccess, isFalse, reason: '声明超限失败');
+        expect(declaredOver.calls, 1, reason: '4xx/超限不重试');
+        // 场景 B：分块流实际超限（声明 contentLength 小、实际持续发送）→
+        // 流式累计检查中断下载、半成品清理、无残留。
+        final downloaderB = UpdateDownloader(
+          tempDirectory: dir,
+          retryCount: 0,
+          httpClient: _OversizeChunkedHttpClient(),
+        );
+        final resultB = await downloaderB.download('https://x.example/app.zip');
+        expect(resultB.isSuccess, isFalse, reason: '分块流超限失败');
+        expect(dir.listSync(), isEmpty, reason: '超限中断后半成品已清理（无残留）');
+      } finally {
+        await dir.delete(recursive: true);
+      }
+    });
+
     test('非法 URL（FormatException）→ 可读失败且不触达网络（r9）', () async {
       final dir = await Directory.systemTemp.createTemp('dl_badurl');
       var calls = 0;
@@ -452,6 +481,51 @@ class _ChunkedHttpClient extends http.BaseClient {
       controller.stream,
       200,
       contentLength: total,
+      headers: {'content-type': 'application/octet-stream'},
+      request: request,
+    );
+  }
+}
+
+/// 分块流总字节数超上限 client（r19）：声明 contentLength 为小值、实际分块
+/// 超上限持续发送（模拟无 Content-Length 的分块响应绕过前置检查）。
+class _OversizeChunkedHttpClient extends http.BaseClient {
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    final controller = StreamController<List<int>>();
+    // 分块持续发送至超上限 250MB（> maxCompressedBytes 200MB；downloadStreamTimeout
+    // 是相邻块空闲超时——只要持续推块不触顶；流式累计检查须在超限时中断下载、
+    // 清理半成品）。逐块消费峰值内存小，写到约 200MB 即中断。
+    for (var i = 0; i < 250; i++) {
+      controller.add(List<int>.filled(1024 * 1024, 7));
+    }
+    controller.close();
+    return http.StreamedResponse(
+      controller.stream,
+      200,
+      contentLength: 1, // 前置检查按声明（1 字节）通过——实际流超限由流式检查拦。
+      headers: {'content-type': 'application/octet-stream'},
+      request: request,
+    );
+  }
+}
+
+/// 响应头 contentLength 超上限 client（r19）：send 后即返回超限声明——下载器
+/// 前置检查须在流消费前拒绝（不写盘）。
+class _DeclaredOverLimitClient extends http.BaseClient {
+  int _calls = 0;
+
+  int get calls => _calls;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    _calls += 1;
+    final controller = StreamController<List<int>>();
+    controller.close();
+    return http.StreamedResponse(
+      controller.stream,
+      200,
+      contentLength: UpdateConfig.maxCompressedBytes + 1,
       headers: {'content-type': 'application/octet-stream'},
       request: request,
     );

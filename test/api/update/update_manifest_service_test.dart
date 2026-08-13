@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:timetrack2/api/update/update_manifest_service.dart';
+import 'package:timetrack2/constants/storage_keys.dart';
 import 'package:timetrack2/data/database/app_database.dart';
 import 'package:timetrack2/viewmodels/update/update_manifest.dart';
 
@@ -58,8 +59,9 @@ void main() {
       expect(result.windows, isNotNull);
       // 缓存供后续判断
       final cached =
-          await (db.select(db.appMetadata)
-                ..where((t) => t.key.equals('last_checked_manifest_version')))
+          await (db.select(db.appMetadata)..where(
+                (t) => t.key.equals(AppMetadataKeys.lastCheckedManifestVersion),
+              ))
               .getSingle();
       expect(cached.value, '1.1.0');
     });
@@ -111,7 +113,7 @@ void main() {
           .into(db.appMetadata)
           .insertOnConflictUpdate(
             AppMetadataCompanion.insert(
-              key: 'ignored_update_version',
+              key: AppMetadataKeys.ignoredUpdateVersion,
               value: '1.1.0',
             ),
           );
@@ -149,7 +151,7 @@ void main() {
           .into(db.appMetadata)
           .insertOnConflictUpdate(
             AppMetadataCompanion.insert(
-              key: 'ignored_update_version',
+              key: AppMetadataKeys.ignoredUpdateVersion,
               value: 'not-semver', // 本地脏数据
             ),
           );
@@ -180,9 +182,11 @@ void main() {
         contains('已关闭'),
       );
       // 未进入 _evaluate 写库（"不做 DB 写"的保证——防复查被挪到写库后）。
-      final cached = await (db.select(
-        db.appMetadata,
-      )..where((t) => t.key.equals('last_checked_manifest_version'))).get();
+      final cached =
+          await (db.select(db.appMetadata)..where(
+                (t) => t.key.equals(AppMetadataKeys.lastCheckedManifestVersion),
+              ))
+              .get();
       expect(cached, isEmpty, reason: 'close 后 evaluate 不写缓存');
     });
   });
@@ -303,6 +307,93 @@ void main() {
       );
     });
 
+    test('StateError 消息匹配（already closed）→ 归因"已关闭"返回可读失败（r14/r19）', () async {
+      // r14 精准归因的正向路径：`_closed=false` 但底层客户端抛
+      // `StateError('Client is already closed')`（调用方未调 close() 而在外部
+      // 关闭了注入的 http.Client）——按消息匹配归因"已关闭"返回 AppFailure，
+      // 而非 rethrow。
+      final client = UpdateManifestService(
+        database: db,
+        currentVersion: '1.0.0',
+        manifestUrl: Uri.parse('https://x.example/update.json'),
+        httpClient: MockClient(
+          (_) async => throw StateError('Client is already closed'),
+        ),
+      );
+      final result = await client.checkForUpdate();
+      expect(result.isSuccess, isFalse);
+      expect(
+        result.when(onSuccess: (_) => '', onFailure: (m) => m),
+        contains('已关闭'),
+        reason: '消息匹配归因已关闭',
+      );
+    });
+
+    test('强制更新不受忽略版本影响（r19）：required + 已忽略 → 仍提示', () async {
+      // r19：required=true 语义为"不可跳过"——用户此前忽略过 ≥ 远端版本时
+      // 仍须判为可用更新（防强制/安全更新被静默跳过）。
+      await db
+          .into(db.appMetadata)
+          .insertOnConflictUpdate(
+            AppMetadataCompanion.insert(
+              key: AppMetadataKeys.ignoredUpdateVersion,
+              value: '1.1.0',
+            ),
+          );
+      final client = UpdateManifestService(
+        database: db,
+        currentVersion: '1.0.0',
+        manifestUrl: Uri.parse('https://x.example/update.json'),
+        httpClient: MockClient(
+          (_) async => http.Response(
+            jsonEncode({
+              'version': '1.1.0',
+              'required': 1,
+              'windows': {
+                'url': 'https://x.example/app.zip',
+                'sha256': 'b' * 64,
+              },
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          ),
+        ),
+      );
+      final result = (await client.checkForUpdate()).requireValue();
+      expect(result.available, isTrue, reason: '强制更新不被忽略版本压制');
+      expect(result.required, isTrue);
+    });
+
+    test('UTF-8 清单无 charset（r19）：中文 releaseNotes 不乱码', () async {
+      // response.body 按响应头 charset 解码、未指定默认 latin-1——JSON 规范
+      // 要求 UTF-8；显式 utf8.decode(bodyBytes) 后中文应正确解析。
+      final client = UpdateManifestService(
+        database: db,
+        currentVersion: '1.0.0',
+        manifestUrl: Uri.parse('https://x.example/update.json'),
+        httpClient: MockClient(
+          (_) async => http.Response.bytes(
+            utf8.encode(
+              jsonEncode({
+                'version': '2.0.0',
+                'release_notes': '更新日志：支持中文',
+                'windows': {
+                  'url': 'https://x.example/app.zip',
+                  'sha256': 'b' * 64,
+                },
+              }),
+            ),
+            200,
+            // 无 charset=utf-8（只发 application/json）——response.body 会按
+            // latin1 解码乱码；显式 utf8.decode(bodyBytes) 必须正确。
+            headers: {'content-type': 'application/json'},
+          ),
+        ),
+      );
+      final result = (await client.checkForUpdate()).requireValue();
+      expect(result.releaseNotes, '更新日志：支持中文', reason: 'UTF-8 显式解码不乱码');
+    });
+
     test('close 后 checkForUpdate 返回可读失败且不发网络请求（r3，网络层归位）', () async {
       var hit = false;
       final client = UpdateManifestService(
@@ -366,9 +457,11 @@ void main() {
         contains('已关闭'),
       );
       // 未写缓存（不进入 _evaluate）
-      final cached = await (db.select(
-        db.appMetadata,
-      )..where((t) => t.key.equals('last_checked_manifest_version'))).get();
+      final cached =
+          await (db.select(db.appMetadata)..where(
+                (t) => t.key.equals(AppMetadataKeys.lastCheckedManifestVersion),
+              ))
+              .get();
       expect(cached, isEmpty, reason: '已关闭不写缓存');
       // **覆盖边界注明（r5）**：本用例触发的是**网络 await 后的 _closed 复查**
       //（返回时未进 _evaluate）；`_evaluate` 内"写库前复查"（DB await 期间
