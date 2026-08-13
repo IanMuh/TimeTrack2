@@ -220,12 +220,17 @@ void main() {
     test('请求 await 期间 close → 复查返回"已关闭"且不写库（r4）', () async {
       // 核心竞态：checkForUpdate 已进入 await（网络挂起）后 close 被并发调用——
       // await 后复查 _closed 返回"已关闭"，不进入 _evaluate 写库。
+      // **显式等待回调入口（r5）**：`started` Completer 确认 MockClient 回调
+      // 已执行并停在 gate.future——不依赖 pumpEventQueue 隐含时序（防重构
+      // 改变请求派发后 close 实际发生在请求发出前、退化为 r3 前置路径）。
+      final started = Completer<void>();
       final gate = Completer<void>();
       final client = UpdateManifestService(
         database: db,
         currentVersion: '1.0.0',
         manifestUrl: Uri.parse('https://x.example/update.json'),
         httpClient: MockClient((request) async {
+          started.complete(); // 请求已进入挂起
           await gate.future; // 挂起响应
           return http.Response(
             jsonEncode({
@@ -242,7 +247,7 @@ void main() {
         }),
       );
       final future = client.checkForUpdate();
-      await pumpEventQueue(); // 让请求进入挂起
+      await started.future; // 显式等待请求进入挂起（回调入口）
       client.close();
       gate.complete(); // 释放响应
       final result = await future;
@@ -256,6 +261,10 @@ void main() {
             ..where((t) => t.key.equals('last_checked_manifest_version')))
           .get();
       expect(cached, isEmpty, reason: '已关闭不写缓存');
+      // **覆盖边界注明（r5）**：本用例触发的是**网络 await 后的 _closed 复查**
+      //（返回时未进 _evaluate）；`_evaluate` 内"写库前复查"（DB await 期间
+      // close 不落缓存）需可控数据库注入挂起点，现有 drift 架构无此注入——
+      // 该分支仅由代码评审 + 本复查逻辑守护，属已知覆盖边界。
     });
   });
 }

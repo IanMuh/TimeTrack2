@@ -201,6 +201,34 @@ void main() {
       }
     });
 
+    test('applyStaging 备份为空（backupOk=false，r5）：staging 被 exclude → 失败 + 备份清理', () async {
+      // 程序目录**仅含 staging 子目录**（备份时 exclude）→ 备份复制后为空 →
+      // backupOk=false 分支：返回失败且 `.backup-*` 无残留（r4 新增清理路径）。
+      final root = await Directory.systemTemp.createTemp('win_empty_backup');
+      final program = Directory('${root.path}/program')..createSync();
+      final data = Directory('${root.path}/data')..createSync();
+      final staging = Directory('${program.path}/staging')..createSync();
+      File('${staging.path}/app.exe').writeAsStringSync('new');
+      try {
+        final installer = WindowsInstaller(
+          programDir: program.path,
+          dataDir: data.path,
+        );
+        final result = await installer.applyStaging(staging.path);
+        expect(result.isSuccess, isFalse, reason: '空备份 → 失败');
+        expect(
+          program
+              .listSync()
+              .where((e) => e.path.contains('.backup-'))
+              .toList(),
+          isEmpty,
+          reason: 'backupOk=false 分支清理残留备份',
+        );
+      } finally {
+        await root.delete(recursive: true);
+      }
+    });
+
     test('applyStaging 备份阶段失败（r4）：复制抛错 → 程序目录原样保留 + 备份清理', () async {
       // r3 核心保证：备份阶段 _copyDirectory 抛错（文件被占用/只读）时程序
       // 目录原样保留、绝不进清空路径（无完整备份可恢复时清空会造空壳）。
