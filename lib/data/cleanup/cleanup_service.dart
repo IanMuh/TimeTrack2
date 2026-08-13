@@ -150,6 +150,14 @@ class CleanupService with RepositoryMappings {
   /// 共享设备上 B 用户的墓碑不得被 A 触发的清理（A 分区游标无法证明 B 已传播）
   /// 误删，否则 B 下次同步时远端行"复活"破坏删除永远赢（保留不变式 #5）。
   ///
+  /// **同用户引用不变式（r11 声明）**：分区谓词依赖"子行与父行 `user_id`
+  /// 相同"——schema FK 仅约束 id（`references(Activities, #id)` 等）不保证
+  /// 同用户。跨用户引用（B 的 entry/link 引用 A 的 activity）会使 A 的清理
+  /// 读不到 B 行阻塞父删除、随后删父时 B 行 FK 违约回滚整个事务。**写入层
+  /// 须保证同用户引用**（活动归属/分类归属/条目归属的仓储契约——阶段 1 已有
+  /// user_id 归属语义）；清理层不做跨用户兜底（属调用方契约，本注释为该
+  /// 不变式的显式声明）。
+  ///
   /// 流程：读保留期 → 读同步游标（sync 守卫）→ 单事务物理删除（引用表软删行
   /// 清理 + 存活引用者跳过 + 分类悬空处理）→ 事务外阈值驱动 VACUUM →
   /// 写 last_cleanup_at。
@@ -187,19 +195,20 @@ class CleanupService with RepositoryMappings {
       final lastSyncAt = syncRow == null
           ? null
           : DateTime.tryParse(syncRow.value);
-      if (lastSyncAt == null) {
-        // **损坏游标区分（r10）**：syncRow 存在但 tryParse 失败 = 游标损坏
-        //（非 utcString 格式/无时区偏移）——与"从未同步（键不存在）"混同会
-        // 静默永久跳过且无日志。写 stderr 警告（清理不因日志失败崩溃）。
-        if (syncRow != null) {
-          try {
-            stderr.writeln(
-              '[cleanup] 同步游标损坏（$cursorKey）：${syncRow.value}——清理跳过',
-            );
-          } catch (_) {
-            // 日志写入失败不影响跳过结论。
-          }
+      // **损坏游标判定（r10/r11 修正）**：tryParse 失败**或无时区偏移**（
+      // `isUtc == false`——无偏移字符串被 Dart 按本地时区解析"成功"，负时区
+      // 设备上解析时刻比本意 UTC 晚数小时、把 cutoff 推晚，可能把尚未传播
+      // 到远端的墓碑提前物理删除）均视为损坏：与"从未同步（键不存在）"混同
+      // 会静默跳过且无日志——写 stderr 警告（清理不因日志失败崩溃）。
+      // 与 SyncStatusStore.markSuccess/readUtc 的 `isUtc` 校验口径一致。
+      if (syncRow != null && (lastSyncAt == null || !lastSyncAt.isUtc)) {
+        try {
+          stderr.writeln('[cleanup] 同步游标损坏（$cursorKey）：${syncRow.value}——清理跳过');
+        } catch (_) {
+          // 日志写入失败不影响跳过结论。
         }
+      }
+      if (syncRow == null || lastSyncAt == null || !lastSyncAt.isUtc) {
         return AppSuccess(
           const CleanupReport(
             deletedByTable: {},

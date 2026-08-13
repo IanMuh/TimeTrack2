@@ -269,6 +269,27 @@ void main() {
       }, reason: 'bob 行保留（r9 分区隔离）');
     });
 
+    test('子表分区隔离（r11）：actionLogs 双用户超期墓碑仅清本用户', () async {
+      // 其余 5 张表的分区谓词同样须锁定——actionLogs 无 FK 依赖最简。
+      await putMeta('${AppMetadataKeys.lastSyncAt}:alice', nowStr());
+      await seedSoftDeleted(
+        'actionLogs',
+        'log-a',
+        const Duration(days: 400),
+        userId: 'alice',
+      );
+      await seedSoftDeleted(
+        'actionLogs',
+        'log-b',
+        const Duration(days: 400),
+        userId: 'bob',
+      );
+      final report = (await service.run(userId: 'alice')).requireValue();
+      expect(report.deletedByTable['actionLogs'], 1, reason: '仅 alice 日志删');
+      final left = await (db.select(db.actionLogs)).get();
+      expect(left.map((r) => r.id).toSet(), {'log-b'}, reason: 'bob 日志保留');
+    });
+
     test('登录用户无分区游标 → 跳过（即使全局键存在，r6）', () async {
       // 共享设备残留全局游标（他用户/历史未登录会话）——不得误判当前登录用户
       // 的墓碑已传播（r6：全局键不能用于登录用户判定）。
@@ -292,6 +313,17 @@ void main() {
         throwsArgumentError,
         reason: '超长 userId 拒绝（与 SyncStatusStore._maxUserIdLength=128 对齐）',
       );
+    });
+
+    test('无时区偏移游标 → 损坏跳过（r11：isUtc 校验与 SyncStatusStore 对齐）', () async {
+      // 无偏移字符串被 Dart 按本地时区解析"成功"（isUtc=false）——负时区设备
+      // 上解析时刻比本意 UTC 晚、cutoff 推晚可能提前删除未传播墓碑（数据丢失）。
+      // 须与 SyncStatusStore.markSuccess 的 `isUtc` 校验一致判损坏跳过。
+      await putMeta(AppMetadataKeys.lastSyncAt, '2026-01-01T00:00:00'); // 无 Z
+      await seedSoftDeleted('activities', 'a-noutc', const Duration(days: 400));
+      final report = (await service.run()).requireValue();
+      expect(report.skippedDueToNoSync, isTrue, reason: '无偏移游标视为损坏跳过');
+      expect(report.deletedTotal, 0);
     });
   });
 
