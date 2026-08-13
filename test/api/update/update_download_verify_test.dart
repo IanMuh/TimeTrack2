@@ -216,6 +216,7 @@ void main() {
       final dir = await Directory.systemTemp.createTemp('dl_close_retry');
       var calls = 0;
       final gate = Completer<void>();
+      final started = Completer<void>();
       final downloader = UpdateDownloader(
         tempDirectory: dir,
         retryCount: 3,
@@ -224,15 +225,18 @@ void main() {
         httpClient: MockClient((request) async {
           calls += 1;
           if (calls == 1) {
-            await gate.future; // 首次 send 挂起（模拟慢请求）
+            started.complete(); // 首次 send 已发起（回调入口精确标记）
+            await gate.future; // 挂起（模拟慢请求）
           }
           throw http.ClientException('reset');
         }),
       );
       try {
         final future = downloader.download('https://x.example/app.zip');
-        // 等待首次 send 已发起（挂起中）。
-        await Future<void>.delayed(const Duration(milliseconds: 20));
+        // **显式等待首次 send 已发起（r13）**：不用固定 Future.delayed——
+        // started Completer 使同步点确定且自文档化（防 http/MockClient 内部
+        // 调度变化时 close 实际发生在请求发出前、退化为前置路径）。
+        await started.future;
         downloader.close(); // 重试间隙关闭
         gate.complete(); // 释放首次 send → 抛异常 → 进入重试循环
         final result = await future;

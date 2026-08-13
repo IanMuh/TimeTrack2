@@ -224,8 +224,11 @@ void main() {
           reason: '声明超限条目拒绝（预检）',
         );
         // 场景 B：**伪造声明**（元数据声明小、实际解压大）——篡改中央目录的
-        // size 字段为小值（zip 中央目录文件头第 24 字节起 4 字节 = uncompressed
-        // size；find 最后 EOCD 前按签名 PK\x01\x02 定位）。
+        // size 字段为小值。ZIP 中央目录条目固定区布局：签名(4) + 版本 made
+        // by(2) + 版本 needed(2) + 标志(2) + 压缩方法(2) + 时间(2) + 日期(2)
+        // + CRC(4) + 压缩后大小(4)，**uncompressed size 偏移 = 4+2+2+2+2+2+2+
+        // 4+4 = 24**（r13 修正：原表达式多算一个 2，篡改落到"size 高 2 字节 +
+        // 文件名长度"字段，测试走的是无关失败路径）。
         final forgedPath = '${root.path}/forged.zip';
         final forged = List<int>.from(
           ZipEncoder().encode(
@@ -240,10 +243,7 @@ void main() {
               forged[i + 1] == 0x4b && // 'K'
               forged[i + 2] == 0x01 && // 中央目录签名
               forged[i + 3] == 0x02) {
-            // 中央目录条目 size 字段偏移：签名(4) + 版本(2+2) + 标志(2) +
-            // 压缩方法(2) + 时间(2+2) + crc(4) + 压缩后大小(4) + 解压大小(4)。
-            // 解压大小字段 = 第 24 字节起（相对中央目录条目起始）。
-            final sizeField = i + 4 + 4 + 2 + 2 + 2 + 2 + 2 + 4 + 4;
+            final sizeField = i + 24; // 相对中央目录条目起始 +24 = uncompressed size
             forged[sizeField] = 1; // 声明 1 字节（实际 2048）
             forged[sizeField + 1] = 0;
             forged[sizeField + 2] = 0;
@@ -255,6 +255,18 @@ void main() {
         File(forgedPath).writeAsBytesSync(forged);
         final forgedResult = await installer.prepareStaging(forgedPath);
         expect(forgedResult.isSuccess, isFalse, reason: '伪造声明（声明小实际大）经终检拒绝');
+        // **失败原因精确断言（r13）**：须命中"实际解压后体积超上限"（终检）——
+        // 排除预检（声明超限）或解析失败等无关路径（否则终检兜底缺失时用例
+        // 仍通过、回归无感知）。
+        final forgedMsg = forgedResult.when(
+          onSuccess: (_) => '',
+          onFailure: (m) => m,
+        );
+        expect(
+          forgedMsg,
+          contains('实际解压后体积超上限'),
+          reason: '伪造声明须命中终检（非预检/解析失败）',
+        );
         expect(
           Directory('${program.path}/staging').existsSync(),
           isFalse,

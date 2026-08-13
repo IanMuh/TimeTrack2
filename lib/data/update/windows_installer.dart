@@ -307,14 +307,18 @@ class WindowsInstaller {
       // 主名（最后一个点之前部分）尾部空格后解析为 `CON.txt`——按第一个点
       // 拆主名、主名裁剪尾部空格/点号后再匹配。
       final main = trimmed.split('.').first.replaceAll(RegExp(r'[. ]+$'), '');
-      // **ADS/冒号形式（r12）**：`CON::$DATA`/`NUL:$DATA` 会解析为对 CON/NUL
-      // 设备的访问（写屏/挂起）——Windows 常规文件名不允许冒号，含 `:` 的段
-      // 一律拒绝（盘符路径已在整体级拦截，此处覆盖段内冒号）。
-      if (main.contains(':')) return true;
+      // **ADS/冒号形式（r12，r13 修正）**：`CON::$DATA`/`NUL:$DATA` 会解析为
+      // 对 CON/NUL 设备的访问（写屏/挂起）；`foo.txt:evil` 会被解析为
+      // `foo.txt` 的 NTFS 备用数据流——Windows 常规文件名不允许冒号，**整段**
+      // 含 `:` 一律拒绝（盘符路径已在整体级拦截，此处覆盖扩展名段冒号）。
+      if (trimmed.contains(':')) return true;
       if (_windowsReservedDevice.hasMatch(main)) return true;
-      // **控制台句柄（r12）**：CONIN$/CONOUT$ 不在设备名正则内、Win32 会将其
-      // 解析为控制台句柄——显式拒绝。
-      if (main == 'CONIN\$' || main == 'CONOUT\$') return true;
+      // **控制台句柄（r12，r13 修正）**：CONIN$/CONOUT$ 不在设备名正则内、
+      // Win32 会将其解析为控制台句柄——**大小写不敏感**拒绝（Windows 设备名
+      // 解析不区分大小写，精确大写比较会漏 `conin$`/`conout$`）。
+      if (main.toLowerCase() == r'conin$' || main.toLowerCase() == r'conout$') {
+        return true;
+      }
       return false;
     });
   }

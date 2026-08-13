@@ -50,13 +50,14 @@ class DownloadResult {
 class UpdateDownloader {
   UpdateDownloader({
     http.Client? httpClient,
-    this._tempDirectory,
+    Directory? tempDirectory,
     int? retryCount,
     Duration? retryBaseDelay,
   }) : _http = httpClient ?? http.Client(),
        _ownsHttp = httpClient == null,
        _retryCount = retryCount ?? UpdateConfig.downloadRetryCount,
-       _retryBaseDelay = retryBaseDelay ?? UpdateConfig.retryBaseDelay;
+       _retryBaseDelay = retryBaseDelay ?? UpdateConfig.retryBaseDelay,
+       _tempDirectory = tempDirectory;
 
   final http.Client _http;
 
