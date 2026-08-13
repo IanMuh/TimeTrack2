@@ -268,6 +268,16 @@ void main() {
         isTrue,
         reason: 'time_entries 必须带 is_auto 列（自动记录标记，镜像本地 drift）',
       );
+      // **存量库补列语句锁定（r9）**：CREATE TABLE IF NOT EXISTS 对已存在表
+      // 是 no-op——存量远端库需 `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`
+      // 补 is_auto（否则存量库推送携带 is_auto 被 PostgREST 拒绝、LWW 整行
+      // 替换丢标记）。若未来重构误删该迁移语句，存量库与新库重新漂移。
+      expect(
+        has(r'ALTER TABLE TIME_ENTRIES ADD COLUMN IF NOT EXISTS IS_AUTO '
+            r'BOOLEAN NOT NULL DEFAULT FALSE'),
+        isTrue,
+        reason: '存量库须有 ALTER 补 is_auto 列语句（CREATE 对已存在表 no-op）',
+      );
       // parent_id 自引用外键（仅 activity_categories 需要）
       final categoryBlock = RegExp(
         r'CREATE TABLE IF NOT EXISTS ACTIVITY_CATEGORIES \(([^;]*)\)',

@@ -1239,8 +1239,11 @@ void main() {
             reason: 'match_kind 推送保真（storageValue）');
         expect(pushedRule['activity_id'], 'rule-activity',
             reason: 'activity_id 推送保真');
-        expect(pushedRule['updated_at'], isNotNull,
-            reason: 'updated_at 推送保真（非空）');
+        expect(
+          pushedRule['updated_at'],
+          t0.toUtc().toIso8601String(),
+          reason: 'updated_at 推送保真（toMap 归一化与本地一致）',
+        );
         expect(remoteRules.containsKey('r-local'), isFalse,
             reason: 'sync_enabled=false 规则不进远端（本地偏好不泄漏到云）');
 

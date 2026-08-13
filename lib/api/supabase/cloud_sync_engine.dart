@@ -216,9 +216,15 @@ class CloudSyncEngine {
       // **skipWhen 双层防线**：本地已有 sync_enabled=false 的规则时跳过远端行
       // ——仓储 replaceIfRemoteNewer 也有同款短路（防仓储被其他调用方绕过引擎
       // 时失效），此处引擎层再挡一道：远端编辑/墓碑均不触碰本地-only 规则。
-      // **批量预载（r8）**：先一次性加载本地规则 id→syncEnabled 映射，skipWhen
+      // **批量预载**：先一次性加载本地规则 id→syncEnabled 映射，skipWhen
       // 内存判定（防逐行 ruleById 的 N+1 查询；全量同步时远端规则数与本地
       // 查询次数线性增长）。
+      // **快照语义（并发权衡）**：预载是拉取开始前的快照，同步进行中若用户
+      // 把某规则 sync_enabled 从 false 改 true（或新建同 id 规则），本应被
+      // 应用的远端行会被这份过期快照跳过。安全方向（远端覆盖本地-only）已由
+      // replaceIfRemoteNewer 的本地-only 短路兜底；被跳过的远端编辑若被本轮
+      // 其他行推进的游标越过（尤其全量同步 fallback=startedAt），可能延迟到
+      // 下次规则变更才恢复——概率极低且大部分可自愈，接受该权衡。
       final localRules = await trackingRules.allRules();
       if (localRules case AppFailure<List<TrackingRule>> failure) {
         throw StateError('查询映射规则失败：${failure.message}');

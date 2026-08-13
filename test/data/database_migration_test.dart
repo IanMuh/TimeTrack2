@@ -16,10 +16,12 @@ void main() {
   test('v1 → v2：is_auto 列补默认 false + tracking_rules 表创建', () async {
     final dir = Directory.systemTemp.createTempSync('timetrack-migrate');
     final file = File('${dir.path}/v1.sqlite');
-    // **句柄释放（r8）**：裸 sqlite3 句柄任一步抛错都须关闭（防 Windows 上
-    // 句柄占用使外层 deleteSync 重试后静默放弃、残留临时文件）。
-    final db = sqlite3.open(file.path);
+    // **句柄释放（r8，r9 修正）**：裸 sqlite3 句柄须声明为可空并在 try 内
+    // 赋值——若 open 本身抛错（Windows 临时文件/权限异常），try-finally 不
+    // 进入、外层清理必须仍执行（可空句柄 finally 兜底关闭）。
+    Database? db;
     try {
+      db = sqlite3.open(file.path);
       db.execute('PRAGMA journal_mode = WAL');
       // **版本标注**：drift 以 `PRAGMA user_version` 判断迁移——裸建的 v1 库
       // 若不设 user_version=1，drift 视为全新库走 onCreate（表已存在会出错/
@@ -186,9 +188,10 @@ void main() {
     } finally {
       // **句柄兜底（r8）**：若建库步骤任一步抛错（DDL 笔误/SQLite 差异），
       // db.close() 未执行——此处兜底关闭（重复 close 幂等忽略），防 Windows
-      // 句柄占用使下方 deleteSync 重试后仍残留临时文件。
+      // 句柄占用使下方 deleteSync 重试后仍残留临时文件。可空句柄：open 本身
+      // 抛错时 db 为 null，跳过关闭但清理照常执行。
       try {
-        db.close();
+        db?.close();
       } catch (_) {
         // 已关闭/重复关闭忽略
       }
@@ -248,7 +251,12 @@ void main() {
           fail('DROP 后 idx_tracking_rules_sync 仍存在——buggy 状态模拟失败');
         }
       } finally {
-        raw.close();
+        // close 异常不掩盖原始断言失败（r9：与第一处 db.close 的防御式风格一致）。
+        try {
+          raw.close();
+        } catch (_) {
+          // 句柄状态异常时忽略（原始 TestFailure 优先）
+        }
       }
 
       // 重新打开：_ensureIndexes 无条件补齐被删索引。

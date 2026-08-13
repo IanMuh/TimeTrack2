@@ -268,6 +268,10 @@ void main() {
       final afterUnknown = await repo.ruleById('r1');
       expect(afterUnknown!.pattern, 'chrome.exe',
           reason: '远端 match_kind=unknown 行不覆盖本地有效规则');
+      expect(afterUnknown.matchKind, TrackingRuleMatchKind.process,
+          reason: 'match_kind 保持本地原值（不被降级为 unknown）');
+      expect(afterUnknown.syncEnabled, isTrue,
+          reason: 'sync_enabled 保持本地原值');
     });
 
     test('陈旧墓碑反向：远端墓碑早于本地存活 updatedAt 不删除（删除永远赢前提）', () async {
