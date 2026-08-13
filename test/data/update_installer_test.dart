@@ -127,6 +127,15 @@ void main() {
           'COM1',
           'CON .txt', // 设备名+空格+扩展名绕过（Win32 裁剪主名尾部空格 → CON.txt）
           'CON  .txt',
+          'CON::\$DATA', // ADS 冒号形式（r13：解析为 CON 设备访问）
+          'NUL:\$DATA',
+          'foo.txt:evil', // 扩展名段冒号（NTFS 备用数据流）
+          'conin\$', // 控制台句柄（r13：小写变体——大小写不敏感须拒绝）
+          'conout\$',
+          'CONIN\$',
+          'CONOUT\$',
+          'nul', // 小写设备名（正则 caseSensitive:false）
+          'com1',
         ].indexed) {
           final zipPath = '${root.path}/evil$i.zip';
           File(zipPath).writeAsBytesSync(buildZip({evil: 'evil'}));
