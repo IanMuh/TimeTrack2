@@ -488,7 +488,7 @@ void main() {
       expect(entries.map((r) => r.id).toSet(), {'e-alive'});
     });
 
-    test('软删未超期条目引用超期活动 → 随父清理（父已移除，子墓碑无参照价值）', () async {
+    test('软删未超期条目引用超期活动 → 阻塞父删除（未传播子行保留，r5）', () async {
       await putMeta(AppMetadataKeys.lastSyncAt, nowStr());
       final parentDeleted = mapping.utcString(
         DateTime.now().subtract(const Duration(days: 400)),
@@ -653,6 +653,73 @@ void main() {
         reason: 'parentId 置空更新 updatedAt（不再等于原软删时刻）',
       );
     });
+
+    test('被存活 link.categoryId 引用的超期分类 → 跳过删除（r2 对称）', () async {
+      // r2 对称修复：_deleteExpiredCategories 按 categoryId 计算 blocked 集合
+      //（存活或软删未传播 link 引用将删分类 → 分类保留、link 不悬空）。
+      await putMeta(AppMetadataKeys.lastSyncAt, nowStr());
+      final catDeleted = mapping.utcString(
+        DateTime.now().subtract(const Duration(days: 400)),
+      );
+      await db
+          .into(db.activityCategories)
+          .insert(
+            ActivityCategoriesCompanion.insert(
+              id: 'catX',
+              name: 'X',
+              color: 1,
+              updatedAt: catDeleted,
+              deletedAt: Value(catDeleted),
+              parentId: const Value(null),
+            ),
+          );
+      await db
+          .into(db.activityCategories)
+          .insert(
+            ActivityCategoriesCompanion.insert(
+              id: 'catY',
+              name: 'Y',
+              color: 1,
+              updatedAt: catDeleted,
+              deletedAt: Value(catDeleted),
+              parentId: const Value(null),
+            ),
+          );
+      // 存活 link 引用 catX（FK 依赖活动——先建活动）；catY 无引用可删。
+      await db
+          .into(db.activities)
+          .insert(
+            ActivitiesCompanion.insert(
+              id: 'actX',
+              name: 'actX',
+              color: 1,
+              updatedAt: nowStr(),
+            ),
+          );
+      await db
+          .into(db.activityCategoryLinks)
+          .insert(
+            ActivityCategoryLinksCompanion.insert(
+              id: 'linkX',
+              activityId: 'actX',
+              categoryId: 'catX',
+              updatedAt: nowStr(),
+            ),
+          );
+      final report = (await service.run()).requireValue();
+      expect(
+        report.deletedByTable['activityCategories'],
+        1,
+        reason: '仅无引用的 Y 删',
+      );
+      final left = await (db.select(db.activityCategories)).get();
+      expect(left.map((r) => r.id).toSet(), {
+        'catX',
+      }, reason: '被存活 link 引用的分类跳过删除');
+      // link 不悬空（catX 仍在）。
+      final links = await (db.select(db.activityCategoryLinks)).get();
+      expect(links.map((r) => r.id).toSet(), {'linkX'});
+    });
   });
 
   group('retentionDays DB 异常回退（r2）', () {
@@ -704,9 +771,12 @@ void main() {
         // freelist_count（空闲页）清零（删除行遗留的空闲页被重写回收）：
         // 删除 5 行前 fileService 运行时页有可回收空间，VACUUM 后空闲页必须为 0。
         expect(report.vacuumed, isTrue, reason: '文件库 WAL 下 VACUUM 真实执行');
-        final freelist = (await fileDb
-            .customSelect('PRAGMA freelist_count')
-            .getSingle()).data.values.first as int;
+        final freelist =
+            (await fileDb.customSelect('PRAGMA freelist_count').getSingle())
+                    .data
+                    .values
+                    .first
+                as int;
         expect(freelist, 0, reason: 'VACUUM 后空闲页归零（空间真实回收）');
         // VACUUM 后库仍可查询（重写未损坏）。
         final left = await (fileDb.select(fileDb.activities)).get();
