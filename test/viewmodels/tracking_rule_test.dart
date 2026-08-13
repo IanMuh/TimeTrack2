@@ -88,8 +88,9 @@ void main() {
       );
       expect(same == rule, isTrue, reason: '同 id 视为同一规则');
       expect(same.hashCode, rule.hashCode);
-      // 负例边界：不同 id 必须不相等、hashCode 不同（防比较逻辑退化为恒等
-      // 或误删 id 之外的比较）。
+      // 负例边界：不同 id 必须不相等（防比较逻辑退化为恒等或误删 id 之外的
+      // 比较）。**注**：hashCode 契约只要求"相等对象 hashCode 相同"，不要求
+      // "不同对象 hashCode 不同"（散列碰撞合法）——故不在此断言 hashCode 负例。
       final other = TrackingRule(
         id: 'r2',
         pattern: 'chrome.exe',
@@ -98,8 +99,6 @@ void main() {
         updatedAt: t0,
       );
       expect(other == rule, isFalse, reason: '不同 id 视为不同规则');
-      expect(other.hashCode == rule.hashCode, isFalse,
-          reason: '不同 id hashCode 不同');
     });
 
     test('updated_at 严格校验：缺失/无时区偏移/非法 → FormatException（不伪造时间戳）', () {

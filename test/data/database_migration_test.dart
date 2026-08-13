@@ -134,6 +134,19 @@ void main() {
             trCols.firstWhere((c) => c.data['name'] == 'sync_enabled');
         expect(syncEnabled.data['dflt_value'], '1',
             reason: 'tracking_rules.sync_enabled 默认 true（新建规则默认进云）');
+        // **迁移后索引存在性（r2）**：@TableIndex 由 m.createTable 在建表时
+        // 创建——若后续改为手工 CREATE TABLE 或 drift 生成行为变化导致索引
+        // 缺失（同步引擎 rulesSince 的 user_id/updated_at 查询关键路径），
+        // 列级断言无法发现。
+        final trIndexes = await appDb
+            .customSelect("SELECT name FROM sqlite_master WHERE type='index' "
+                "AND tbl_name='tracking_rules'")
+            .get();
+        final indexNames = trIndexes.map((r) => r.data['name']).toSet();
+        expect(indexNames, contains('idx_tracking_rules_sync'),
+            reason: '迁移后 idx_tracking_rules_sync 索引存在（同步查询路径）');
+        expect(indexNames, contains('idx_tracking_rules_activity'),
+            reason: '迁移后 idx_tracking_rules_activity 索引存在');
 
         // 旧数据保留
         final rows = await (appDb.select(appDb.timeEntries)).get();

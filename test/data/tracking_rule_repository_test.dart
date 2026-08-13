@@ -158,6 +158,11 @@ void main() {
 
     test('rulesSince 过滤 unknown 匹配类型（r1：防跨端循环传播/跨版本退化）', () async {
       final t0 = DateTime.now().toUtc().subtract(const Duration(minutes: 1));
+      // 阳性对照：同窗口内保存一条正常同步规则——证明过滤仅针对 unknown 行，
+      // 而非时间边界/其它条件导致所有行被过滤。
+      await repo.saveRule(
+        rule(id: 'r-sync-ok', updatedAt: t0, syncEnabled: true),
+      );
       // match_kind=unknown 的规则（反序列化兜底产物）——不得进同步（防各端
       // 永久循环传播；未来新增匹配类型时当前版本拉取降级 unknown 再推回
       // 覆盖远端原值 = 跨版本数据退化）。
@@ -172,8 +177,28 @@ void main() {
         ),
       );
       final result = (await repo.rulesSince(t0)).requireValue();
-      expect(result, isEmpty,
-          reason: 'unknown 匹配类型规则不进同步窗口');
+      expect(result.map((r) => r.id), ['r-sync-ok'],
+          reason: 'unknown 匹配类型规则不进同步窗口（正常规则不受影响）');
+    });
+
+    test('deleteRule 单调时间（r2）：远端偏未来 updatedAt 不被本地 now 倒退', () async {
+      // deleteRule 的 `now.isAfter(current.updatedAt)` 为 false 分支——库内行
+      // updatedAt 来自远端偏未来时间戳（设备时钟不同步）、本地 now 早于原值：
+      // 墓碑时间必须取 `current.updatedAt + 1ms`（单调推进），否则墓碑被判定
+      // 陈旧、下次 LWW 覆盖导致删除丢失、规则复活。
+      final future = DateTime.now()
+          .toUtc()
+          .add(const Duration(hours: 2));
+      final remoteDated = rule(id: 'r-future', updatedAt: future);
+      await repo.saveRule(remoteDated);
+      await repo.deleteRule(remoteDated);
+      final tombstone = await repo.ruleById('r-future');
+      expect(tombstone!.isDeleted, isTrue);
+      expect(
+        tombstone.updatedAt.isAfter(future),
+        isTrue,
+        reason: '墓碑时间单调推进（≥ 当前 updatedAt，不被本地 now 倒退）',
+      );
     });
 
     test('replaceIfRemoteNewer 短路：本地-only 规则不被远端覆盖/删除（r1）', () async {

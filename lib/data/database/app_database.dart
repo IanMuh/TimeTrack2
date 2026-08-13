@@ -237,6 +237,19 @@ class AppDatabase extends _$AppDatabase {
               'BOOLEAN NOT NULL DEFAULT false',
             );
             await m.createTable(trackingRules);
+            // **迁移路径补建 tracking_rules 索引（r2）**：`@TableIndex` 注解
+            // 仅在新库 onCreate 的 createAll() 时建索引，`m.createTable` 不建
+            // ——迁移库若不补建，同步引擎 rulesSince 的 (user_id, updated_at)
+            // 查询与 activity_id 反查会全表扫描（与 _ensureIndexes 的
+            // 无条件补齐策略一致，IF NOT EXISTS 幂等）。
+            await customStatement(
+              'CREATE INDEX IF NOT EXISTS idx_tracking_rules_sync '
+              'ON tracking_rules (user_id, updated_at)',
+            );
+            await customStatement(
+              'CREATE INDEX IF NOT EXISTS idx_tracking_rules_activity '
+              'ON tracking_rules (activity_id)',
+            );
           }
         },
       );

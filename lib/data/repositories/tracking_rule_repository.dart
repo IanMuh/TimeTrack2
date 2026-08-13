@@ -33,13 +33,17 @@ class TrackingRuleRepository with RepositoryMappings {
     }
   }
 
-  /// 活跃规则（未删除；规则匹配器用）——**按 updated_at 升序**（结果确定：
-  /// 后续"首个命中规则生效"的匹配器依赖稳定顺序，SQLite 默认不保证行序）。
+  /// 活跃规则（未删除；规则匹配器用）——**按 updated_at 升序 + id 次级键**
+  ///（结果确定：后续"首个命中规则生效"的匹配器依赖稳定顺序；SQLite 不保证
+  /// 同 updated_at 行间的相对顺序，须次级唯一键兜底）。
   Future<AppResult<List<TrackingRule>>> activeRules() async {
     try {
       final query = database.select(database.trackingRules)
         ..where((t) => t.deletedAt.isNull())
-        ..orderBy([(t) => OrderingTerm.asc(t.updatedAt)]);
+        ..orderBy([
+          (t) => OrderingTerm.asc(t.updatedAt),
+          (t) => OrderingTerm.asc(t.id),
+        ]);
       final rows = await query.get();
       return AppSuccess(rows.map(trackingRuleFromRow).toList());
     } catch (e) {
