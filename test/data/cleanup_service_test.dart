@@ -188,6 +188,9 @@ void main() {
                 userId: Value(userId),
               ),
             );
+      default:
+        // **r12 修正**：未知表名静默吞掉会使种子失效误判为实现 bug——显式抛。
+        throw ArgumentError('未知表名：$table');
     }
   }
 
@@ -211,6 +214,17 @@ void main() {
         await putMeta(AppMetadataKeys.deletedRetentionDays, evil);
         expect(await service.retentionDays(), 180, reason: '非法覆盖回退：$evil');
       }
+    });
+
+    test('超大覆盖值上界钳制（r10/r12）：超 3650 钳制、恰在上限保留', () async {
+      // Duration(days:) int64 微秒溢出回绕（约 1.07 亿天）会致 cutoff 失真、
+      // 未满保留期墓碑被提前物理删除——钳制到 3650（10 年）。
+      await putMeta(AppMetadataKeys.deletedRetentionDays, '999999');
+      expect(await service.retentionDays(), 3650, reason: '超上限钳制');
+      await putMeta(AppMetadataKeys.deletedRetentionDays, '3650');
+      expect(await service.retentionDays(), 3650, reason: '恰在上限保留');
+      await putMeta(AppMetadataKeys.deletedRetentionDays, '3651');
+      expect(await service.retentionDays(), 3650, reason: '超 1 天钳制');
     });
   });
 
@@ -854,10 +868,12 @@ void main() {
         db.activityCategories,
       )..where((t) => t.id.equals('child3'))).get()).single;
       expect(child.parentId, isNull, reason: '软删未传播子 parentId 置空（防自引用 FK）');
+      // **r12 修正**：墓碑子本轮不删——只置空 parentId、**不刷新 updatedAt**
+      //（刷新会伪造同步增量/已传播墓碑重复推送）。断言保持原软删时刻。
       expect(
         child.updatedAt,
-        isNot(childDeleted),
-        reason: 'parentId 置空更新 updatedAt（不再等于原软删时刻）',
+        childDeleted,
+        reason: '墓碑子 updatedAt 不被清理刷新（防伪造同步增量）',
       );
     });
 

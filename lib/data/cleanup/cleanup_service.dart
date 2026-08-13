@@ -294,10 +294,24 @@ class CleanupService with RepositoryMappings {
                     .data;
             final busy = cp['busy'] ?? 0;
             vacuumed = busy is int && busy != 0 ? false : true;
+            if (busy is int && busy != 0) {
+              // **checkpoint busy 告警（r12）**：与损坏游标路径的观测口径一致
+              // ——空间回收未生效须可察觉（VACUUM 本身已执行、主流程不受影响）。
+              try {
+                stderr.writeln('[cleanup] wal_checkpoint busy=$busy——空间未完全回收');
+              } catch (_) {
+                // 日志写入失败不影响主流程。
+              }
+            }
           }
-        } catch (_) {
+        } catch (e) {
           // VACUUM 失败不阻塞清理主流程（已完成的物理删除不回滚）。
           vacuumed = false;
+          try {
+            stderr.writeln('[cleanup] VACUUM 失败（跳过空间回收）：$e');
+          } catch (_) {
+            // 日志写入失败不影响主流程。
+          }
         }
       }
 
@@ -558,15 +572,24 @@ class CleanupService with RepositoryMappings {
     final deletable = expired.where((id) => !blocked.contains(id)).toList();
     if (deletable.isEmpty) return 0;
     // parentId 置空：引用将删分类的所有行（含软删——置空无害且防 FK）。
+    // **拆两个 UPDATE（r12）**：软删未传播子（deleted_at >= cutoff）本轮不删、
+    // 留待下一轮——刷新其 updatedAt 会伪造同步增量（墓碑以 update 形式先于
+    // delete 传播/已传播墓碑重复推送，增加远端合并歧义）。仅存活子刷新
+    // updatedAt（清理造成真实变更），墓碑子只置 parentId 不动 updatedAt。
     for (final chunk in _chunks(deletable)) {
+      // 1) 存活子（deletedAt IS NULL）：置空 + 刷新 updatedAt。
       await (database.update(
         database.activityCategories,
-      )..where((t) => t.parentId.isIn(chunk))).write(
+      )..where((t) => t.parentId.isIn(chunk) & t.deletedAt.isNull())).write(
         ActivityCategoriesCompanion(
           parentId: const Value(null),
           updatedAt: Value(utcString(now)),
         ),
       );
+      // 2) 软删子（deletedAt IS NOT NULL）：仅置空，不动 updatedAt。
+      await (database.update(database.activityCategories)
+            ..where((t) => t.parentId.isIn(chunk) & t.deletedAt.isNotNull()))
+          .write(ActivityCategoriesCompanion(parentId: const Value(null)));
     }
     var count = 0;
     for (final chunk in _chunks(deletable)) {
