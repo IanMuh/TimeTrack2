@@ -50,14 +50,13 @@ class DownloadResult {
 class UpdateDownloader {
   UpdateDownloader({
     http.Client? httpClient,
-    Directory? tempDirectory,
+    this._tempDirectory,
     int? retryCount,
     Duration? retryBaseDelay,
   }) : _http = httpClient ?? http.Client(),
        _ownsHttp = httpClient == null,
        _retryCount = retryCount ?? UpdateConfig.downloadRetryCount,
-       _retryBaseDelay = retryBaseDelay ?? UpdateConfig.retryBaseDelay,
-       _tempDirectory = tempDirectory;
+       _retryBaseDelay = retryBaseDelay ?? UpdateConfig.retryBaseDelay;
 
   final http.Client _http;
 
@@ -147,7 +146,14 @@ class UpdateDownloader {
         // **仅兜底 Exception（r10）**：Error（编程错误）不吞、交给全局错误
         // 处理暴露（掩盖真实 bug 会增排障难度）；文案脱敏（不拼 `$e`——可能
         // 含内部 URL/路径细节）。
-        stderr.writeln('[update] 下载未知异常：$e');
+        // **stderr 写自身保护（r12）**：stderr 已关闭/输出管道断开时 writeln
+        // 会抛 FileSystemException——包一层防从兜底分支逃逸（破坏"恒返回
+        // AppResult、不逃逸"契约）。
+        try {
+          stderr.writeln('[update] 下载未知异常：$e');
+        } catch (_) {
+          // 日志写入失败不影响失败结论。
+        }
         return const AppFailure('下载失败，请稍后重试');
       }
       attempt += 1;

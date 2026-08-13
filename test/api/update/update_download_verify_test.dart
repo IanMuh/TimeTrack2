@@ -211,6 +211,61 @@ void main() {
         await dir.delete(recursive: true);
       }
     });
+
+    test('重试间隙 close：返回"已关闭"且不再发起下次 send（r11）', () async {
+      final dir = await Directory.systemTemp.createTemp('dl_close_retry');
+      var calls = 0;
+      final gate = Completer<void>();
+      final downloader = UpdateDownloader(
+        tempDirectory: dir,
+        retryCount: 3,
+        // 退避延迟挂起（gate 控制）——让 close 有机会在重试间隙触发。
+        retryBaseDelay: Duration(milliseconds: 100),
+        httpClient: MockClient((request) async {
+          calls += 1;
+          if (calls == 1) {
+            await gate.future; // 首次 send 挂起（模拟慢请求）
+          }
+          throw http.ClientException('reset');
+        }),
+      );
+      try {
+        final future = downloader.download('https://x.example/app.zip');
+        // 等待首次 send 已发起（挂起中）。
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        downloader.close(); // 重试间隙关闭
+        gate.complete(); // 释放首次 send → 抛异常 → 进入重试循环
+        final result = await future;
+        expect(result.isSuccess, isFalse);
+        expect(
+          result.when(onSuccess: (_) => '', onFailure: (m) => m),
+          contains('已关闭'),
+          reason: '重试间隙 close 后返回"已关闭"（非误导性网络错误）',
+        );
+        expect(calls, 1, reason: 'close 后不再发起下次 send');
+      } finally {
+        await dir.delete(recursive: true);
+      }
+    });
+
+    test('Error（编程错误）不吞：StateError 向外传播（r11）', () async {
+      final dir = await Directory.systemTemp.createTemp('dl_error');
+      final downloader = UpdateDownloader(
+        tempDirectory: dir,
+        httpClient: MockClient(
+          (_) async => throw StateError('programming bug'), // Error 非 Exception
+        ),
+      );
+      try {
+        await expectLater(
+          downloader.download('https://x.example/app.zip'),
+          throwsA(isA<StateError>()),
+          reason: 'Error 不吞、向外传播（防掩盖真实 bug）',
+        );
+      } finally {
+        await dir.delete(recursive: true);
+      }
+    });
   });
 
   group('UpdateVerifier', () {

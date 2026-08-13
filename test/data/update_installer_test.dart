@@ -196,29 +196,96 @@ void main() {
       }
     });
 
-    test('zip bomb 防护：超限条目（r10，上限可注入）', () async {
+    test('zip bomb 防护：声明超限（预检剪枝）+ 伪造声明（终检兜底，r11）', () async {
       final root = await Directory.systemTemp.createTemp('win_bomb');
       final program = Directory('${root.path}/program')..createSync();
       final data = Directory('${root.path}/data')..createSync();
-      final zipPath = '${root.path}/bomb.zip';
-      // 构造解压后体积超上限的 zip 条目（写入实际 >上限 的字节——上限可注入
-      // 为小值以真实覆盖 zip bomb 分支）。
-      final bombContent = List<int>.filled(1024 * 1024, 7); // 1 MB
-      File(zipPath).writeAsBytesSync(
-        ZipEncoder().encode(
-          Archive()
-            ..addFile(ArchiveFile('bomb.bin', bombContent.length, bombContent)),
-        ),
-      );
+      // 用较小体积（2 KB）覆盖两条上限分支（上限可注入为 1 KB）。
+      final bombContent = List<int>.filled(2048, 7);
       try {
         final installer = WindowsInstaller(
           programDir: program.path,
           dataDir: data.path,
-          maxUncompressedEntryBytes: 1024, // 注入小上限（1 KB < 1 MB）
-          maxTotalUncompressedBytes: 2048,
+          maxUncompressedEntryBytes: 1024, // 注入小上限（1 KB < 2 KB）
+          maxTotalUncompressedBytes: 4096,
+        );
+        // 场景 A：中央目录声明与实际解压均超限——预检剪枝（file.size > 上限）。
+        final declaredPath = '${root.path}/declared.zip';
+        File(declaredPath).writeAsBytesSync(
+          ZipEncoder().encode(
+            Archive()..addFile(
+              ArchiveFile('bomb.bin', bombContent.length, bombContent),
+            ),
+          ),
+        );
+        expect(
+          (await installer.prepareStaging(declaredPath)).isSuccess,
+          isFalse,
+          reason: '声明超限条目拒绝（预检）',
+        );
+        // 场景 B：**伪造声明**（元数据声明小、实际解压大）——篡改中央目录的
+        // size 字段为小值（zip 中央目录文件头第 24 字节起 4 字节 = uncompressed
+        // size；find 最后 EOCD 前按签名 PK\x01\x02 定位）。
+        final forgedPath = '${root.path}/forged.zip';
+        final forged = List<int>.from(
+          ZipEncoder().encode(
+            Archive()..addFile(
+              ArchiveFile('bomb.bin', bombContent.length, bombContent),
+            ),
+          ),
+        );
+        var patched = false;
+        for (var i = forged.length - 4; i >= 0 && !patched; i--) {
+          if (forged[i] == 0x50 && // 'P'
+              forged[i + 1] == 0x4b && // 'K'
+              forged[i + 2] == 0x01 && // 中央目录签名
+              forged[i + 3] == 0x02) {
+            // 中央目录条目 size 字段偏移：签名(4) + 版本(2+2) + 标志(2) +
+            // 压缩方法(2) + 时间(2+2) + crc(4) + 压缩后大小(4) + 解压大小(4)。
+            // 解压大小字段 = 第 24 字节起（相对中央目录条目起始）。
+            final sizeField = i + 4 + 4 + 2 + 2 + 2 + 2 + 2 + 4 + 4;
+            forged[sizeField] = 1; // 声明 1 字节（实际 2048）
+            forged[sizeField + 1] = 0;
+            forged[sizeField + 2] = 0;
+            forged[sizeField + 3] = 0;
+            patched = true;
+          }
+        }
+        expect(patched, isTrue, reason: '成功篡改中央目录 size 字段（构造伪造场景）');
+        File(forgedPath).writeAsBytesSync(forged);
+        final forgedResult = await installer.prepareStaging(forgedPath);
+        expect(forgedResult.isSuccess, isFalse, reason: '伪造声明（声明小实际大）经终检拒绝');
+        expect(
+          Directory('${program.path}/staging').existsSync(),
+          isFalse,
+          reason: '失败后 staging 已清理',
+        );
+      } finally {
+        await root.delete(recursive: true);
+      }
+    });
+
+    test('zip bomb 防护：累计超限（多条目各低于单条目上限，r11）', () async {
+      final root = await Directory.systemTemp.createTemp('win_bomb_total');
+      final program = Directory('${root.path}/program')..createSync();
+      final data = Directory('${root.path}/data')..createSync();
+      final archive = Archive();
+      // 4 个条目各 512 B（低于单条目上限 1 KB），累计 2 KB > 总上限 1 KB。
+      for (var i = 0; i < 4; i++) {
+        final content = List<int>.filled(512, i + 1);
+        archive.addFile(ArchiveFile('f$i.bin', content.length, content));
+      }
+      final zipPath = '${root.path}/total.zip';
+      File(zipPath).writeAsBytesSync(ZipEncoder().encode(archive));
+      try {
+        final installer = WindowsInstaller(
+          programDir: program.path,
+          dataDir: data.path,
+          maxUncompressedEntryBytes: 1024,
+          maxTotalUncompressedBytes: 1024, // 总上限 = 单条目上限（累计超）
         );
         final result = await installer.prepareStaging(zipPath);
-        expect(result.isSuccess, isFalse, reason: '超限条目拒绝');
+        expect(result.isSuccess, isFalse, reason: '累计超限拒绝');
         expect(
           Directory('${program.path}/staging').existsSync(),
           isFalse,
@@ -377,26 +444,28 @@ void main() {
         expect(installer.checkWritable(), isTrue, reason: '临时目录可写');
         // **只读分支（r9）**：Windows 目录只读位语义与 Unix 不同（chmod 0555
         // 在 Windows 上几乎无效、以管理员运行也可写）；POSIX root 拥有
-        // CAP_DAC_OVERRIDE 同样不受写权限位限制——两平台均跳过。用 chmod
-        // 构造只读目录并校验 exitCode（chmod 失败时掩盖为断言失败而非跳过）。
+        // CAP_DAC_OVERRIDE 同样不受写权限位限制——两平台均跳过。
         if (!Platform.isWindows) {
           final isRoot =
               Process.runSync('id', ['-u']).stdout.toString().trim() == '0';
           if (!isRoot) {
             final chmod = Process.runSync('chmod', ['0555', ro.path]);
-            if (chmod.exitCode == 0) {
-              try {
-                expect(
-                  WindowsInstaller(
-                    programDir: ro.path,
-                    dataDir: '${root.path}/data',
-                  ).checkWritable(),
-                  isFalse,
-                  reason: '只读目录不可写（写探针抛 FileSystemException）',
-                );
-              } finally {
-                Process.runSync('chmod', ['0755', ro.path]);
-              }
+            if (chmod.exitCode != 0) {
+              // chmod 失败时显式失败（注释所述"掩盖为断言失败"应为显式暴露——
+              // 静默跳过会让只读分支回归无感知）。
+              fail('chmod 0555 失败：${chmod.stderr}');
+            }
+            try {
+              expect(
+                WindowsInstaller(
+                  programDir: ro.path,
+                  dataDir: '${root.path}/data',
+                ).checkWritable(),
+                isFalse,
+                reason: '只读目录不可写（写探针抛 FileSystemException）',
+              );
+            } finally {
+              Process.runSync('chmod', ['0755', ro.path]);
             }
           }
         }
@@ -507,15 +576,22 @@ void main() {
         );
         // **符号链接拒绝（r10）**：statSync 默认跟随链接、指向常规文件的链接
         // type 仍为 file 会被放行——显式 followLinks:false 检测须拒绝（防外部
-        // 文件经链接绕过守卫进入安装流程）。POSIX only（Windows 创建链接权限
-        // 要求高、测试环境不稳定）。
+        // 文件经链接绕过守卫进入安装流程）。POSIX only；无 symlink 权限的
+        // 环境（容器/FAT 挂载）创建会抛 FileSystemException——按"环境不支持
+        // 则跳过"处理（与只读目录用例的平台兼容一致）。
         if (!Platform.isWindows) {
-          Link('${dir.path}/link.apk').createSync('${dir.path}/real.apk');
-          expect(
-            installer.ensureApkValid('${dir.path}/link.apk').isSuccess,
-            isFalse,
-            reason: '符号链接拒绝（防绕过安装守卫）',
-          );
+          try {
+            Link('${dir.path}/link.apk').createSync('${dir.path}/real.apk');
+          } on FileSystemException {
+            // 环境不支持符号链接：跳过（不误报）。
+          }
+          if (File('${dir.path}/link.apk').existsSync()) {
+            expect(
+              installer.ensureApkValid('${dir.path}/link.apk').isSuccess,
+              isFalse,
+              reason: '符号链接拒绝（防绕过安装守卫）',
+            );
+          }
         }
       } finally {
         await dir.delete(recursive: true);

@@ -31,6 +31,12 @@ class WindowsInstaller {
     int? maxUncompressedEntryBytes,
     int? maxTotalUncompressedBytes,
   }) : zipCodec = zipCodec ?? ZipDecoder(),
+       assert(
+         maxUncompressedEntryBytes == null || maxUncompressedEntryBytes > 0,
+       ),
+       assert(
+         maxTotalUncompressedBytes == null || maxTotalUncompressedBytes > 0,
+       ),
        maxUncompressedEntryBytes =
            maxUncompressedEntryBytes ?? UpdateConfig.maxUncompressedEntryBytes,
        maxTotalUncompressedBytes =
@@ -98,10 +104,20 @@ class WindowsInstaller {
           if (_isUnsafePath(name)) {
             throw StateError('更新包包含非法路径条目（路径穿越风险）：$name');
           }
-          // **zip bomb 按实际解压长度校验（r10）**：`file.size` 是中央目录
-          // 声明的元数据、可被攻击者伪造（声明小、实际 deflate 流超大）——
-          // 须在 [file.content] 实际解压后按真实长度判定（archive 4.x 惰性
-          // 解压，content 长度即真实体积）。
+          // **zip bomb 双层校验（r11）**：
+          // 1) **预检**：中央目录声明的 `file.size` 超单条目上限直接拒绝——
+          //    防超限包先被整条惰性解压进内存（archive 4.x 的 content getter
+          //    一次性全量解压；声明即超限的包先解压再拒会白耗内存/CPU）；
+          // 2) **终检**：元数据可被攻击者伪造（声明小、实际 deflate 流大）——
+          //    解压后按真实 `content.length` 再判一次（绕过预检的伪造条目在此
+          //    被拦）。
+          // **剩余内存风险（如实声明）**：即便双检，恶意条目仍可能在 content
+          // 解压完成前分配大内存（预检只挡声明值超限、伪造条目挡在解压后）；
+          // 完全消除需流式解压（archive 4.x decodeStream 逐条目流式），本阶段
+          // 以预检剪枝 + 终检兜底缓解，流式解压记入后续优化。
+          if (file.size > maxUncompressedEntryBytes) {
+            throw StateError('更新包条目声明体积超上限：$name');
+          }
           final content = file.content as List<int>;
           if (content.length > maxUncompressedEntryBytes) {
             throw StateError('更新包条目实际解压后体积超上限：$name');
@@ -285,13 +301,20 @@ class WindowsInstaller {
       // 归一化为空名/`.`——写入抛非法文件名异常或落盘非预期名称，一律拒绝。
       if (trimmed.isEmpty) return true;
       if (trimmed == '.' || trimmed == '..') return true;
-      // **保留设备名（r9，r10 修正）**：CON/NUL/PRN/AUX/COM1-9/LPT1-9——
-      // 防设备访问/挂起（恶意 zip 写入 `nul` 等）。**空格绕过**：`CON .txt`
-      // 因中间空格不匹配 `CON(\..*)?$`，但 Win32 裁剪文件主名（最后一个点
-      // 之前部分）尾部空格后解析为 `CON.txt`——按第一个点拆主名、主名裁剪
-      // 尾部空格/点号后再匹配。
+      // **保留设备名（r9，r10 修正，r12 补 ADS/CONIN$）**：CON/NUL/PRN/AUX/
+      // COM1-9/LPT1-9——防设备访问/挂起（恶意 zip 写入 `nul` 等）。**空格
+      // 绕过**：`CON .txt` 因中间空格不匹配 `CON(\..*)?$`，但 Win32 裁剪文件
+      // 主名（最后一个点之前部分）尾部空格后解析为 `CON.txt`——按第一个点
+      // 拆主名、主名裁剪尾部空格/点号后再匹配。
       final main = trimmed.split('.').first.replaceAll(RegExp(r'[. ]+$'), '');
+      // **ADS/冒号形式（r12）**：`CON::$DATA`/`NUL:$DATA` 会解析为对 CON/NUL
+      // 设备的访问（写屏/挂起）——Windows 常规文件名不允许冒号，含 `:` 的段
+      // 一律拒绝（盘符路径已在整体级拦截，此处覆盖段内冒号）。
+      if (main.contains(':')) return true;
       if (_windowsReservedDevice.hasMatch(main)) return true;
+      // **控制台句柄（r12）**：CONIN$/CONOUT$ 不在设备名正则内、Win32 会将其
+      // 解析为控制台句柄——显式拒绝。
+      if (main == 'CONIN\$' || main == 'CONOUT\$') return true;
       return false;
     });
   }
