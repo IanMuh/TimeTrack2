@@ -60,12 +60,22 @@ class UpdateManifestService {
     Uri? manifestUrl,
   })  : _current = AppVersion.parse(currentVersion),
         _http = httpClient ?? http.Client(),
+        _ownsHttp = httpClient == null,
         _manifestUrl = manifestUrl ?? UpdateConfig.defaultManifestUrl;
 
   final AppDatabase database;
   final http.Client _http;
+  /// 是否自建 http client（close 时释放；注入对象由调用方负责生命周期）。
+  final bool _ownsHttp;
   final Uri _manifestUrl;
   final AppVersion _current;
+
+  /// 释放自建 http client（注入对象由调用方负责生命周期）。
+  void close() {
+    if (_ownsHttp) {
+      _http.close();
+    }
+  }
 
   /// 检查更新；失败返回可读原因（网络/清单损坏）。
   Future<AppResult<UpdateCheckResult>> checkForUpdate() async {
@@ -105,15 +115,32 @@ class UpdateManifestService {
   Future<AppResult<UpdateCheckResult>> _evaluate(
     UpdateManifest manifest,
   ) async {
-    final remote = AppVersion.parse(manifest.version);
+    // **版本解析容错**：UpdateManifest.fromMap 的正则只校验格式、不检查数字段
+    // 是否超出 Dart int 范围——超大数字段（如 9999999999999999999999.0.0）会
+    // 在 AppVersion.parse 抛 FormatException。包一层 catch 返回可读失败，防
+    // checkForUpdate 崩溃。
+    final AppVersion remote;
+    try {
+      remote = AppVersion.parse(manifest.version);
+    } on FormatException {
+      return const AppFailure('更新清单版本号格式非法');
+    }
     // 远端版本 ≤ 当前应用版本 → 无更新。
     if (!(_current < remote)) {
       return AppSuccess(_none(manifest));
     }
     // "忽略此版本"：用户选择忽略的版本不再提示（远端 ≤ 已忽略版本即跳过）。
+    // **脏数据容错**：本地忽略版本可能被写入非 SemVer（旧数据/手动改库）——
+    // 解析失败视为"未忽略"，继续走更新判定（不崩溃）。
     final ignored = await _readString(AppMetadataKeys.ignoredUpdateVersion);
-    if (ignored != null && !(AppVersion.parse(ignored) < remote)) {
-      return AppSuccess(_none(manifest));
+    if (ignored != null) {
+      try {
+        if (!(AppVersion.parse(ignored) < remote)) {
+          return AppSuccess(_none(manifest));
+        }
+      } on FormatException {
+        // 本地脏数据：视为未忽略，继续。
+      }
     }
     // 可用更新：缓存远端版本（供"检查过但未装"的后续判断）。
     await _writeString(AppMetadataKeys.lastCheckedManifestVersion, manifest.version);

@@ -58,6 +58,28 @@ Future<String> sha256Stream(Stream<List<int>> stream) async {
   return collector.digest!.toString();
 }
 
+/// 增量 SHA-256 累积器（**单一事实来源**）：`sha256Stream` 与下载器
+///（边写文件边算哈希）共用同一累积逻辑——哈希算法细节集中一处，防漂移。
+///
+/// 用法：逐块 [add]；全部完成后 [digest]（幂等，重复调用返回同一值）。
+class Sha256Sink {
+  final _collector = _DigestCollector();
+  late final ByteConversionSink _converter;
+
+  Sha256Sink() {
+    _converter = crypto.sha256.startChunkedConversion(_collector);
+  }
+
+  /// 累计一块数据。
+  void add(List<int> chunk) => _converter.add(chunk);
+
+  /// 结束累积并返回 hex 小写摘要（幂等：重复调用返回同一值）。
+  String digest() {
+    _converter.close();
+    return _collector.digest!.toString();
+  }
+}
+
 /// 收集流式哈希的最终 [crypto.Digest]。
 class _DigestCollector implements Sink<crypto.Digest> {
   crypto.Digest? digest;

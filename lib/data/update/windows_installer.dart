@@ -50,8 +50,10 @@ class WindowsInstaller {
 
   /// 把 [zipPath] 解压到 staging 目录（**zip-slip 防护**）。
   ///
-  /// 解析 zip 条目名，拒绝任何包含 `..` 段或绝对路径的条目（防路径穿越
-  /// 写入程序目录之外）；staging 已存在则先删除（幂等）。返回 staging 路径。
+  /// 解析 zip 条目名，拒绝任何包含 `..` 段/绝对路径/盘符路径的条目（防路径
+  /// 穿越写入程序目录之外）；**空包（无任何文件）直接失败**（防 applyStaging
+  /// 把程序目录清空成空壳）；staging 已存在则先删除（幂等）。返回 staging 路径。
+  /// 失败路径清理 staging（防半解压残留被当作可安装包）。
   Future<AppResult<String>> prepareStaging(String zipPath) async {
     final staging = Directory('$programDir/${UpdateConfig.windowsStagingDirName}');
     try {
@@ -61,21 +63,34 @@ class WindowsInstaller {
       staging.createSync(recursive: true);
       final bytes = File(zipPath).readAsBytesSync();
       final archive = zipCodec.decodeBytes(bytes);
+      var fileCount = 0;
       for (final file in archive.files) {
         if (file.isFile) {
           final name = file.name;
-          // zip-slip 防护：拒绝路径穿越（`..` 段/绝对路径）——否则恶意 zip
-          // 可把文件写入 staging 之外（如覆盖程序目录/系统路径）。
+          // zip-slip 防护：拒绝路径穿越（`..` 段/绝对路径/盘符路径）——否则
+          // 恶意 zip 可把文件写入 staging 之外（如覆盖程序目录/系统路径）。
           if (_isUnsafePath(name)) {
             throw StateError('更新包包含非法路径条目（路径穿越风险）：$name');
           }
           final out = File('${staging.path}/$name');
           out.createSync(recursive: true);
           out.writeAsBytesSync(file.content as List<int>, flush: true);
+          fileCount += 1;
         }
+      }
+      if (fileCount == 0) {
+        throw StateError('更新包为空（无任何文件）');
       }
       return AppSuccess(staging.path);
     } catch (e) {
+      // 失败清理 staging（防半解压残留被当作可安装包）。
+      try {
+        if (staging.existsSync()) {
+          staging.deleteSync(recursive: true);
+        }
+      } on FileSystemException {
+        // 清理失败不影响失败结论。
+      }
       return AppFailure('解压更新包失败：$e');
     }
   }
@@ -84,7 +99,15 @@ class WindowsInstaller {
   ///
   /// 调用方（阶段 3/4 启动逻辑）应**先确认 exe 未被锁定**（本文件不持有 exe）；
   /// [applyStaging] 内部做原子性：备份目录先建，任何步骤失败恢复备份。
+  /// **清空前校验 staging 存在且非空**（防空包把程序目录清空成不可用状态）。
   Future<AppResult<void>> applyStaging(String stagingPath) async {
+    // 前置守卫：staging 必须存在且非空（prepareStaging 已拒空包，此处
+    // 双保险——调用方可能绕过 prepareStaging 直接传路径）。
+    final staging = Directory(stagingPath);
+    if (!staging.existsSync() ||
+        staging.listSync().isEmpty) {
+      return const AppFailure('安装暂存目录缺失或为空，已中止（未改动程序目录）');
+    }
     final backupDir = Directory('$programDir/.backup-${DateTime.now().millisecondsSinceEpoch}');
     try {
       // 1. 备份当前程序目录（不含 staging 与备份自身）。
@@ -96,34 +119,53 @@ class WindowsInstaller {
       // 2. 清空程序目录（保留 staging/备份）。
       _clearProgramDir();
       // 3. 移入 staging。
-      final staging = Directory(stagingPath);
       for (final entry in staging.listSync()) {
         entry.renameSync('$programDir/${_basename(entry.path)}');
       }
       staging.deleteSync(recursive: true);
-      // 4. 删除备份（安装成功）。
-      backupDir.deleteSync(recursive: true);
+      // 4. 删除备份（**best-effort，r1**）：备份中文件被占用/杀毒扫描时删除
+      // 失败——安装已成功，备份删除失败不改变结果（只留备份目录待手动清理），
+      // 绝不能因此进入回滚把刚装好的新文件清掉。
+      try {
+        if (backupDir.existsSync()) {
+          backupDir.deleteSync(recursive: true);
+        }
+      } on FileSystemException {
+        // 备份保留（供手动清理/回滚），安装成功结论不变。
+      }
       return const AppSuccess(null);
     } catch (e) {
-      // 失败回滚：恢复备份（若已部分移入则先清空）。
+      // **失败回滚（r1 修正）**：清空与恢复必须**各自独立尝试**——清空失败
+      //（新文件被占用）不能阻止恢复备份。备份目录保留供手动恢复（不掩盖
+      // 原始错误，也不误导为"已回滚"）。
+      var rollbackOk = false;
       try {
         _clearProgramDir();
         if (backupDir.existsSync()) {
           for (final entry in backupDir.listSync()) {
             entry.renameSync('$programDir/${_basename(entry.path)}');
           }
-          backupDir.deleteSync(recursive: true);
+          rollbackOk = true;
         }
       } catch (_) {
-        // 回滚自身失败：保留备份目录供手动恢复（不掩盖原始错误）。
+        // 清空/恢复失败：备份目录仍在，供手动恢复。
       }
-      return AppFailure('安装更新失败（已回滚）：$e');
+      if (rollbackOk) {
+        return AppFailure('安装更新失败（已回滚）：$e');
+      }
+      return AppFailure(
+        '安装更新失败，且回滚未完成（备份保留在 $backupDir，请手动恢复）：$e',
+      );
     }
   }
 
-  /// 路径穿越判定：绝对路径或以 `..` 开头/含 `..` 段的条目名不安全。
+  /// 路径穿越判定：绝对路径 / 盘符路径（Windows）/ 含 `..` 段或前导空段的
+  /// 条目名不安全。
   static bool _isUnsafePath(String name) {
     if (name.startsWith('/') || name.startsWith(r'\')) return true;
+    // 拒绝 Windows 盘符绝对/相对路径（C:/xxx、C:\xxx、C:evil.txt）——
+    // 拼接后含内嵌冒号会引发路径解析歧义/非预期行为。
+    if (name.length >= 2 && name[1] == ':') return true;
     final segments = name.replaceAll(r'\', '/').split('/');
     return segments.any((s) => s == '..' || s.isEmpty && segments.length > 1);
   }

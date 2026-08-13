@@ -10,7 +10,6 @@ import 'dart:io' show File, FileSystemException;
 
 import '../../constants/update_config.dart';
 import '../../utils/result.dart';
-import '../../utils/sha256.dart';
 import '../../viewmodels/update/update_manifest.dart';
 import 'update_downloader.dart';
 
@@ -37,7 +36,9 @@ class UpdateVerifier {
         return AppFailure(failure.message);
       }
       final result = downloaded.requireValue();
-      final actual = await sha256File(result.filePath);
+      // **复用下载时边收边算的 SHA-256（r1）**：免二次读盘（大更新包双倍
+      // I/O）。文件读取类异常在下载器已归为写盘失败；此处只比字符串。
+      final actual = result.sha256;
       if (actual == artifact.sha256.toLowerCase()) {
         return AppSuccess(UpdateVerifierResult(
           filePath: result.filePath,

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -150,6 +151,23 @@ void main() {
         await sha256Stream(Stream.value('abc'.codeUnits)),
         'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
       );
+    });
+
+    test('流中途出错：异常向上传播（下载流中断关键路径，r2）', () async {
+      // 文档承诺"流中途出错时错误向上传播、converter 在 finally 中关闭"——
+      // 下载流中断/网络异常时哈希状态完整、不泄漏。
+      final controller = StreamController<List<int>>();
+      controller
+        ..add([1, 2, 3])
+        ..addError(StateError('stream interrupted'))
+        ..close();
+      await expectLater(
+        sha256Stream(controller.stream),
+        throwsA(isA<StateError>()),
+        reason: '中途错误向上传播',
+      );
+      // 错误后仍可用（converter 关闭不泄漏）：新流正常计算。
+      expect(await sha256Stream(Stream.value('abc'.codeUnits)), isNotEmpty);
     });
   });
 }

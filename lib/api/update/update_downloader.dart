@@ -13,11 +13,11 @@ library;
 import 'dart:async';
 import 'dart:io' show Directory, File, FileSystemException, SocketException;
 
-import 'package:crypto/crypto.dart' as crypto;
 import 'package:http/http.dart' as http;
 
 import '../../constants/update_config.dart';
 import '../../utils/result.dart';
+import '../../utils/sha256.dart';
 
 /// 下载结果。
 class DownloadResult {
@@ -42,12 +42,22 @@ class UpdateDownloader {
   UpdateDownloader({
     http.Client? httpClient,
     Directory? tempDirectory,
-  })  : _http = httpClient ?? http.Client() {
+    int? retryCount,
+    Duration? retryBaseDelay,
+  })  : _http = httpClient ?? http.Client(),
+        _retryCount = retryCount ?? UpdateConfig.downloadRetryCount,
+        _retryBaseDelay = retryBaseDelay ?? UpdateConfig.retryBaseDelay {
     _tempDirectory = tempDirectory;
   }
 
   final http.Client _http;
+  /// 重试次数（默认取 [UpdateConfig.downloadRetryCount]；测试注入小值免真实等待）。
+  final int _retryCount;
+  /// 退避基时（默认取 [UpdateConfig.retryBaseDelay]；测试注入零延迟）。
+  final Duration _retryBaseDelay;
   late final Directory? _tempDirectory;
+  /// 临时文件名自增后缀（防同一微秒并发下载撞名覆盖）。
+  int _seq = 0;
 
   /// 下载 [url] 到临时目录；失败返回可读原因。
   ///
@@ -55,6 +65,7 @@ class UpdateDownloader {
   /// 内部自动重试网络瞬时失败（指数退避 [UpdateConfig.downloadRetryCount] 次）；
   /// **校验失败不重试**（调用方 `UpdateVerifier` 判定后删重下，见配置
   /// `redownloadAfterVerificationFailure`——语义分层，这里只管传输）。
+  /// **非网络异常（非法 URL/本地写盘失败）直接失败不重试**（重试无意义）。
   Future<AppResult<DownloadResult>> download(
     String url, {
     void Function(int receivedBytes, int? totalBytes)? onProgress,
@@ -76,18 +87,27 @@ class UpdateDownloader {
         if (!_shouldRetry(attempt)) {
           return const AppFailure('下载超时，请稍后重试');
         }
+      } on HttpStatusException catch (e) {
+        // 服务端明确拒绝（4xx/5xx）：不重试，文案带状态码（区别于瞬态网络）。
+        return AppFailure('下载失败（HTTP ${e.statusCode}）');
+      } on FileSystemException {
+        // 本地写盘失败（目录不可写/磁盘满）：重试无意义，直接失败。
+        return const AppFailure('下载写入失败，请检查磁盘空间后重试');
+      } on FormatException {
+        // 非法 URL。
+        return const AppFailure('下载地址非法');
       }
       attempt += 1;
       await Future<void>.delayed(_retryDelay(attempt));
     }
   }
 
-  /// 是否继续重试：attempt 从 0 计，重试次数上限 [UpdateConfig.downloadRetryCount]。
-  bool _shouldRetry(int attempt) => attempt < UpdateConfig.downloadRetryCount;
+  /// 是否继续重试：attempt 从 0 计，重试次数上限 [_retryCount]。
+  bool _shouldRetry(int attempt) => attempt < _retryCount;
 
   /// 指数退避：`base * 2^attempt`（attempt 从 1 计，首次重试等待 base）。
   Duration _retryDelay(int attempt) =>
-      UpdateConfig.retryBaseDelay * (1 << (attempt - 1));
+      _retryBaseDelay * (1 << (attempt - 1));
 
   Future<DownloadResult> _attemptDownload(
     String url, {
@@ -95,27 +115,45 @@ class UpdateDownloader {
   }) async {
     final file = File(
       '${_tempDirectory?.path ?? Directory.systemTemp.path}/timetrack-download-'
-      '${DateTime.now().microsecondsSinceEpoch}',
+      '${DateTime.now().microsecondsSinceEpoch}'
+      '-${_seq++}', // 自增后缀防同一微秒并发撞名覆盖
     );
     final request = http.Request('GET', Uri.parse(url));
     final response = await _http.send(request).timeout(UpdateConfig.checkTimeout);
+    // **4xx 不重试**（永久性错误）：抛专用异常，download() 直接失败带状态码。
+    // 5xx 也先不重试（本模块传输层保守——调用方编排层可整体重试）。
     if (response.statusCode != 200) {
-      throw http.ClientException('HTTP ${response.statusCode}');
+      throw HttpStatusException(response.statusCode);
     }
     final sink = file.openWrite();
     var received = 0;
-    var shaBuilder = _ChunkedSha256();
+    // 复用共享的增量哈希累积器（Sha256Sink，单一事实来源——与 sha256Stream
+    // 同一算法实现，防哈希细节在两侧漂移）。
+    final shaBuilder = Sha256Sink();
+    var closed = false;
     try {
-      await for (final chunk in response.stream) {
-        sink.add(chunk);
-        received += chunk.length;
-        shaBuilder.add(chunk);
-        onProgress?.call(received, response.contentLength);
-      }
+      // **流读取超时**：响应头已返回但流挂起/断流不报错会无限等待——
+      // 给整个流消费过程设独立超时（.timeout 包住 await for 的 future）。
+      await response.stream.timeout(UpdateConfig.downloadStreamTimeout).forEach(
+            (chunk) {
+              sink.add(chunk);
+              received += chunk.length;
+              shaBuilder.add(chunk);
+              onProgress?.call(received, response.contentLength);
+            },
+          );
       await sink.close();
+      closed = true;
     } catch (_) {
-      // 写入失败/流中断：关闭 sink 并删除半成品，重试或失败由外层处理。
-      await sink.close();
+      // 写入失败/流中断：sink 只关一次（关闭自身抛错不掩盖原始错误），
+      // 删除半成品，重试或失败由外层处理。
+      if (!closed) {
+        try {
+          await sink.close();
+        } catch (_) {
+          // close 抛错：忽略，原始错误优先。
+        }
+      }
       try {
         file.deleteSync();
       } on FileSystemException {
@@ -131,29 +169,10 @@ class UpdateDownloader {
   }
 }
 
-/// 分块 SHA-256 累积器（复用 crypto 流式 API）。
-class _ChunkedSha256 {
-  final _collector = _DigestCollector();
-  late final _converter =
-      crypto.sha256.startChunkedConversion(_collector);
+/// 服务端非 200 状态（区别于瞬态网络异常——不重试）。
+class HttpStatusException implements Exception {
+  const HttpStatusException(this.statusCode);
 
-  void add(List<int> chunk) => _converter.add(chunk);
-
-  String digest() {
-    _converter.close();
-    return _collector.digest!.toString();
-  }
+  final int statusCode;
 }
 
-/// 收集流式哈希的最终 [crypto.Digest]。
-class _DigestCollector implements Sink<crypto.Digest> {
-  crypto.Digest? digest;
-
-  @override
-  void add(crypto.Digest data) {
-    digest = data;
-  }
-
-  @override
-  void close() {}
-}

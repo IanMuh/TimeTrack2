@@ -55,9 +55,14 @@ void main() {
       expect((await service('1.1.0').evaluate(manifest('1.1.0-pre.1'))).requireValue().available, isFalse);
       // 1.1.0-pre.1 > 1.0.0（更高主版本 pre-release 算更新）
       expect((await service('1.0.0').evaluate(manifest('1.1.0-pre.1'))).requireValue().available, isTrue);
+      // **pre-release → 正式版升级（r2）**：current=1.1.0-pre.1、remote=1.1.0
+      // ——SemVer 规则 pre-release 排序低于正式版，应判为更新（字符串比较会
+      // 得出相反结论，此用例锁定防误用字符串比较回归）。
+      expect((await service('1.1.0-pre.1').evaluate(manifest('1.1.0'))).requireValue().available, isTrue,
+          reason: 'pre-release 用户可升级到同版本正式版');
     });
 
-    test('已忽略版本 → 无更新；忽略的更新版本低于当前 → 无更新', () async {
+    test('已忽略版本 → 无更新；忽略版本低于新远端版本 → 仍提示', () async {
       // 忽略 1.1.0
       await db.into(db.appMetadata).insertOnConflictUpdate(
             AppMetadataCompanion.insert(

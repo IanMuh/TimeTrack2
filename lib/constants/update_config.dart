@@ -53,6 +53,11 @@ class UpdateConfig {
   /// 首次重试等待基时；每次失败等待 `base * 2^n`。
   static const retryBaseDelay = Duration(seconds: 2);
 
+  /// **响应体流读取超时（r1）**：响应头已返回但流挂起/断流不报错会无限等待
+  /// ——给整个流消费过程设独立超时（与检查超时语义区分：检查是头超时、
+  /// 下载是体超时；慢网络下流式按块推进不会误触）。
+  static const downloadStreamTimeout = Duration(seconds: 60);
+
   /// 下载分块大小（流式写临时目录）。
   static const downloadChunkBytes = 64 * 1024;
 
