@@ -152,8 +152,8 @@ class LlmCapability {
   );
 
   /// 校验"请求组合"是否在能力范围内。**顺序**：单项能力（tools/stream 各自
-  /// 是否支持）→ 组合限制（tools+stream 并用）——Ollama 这类不支持 tools 的
-  /// provider 在 useTools+stream 时先命中"不支持工具调用"的正确文案。
+  /// 是否支持）→ 组合限制（tools+stream 并用）→ JSON 模式能力。Ollama 这类
+  /// 不支持 tools 的 provider 在 useTools+stream 时先命中"不支持工具调用"。
   /// 返回 null = 合法；否则返回可读的失败原因。
   String? validateRequest(LlmRequestOptions options) {
     if (options.useTools && !supportsTools) {
@@ -165,6 +165,12 @@ class LlmCapability {
     if (options.useTools && options.stream && !supportsToolsWithStream) {
       return '当前 provider 不支持 tools 与 stream 并用';
     }
+    // useJsonMode 与 supportsResponseFormat 关联校验：qwen/ollama 不支持
+    // JSON 模式——明确拒绝（防 buildChatRequestBody 静默省略 response_format、
+    // 调用方请求的结构化输出被无声降级为普通文本）。
+    if (options.useJsonMode && !supportsResponseFormat) {
+      return '当前 provider 不支持 JSON 结构化输出';
+    }
     return null;
   }
 }
@@ -174,17 +180,18 @@ class LlmConfig {
   LlmConfig({
     required String baseUrl,
     required String? apiKey,
-    required this.model,
+    required String model,
     required this.capability,
     this.timeout = AiConfig.requestTimeout,
   })  : assert(timeout > Duration.zero, 'timeout 必须为正'),
         baseUrl = _normalizeBaseUrl(baseUrl),
-        apiKey = _normalizeApiKey(apiKey) {
+        apiKey = _normalizeApiKey(apiKey),
+        model = model.trim() {
     // release 下 assert 剥离——超时来自二期设置页用户输入，运行时兜底。
     if (timeout <= Duration.zero) {
       throw ArgumentError.value(timeout, 'timeout', 'timeout 必须为正');
     }
-    if (model.trim().isEmpty) {
+    if (this.model.isEmpty) {
       throw ArgumentError.value(model, 'model', '模型名不能为空');
     }
   }
@@ -218,14 +225,18 @@ class LlmConfig {
       );
     }
     // 允许根路径下的单段路径（如自托管 `https://host:8080/v1`——OpenAI
-    // 兼容层常以 /v1 为前缀）。**双斜杠路径拒绝**：Dart 的 `Uri.pathSegments`
-    // 会跳过前导/尾随空段（`//v1` → `['v1']`、`//` → `[]`），单独用
-    // pathSegments 长度无法识别——直接检查原始 path 是否含 `//`。
-    if (uri.path.contains('//') || uri.pathSegments.length > 1) {
+    // 兼容层常以 /v1 为前缀）。**深层路径/双斜杠拒绝**：
+    // - `pathSegments` 会跳过前导/尾随空段（`//v1` → `['v1']`），须查原始
+    //   path 是否含 `//`；
+    // - `pathSegments` 是**解码后**分段（`a%2Fb` → `'a/b'`），段内含 `/`
+    //   即深层路径绕过（服务端解码后形成额外路径段，路由到非预期端点）。
+    if (uri.path.contains('//') ||
+        uri.pathSegments.any((seg) => seg.contains('/')) ||
+        uri.pathSegments.length > 1) {
       throw ArgumentError.value(
         value,
         'baseUrl',
-        'baseUrl 至多一个路径段（如 /v1），不支持深层路径/双斜杠',
+        'baseUrl 至多一个路径段（如 /v1），不支持深层路径/双斜杠/编码斜杠',
       );
     }
     return trimmed.endsWith('/') ? trimmed.substring(0, trimmed.length - 1) : trimmed;

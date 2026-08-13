@@ -60,6 +60,20 @@ class OpenAiCompatibleLlmClient implements LlmClient {
     if (incompatible != null) {
       return AppFailure(incompatible);
     }
+    // **骨架阶段能力边界（r6 契约修正）**：二期落地前显式拒绝——
+    // - `useTools`：真实 OpenAI 兼容端点对**空 tools 数组**通常返回 400
+    //   （要求至少一项工具定义）；工具定义与 CommandInvocation 绑定前
+    //   发送空数组必失败；
+    // - `stream`：OpenAI 兼容流式端点返回 SSE（text/event-stream），骨架
+    //   的 http.post + 普通 JSON 解析无法处理——发送 `stream: true` 会
+    //   缓冲到流结束（慢生成大概率超时）且响应体非合法 JSON。
+    // 能力标记已声明支持（二期落地后校验放行），此处是骨架实现边界。
+    if (options.useTools) {
+      return const AppFailure('当前暂不支持工具调用');
+    }
+    if (options.stream) {
+      return const AppFailure('当前暂不支持流式输出');
+    }
     // system role 不支持时的降级校验（Ollama 部分模型）。
     if (!capability.supportsSystemMessage &&
         messages.any((m) => m.role == LlmRole.system)) {
@@ -132,10 +146,14 @@ class OpenAiCompatibleLlmClient implements LlmClient {
       body['max_tokens'] = maxTokens;
     }
     if (options.useTools && config.capability.supportsTools) {
-      // 占位工具声明：二期工具定义与 CommandInvocation 绑定后替换。
+      // **二期契约占位（r6）**：chat() 入口已显式拒绝 useTools（真实端点
+      // 对空 tools 数组返 400）——此分支保留为纯函数序列化契约（二期工具
+      // 定义与 CommandInvocation 绑定后启用真实 tools 载荷）。
       body['tools'] = <Object?>[];
     }
     if (options.stream && config.capability.supportsStreaming) {
+      // **二期契约占位（r6）**：chat() 入口已显式拒绝 stream（骨架不解析
+      // SSE）——此分支保留为纯函数序列化契约（二期流式接口落地后启用）。
       body['stream'] = true;
     }
     // **response_format 与 stream 正交（r1）**：JSON 模式是独立能力，由

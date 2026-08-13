@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show SocketException;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -56,11 +57,19 @@ void main() {
     test('预置 provider 能力快照', () {
       expect(LlmCapability.deepseek.supportsTools, isTrue);
       expect(LlmCapability.deepseek.supportsStreaming, isTrue);
+      // **后续用例依赖标记显式锁定（r6）**：useJsonMode 用例依赖
+      // deepseek.supportsResponseFormat==true、组合用例依赖 supportsToolsWithStream
+      // ——在快照处断言，防能力声明与测试假设漂移时失败落在远端用例且原因不直观。
+      expect(LlmCapability.deepseek.supportsResponseFormat, isTrue);
+      expect(LlmCapability.deepseek.supportsToolsWithStream, isTrue);
       expect(LlmCapability.kimi.supportsTools, isTrue);
+      expect(LlmCapability.kimi.supportsResponseFormat, isTrue);
+      expect(LlmCapability.kimi.supportsToolsWithStream, isTrue);
       // 通义：tools/stream 均支持但**不可并用**（validateRequest 拒绝）
       expect(LlmCapability.qwen.supportsTools, isTrue);
       expect(LlmCapability.qwen.supportsStreaming, isTrue);
       expect(LlmCapability.qwen.supportsResponseFormat, isFalse);
+      expect(LlmCapability.qwen.supportsToolsWithStream, isFalse);
       // Ollama：缺 tools/response_format/system
       expect(LlmCapability.ollama.supportsTools, isFalse);
       expect(LlmCapability.ollama.supportsStreaming, isTrue);
@@ -146,6 +155,26 @@ void main() {
         reason: '通义单独 tools 合法',
       );
     });
+
+    test('useJsonMode 能力拒绝（r6：qwen/ollama 不支持 JSON 模式）', () {
+      // 防 buildChatRequestBody 静默省略 response_format、调用方请求的
+      // 结构化输出被无声降级为普通文本。
+      for (final capability in [LlmCapability.qwen, LlmCapability.ollama]) {
+        expect(
+          capability.validateRequest(LlmRequestOptions(useJsonMode: true)),
+          isNotNull,
+          reason: '${identical(capability, LlmCapability.qwen) ? '通义' : 'Ollama'} '
+              '不支持 JSON 结构化输出须拒绝',
+        );
+      }
+      expect(
+        LlmCapability.deepseek.validateRequest(
+          LlmRequestOptions(useJsonMode: true),
+        ),
+        isNull,
+        reason: 'DeepSeek 支持 JSON 模式放行',
+      );
+    });
   });
 
   group('LlmConfig baseUrl 校验', () {
@@ -184,6 +213,7 @@ void main() {
         'https://user:pass@api.example.com',
         'https://api.example.com//v1', // 双斜杠路径
         'https://api.example.com//', // 裸双斜杠尾路径
+        'https://api.example.com/a%2Fb', // 编码斜杠（解码后为深层路径）
       ]) {
         expect(() => config(bad), throwsArgumentError,
             reason: '非法 baseUrl 应拒绝：$bad');
@@ -409,6 +439,38 @@ void main() {
       expect(body['model'], 'model-x');
     });
 
+    test('apiKey 为 null（Ollama/本地自托管）：请求不携带 Authorization 头（r6）', () async {
+      // 防未来误拼接 'Bearer null' / 无条件带头——Ollama/本地场景最常见。
+      http.Request? captured;
+      final client = OpenAiCompatibleLlmClient(
+        config: LlmConfig(
+          baseUrl: 'http://localhost:11434/v1',
+          apiKey: null,
+          model: 'llama3',
+          capability: LlmCapability.ollama,
+        ),
+        httpClient: MockClient((request) async {
+          captured = request;
+          return http.Response(
+            jsonEncode({
+              'choices': [
+                {'message': {'role': 'assistant', 'content': 'ok'}},
+              ],
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+            request: request,
+          );
+        }),
+      );
+      expect((await client.chat(
+        messages: const [LlmMessage(role: LlmRole.user, content: 'x')],
+      ))
+          .isSuccess, isTrue);
+      expect(captured!.headers.containsKey('authorization'), isFalse,
+          reason: 'apiKey 为 null 时不得携带 Authorization 头');
+    });
+
     test('能力组合非法：tools+stream 在发送前拒绝（不触达网络）', () async {
       var hit = false;
       final client = OpenAiCompatibleLlmClient(
@@ -474,6 +536,60 @@ void main() {
         isFalse,
         reason: '不泄露底层异常类型',
       );
+    });
+
+    test('网络异常映射：SocketException → 可读失败（r6）', () async {
+      // SocketException 是真实网络故障（断网/DNS/连接拒绝）的常见异常——
+      // 该 catch 分支回归（文案错误/未先判 _closed）须被拦截。
+      final client = OpenAiCompatibleLlmClient(
+        config: config(),
+        httpClient: MockClient(
+          (_) async => throw const SocketException('connection refused'),
+        ),
+      );
+      final result = await client.chat(
+        messages: const [LlmMessage(role: LlmRole.user, content: 'x')],
+      );
+      expect(result.isSuccess, isFalse);
+      final msg = result.when(onSuccess: (_) => '', onFailure: (m) => m);
+      expect(
+        msg.contains('SocketException') || msg.contains('ClientException'),
+        isFalse,
+        reason: '不泄露底层异常类型',
+      );
+      expect(msg, contains('网络'), reason: '统一脱敏文案');
+    });
+
+    test('骨架能力边界（r6）：useTools/stream 在 chat 入口显式拒绝', () async {
+      // 二期落地前：空 tools 数组必 400、SSE 骨架无法解析——显式拒绝而非
+      // 发送必败请求（防"已发送但服务端 400/超时"的误导性失败）。
+      var hit = false;
+      final client = OpenAiCompatibleLlmClient(
+        config: config(),
+        httpClient: MockClient((request) async {
+          hit = true;
+          return http.Response('{}', 200, request: request);
+        }),
+      );
+      final toolsResult = await client.chat(
+        messages: const [LlmMessage(role: LlmRole.user, content: 'x')],
+        options: LlmRequestOptions(useTools: true),
+      );
+      expect(toolsResult.isSuccess, isFalse, reason: 'useTools 骨架拒绝');
+      expect(
+        toolsResult.when(onSuccess: (_) => '', onFailure: (m) => m),
+        contains('暂不支持工具调用'),
+      );
+      final streamResult = await client.chat(
+        messages: const [LlmMessage(role: LlmRole.user, content: 'x')],
+        options: LlmRequestOptions(stream: true),
+      );
+      expect(streamResult.isSuccess, isFalse, reason: 'stream 骨架拒绝');
+      expect(
+        streamResult.when(onSuccess: (_) => '', onFailure: (m) => m),
+        contains('暂不支持流式输出'),
+      );
+      expect(hit, isFalse, reason: '骨架边界拒绝不触达网络');
     });
 
     test('close 生命周期：自建释放 / 注入不释放 / 关闭后 chat 拒绝（r3）', () async {
