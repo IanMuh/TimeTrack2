@@ -234,5 +234,57 @@ void main() {
       expect(afterTombstone!.isDeleted, isFalse,
           reason: '本地-only 规则不被远端墓碑删除（本地偏好保留）');
     });
+
+    test('远端异常行防御：sync_enabled=false / match_kind=unknown 不落地（r8）', () async {
+      final t0 = DateTime.now().toUtc().subtract(const Duration(minutes: 1));
+      // 本地同步规则（sync_enabled=true）。
+      await repo.saveRule(rule(id: 'r1', updatedAt: t0));
+
+      // 远端 sync_enabled=false 异常行（legacy/手工修改）——落地会把本地同步
+      // 规则静默降级为本地-only，随后 rulesSince 不再返回、永不推回，永久分叉。
+      final remoteFalse = rule(
+        id: 'r1',
+        pattern: 'other.exe',
+        syncEnabled: false,
+        updatedAt: t0.add(const Duration(minutes: 1)),
+      );
+      await repo.replaceIfRemoteNewer(remoteFalse);
+      final afterFalse = await repo.ruleById('r1');
+      expect(afterFalse!.syncEnabled, isTrue,
+          reason: '远端 sync_enabled=false 异常行不覆盖本地同步规则');
+      expect(afterFalse.pattern, 'chrome.exe');
+
+      // 远端 match_kind=unknown 行（未来版本新匹配类型被当前版本降级）——
+      // 落地会覆盖本地有效规则（跨版本数据退化）。
+      final remoteUnknown = TrackingRule(
+        id: 'r1',
+        pattern: 'other.exe',
+        matchKind: TrackingRuleMatchKind.unknown,
+        activityId: 'a1',
+        syncEnabled: true,
+        updatedAt: t0.add(const Duration(minutes: 2)),
+      );
+      await repo.replaceIfRemoteNewer(remoteUnknown);
+      final afterUnknown = await repo.ruleById('r1');
+      expect(afterUnknown!.pattern, 'chrome.exe',
+          reason: '远端 match_kind=unknown 行不覆盖本地有效规则');
+    });
+
+    test('陈旧墓碑反向：远端墓碑早于本地存活 updatedAt 不删除（删除永远赢前提）', () async {
+      final t0 = DateTime.now().toUtc().subtract(const Duration(minutes: 1));
+      // 本地存活行（updatedAt 较新）。
+      await repo.saveRule(rule(id: 'r1', updatedAt: t0));
+      // 远端陈旧墓碑（时间戳早于本地）——删除永远赢的前提是时间戳更新，
+      // 陈旧墓碑不得删除本地行。
+      final staleTombstone = rule(
+        id: 'r1',
+        updatedAt: t0.subtract(const Duration(minutes: 1)),
+        deletedAt: t0.subtract(const Duration(minutes: 1)),
+      );
+      await repo.replaceIfRemoteNewer(staleTombstone);
+      final after = await repo.ruleById('r1');
+      expect(after!.isDeleted, isFalse,
+          reason: '陈旧墓碑（早于本地 updatedAt）不得删除本地行');
+    });
   });
 }

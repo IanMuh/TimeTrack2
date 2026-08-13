@@ -112,6 +112,12 @@ CREATE TABLE IF NOT EXISTS time_entries (
   deleted_at     text
 );
 
+-- 存量库补齐列（模块 2c'）：CREATE TABLE IF NOT EXISTS 对已存在表是 no-op——
+-- 重跑本 schema 不会给存量 time_entries 补 is_auto 列，导致新库与存量库漂移
+--（存量库推送携带 is_auto 被 PostgREST 拒绝、LWW 整行替换丢标记）。与本地
+-- drift 迁移（onUpgrade 手工 ALTER）等价，ADD COLUMN IF NOT EXISTS 幂等。
+ALTER TABLE time_entries ADD COLUMN IF NOT EXISTS is_auto boolean NOT NULL DEFAULT false;
+
 -- 操作日志
 -- 注意：activity_id / entry_id 为可空的归档性引用，**有意不做存在性校验**
 --（日志容忍脏引用：活动/条目被删后历史日志仍保留其 id 供展示，校验会

@@ -1172,12 +1172,18 @@ void main() {
         await h.close();
       }
     });
+  });
 
+  group('CloudSyncEngine 推送（分类/规则）', () {
     test('tracking_rules：sync_enabled=true 规则推送/拉取，false 仅存本地（模块 2c-foreground）', () async {
       final h = CloudHarness.create();
       try {
         // 规则 activity_id 引用 activities（本地 FK ON）——先落本地活动，
-        // 否则本地 saveRule 因 FK 悬挂失败（远端 seed 不解决本地引用）。
+        // 否则本地 saveRule 因 FK 悬挂失败。**不做远端 seed**：远端活动由
+        // 首轮同步的 activities 推送建立（引擎表顺序 activities → … →
+        // tracking_rules 与 FK 依赖方向一致）；云端引用完整性由
+        // validate_tracking_rule_ref 触发器兜底（mock 不模拟触发器，顺序
+        // 契约由本用例的活动先推送 + 引擎表序隐式保证）。
         await h.db.into(h.db.activities).insert(
               ActivitiesCompanion.insert(
                 id: 'rule-activity',
@@ -1185,18 +1191,11 @@ void main() {
                 name: '规则活动',
                 color: 0xff2563eb,
                 isFavorite: const Value(false),
+                // 固定 UTC 时刻（与远端活动同刻，防首轮 LWW 冲突随机器时区
+                // 胜负不定——DateTime.utc 与 toMap 归一化一致）。
                 updatedAt: '2026-08-12T10:00:00.000000Z',
               ),
             );
-        // 远端活动（规则 activity_id 引用它——先推送活动保证引用成立）。
-        final remoteActivity = Activity(
-          id: 'rule-activity',
-          name: '规则活动',
-          color: 0xff2563eb,
-          isFavorite: false,
-          updatedAt: DateTime(2026, 8, 12, 10),
-        );
-        h.remote.seed(RemoteTables.activities, remoteActivity.toMap());
         // 本地同步规则（sync_enabled=true）+ 本地-only 规则（sync_enabled=false）
         final t0 = DateTime.utc(2026, 8, 12, 4);
         await h.trackingRules.saveRule(
@@ -1231,6 +1230,17 @@ void main() {
             reason: '规则推送补填 user_id');
         expect(remoteRules['r-sync']!['sync_enabled'], true,
             reason: 'sync_enabled 字段保真');
+        // **字段级往返一致性（r8）**：防推送时字段截断/改写/归一化错误
+        //（如 match_kind 序列化丢失、activity_id 缺失）被忽略。
+        final pushedRule = remoteRules['r-sync']!;
+        expect(pushedRule['pattern'], 'chrome.exe',
+            reason: 'pattern 推送保真');
+        expect(pushedRule['match_kind'], 'process',
+            reason: 'match_kind 推送保真（storageValue）');
+        expect(pushedRule['activity_id'], 'rule-activity',
+            reason: 'activity_id 推送保真');
+        expect(pushedRule['updated_at'], isNotNull,
+            reason: 'updated_at 推送保真（非空）');
         expect(remoteRules.containsKey('r-local'), isFalse,
             reason: 'sync_enabled=false 规则不进远端（本地偏好不泄漏到云）');
 
@@ -1281,9 +1291,7 @@ void main() {
         await h.close();
       }
     });
-  });
 
-  group('CloudSyncEngine 推送（分类/规则）', () {
     test('分类推送：本地新分类（含 parentId）推送且补填 user_id', () async {
       final h = CloudHarness.create();
       try {

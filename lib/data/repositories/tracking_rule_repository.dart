@@ -148,6 +148,20 @@ class TrackingRuleRepository with RepositoryMappings {
         if (local != null && !local.syncEnabled) {
           return;
         }
+        // **远端异常行防御短路**："远端表只承载 sync_enabled=true 规则"的
+        // 不变量由推送侧 rulesSince 过滤维持——若远端出现 sync_enabled=false
+        // 的异常行（legacy/异常客户端/手工修改），落地会把本地同步规则静默
+        // 降级为本地-only，随后 rulesSince 不再返回、永不推回，云端与本地
+        // 永久分叉且无法自愈——防御性跳过。
+        if (!remote.syncEnabled) {
+          return;
+        }
+        // **unknown 匹配类型防御短路**：match_kind=unknown 是反序列化兜底值
+        //（未知值不落库）——远端行若为 unknown（未来版本新匹配类型被当前
+        // 版本降级），落地会覆盖本地有效规则造成跨版本数据退化——跳过。
+        if (remote.matchKind == TrackingRuleMatchKind.unknown) {
+          return;
+        }
         // **平局决胜分支**：updated_at 相等时远端删除墓碑仍应用（删除永远赢）——
         // 与 ActivityRepository 的 tie-break 对齐。规则可更新/可删除（不同于
         // 不可变的 action log），平局场景真实可达，须显式处理。

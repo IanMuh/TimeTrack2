@@ -74,8 +74,8 @@ class TrackingRules extends Table {
   TextColumn get pattern => text()();
   /// 匹配类型（process/title，存储值见 TrackingRuleMatchKind.storageValue）。
   TextColumn get matchKind => text()();
-  /// 映射到的活动 id（可空：未指定时命中即切未分配？——设计：**必填**，
-  /// 无匹配活动的规则无意义，规则匹配到活动是映射的落点）。
+  /// 映射到的活动 id（必填：规则匹配到活动是映射的落点，无匹配活动的规则
+  /// 无意义）。
   TextColumn get activityId => text().references(Activities, #id)();
   BoolColumn get syncEnabled => boolean().withDefault(const Constant(true))();
   TextColumn get updatedAt => text()();
@@ -237,10 +237,9 @@ class AppDatabase extends _$AppDatabase {
               'BOOLEAN NOT NULL DEFAULT false',
             );
             await m.createTable(trackingRules);
-            // **迁移路径（r2）**：`@TableIndex` 注解仅在新库 onCreate 的
-            // createAll() 时建索引，`m.createTable` 不建——迁移库的索引由
-            // beforeOpen 的 [_ensureIndexes] 无条件补齐（见该方法的 tracking_rules
-            // 段），此处不重复建。
+            // 迁移路径：tracking_rules 索引由 beforeOpen 的 [_ensureIndexes]
+            // 无条件补齐（@TableIndex 仅 onCreate 的 createAll 建，m.createTable
+            // 不建），此处不重复。
           }
         },
       );
@@ -305,11 +304,10 @@ class AppDatabase extends _$AppDatabase {
       'CREATE INDEX IF NOT EXISTS idx_action_logs_entry_active '
       'ON action_logs (entry_id, occurred_at) WHERE deleted_at IS NULL',
     );
-    // tracking_rules 同步索引（**每次打开无条件补齐，r3**）：@TableIndex 仅
-    // 新库 createAll 建、迁移库 m.createTable 不建——放这里幂等补齐，同时
-    // 覆盖 新建库 / v1→v2 首次升级 / 已升到 v2 的存量库（上个 buggy 版本
-    // 升级后缺索引）三条路径；同步引擎 rulesSince 的 (user_id, updated_at)
-    // 查询与 activity_id 反查依赖。
+    // tracking_rules 同步索引（每次打开无条件补齐）：@TableIndex 仅在 onCreate
+    // 的 createAll() 建索引、迁移库 m.createTable 不建——放这里幂等补齐，覆盖
+    // 新建库 / v1→v2 升级 / 已升级但缺索引的存量库三类路径；同步引擎
+    // rulesSince 的 (user_id, updated_at) 查询与 activity_id 反查依赖。
     await customStatement(
       'CREATE INDEX IF NOT EXISTS idx_tracking_rules_sync '
       'ON tracking_rules (user_id, updated_at)',

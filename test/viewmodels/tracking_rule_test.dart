@@ -66,7 +66,14 @@ void main() {
         syncEnabled: false,
         deletedAt: DateTime.utc(2026, 8, 13, 4),
       );
-      final restored = TrackingRule.fromMap(localOnly.toMap());
+      // **序列化产物断言（r8）**：远端 tracking_rules 表该列默认 true——若
+      // toMap 回归为省略 sync_enabled=false 字段，推送载荷会让远端把本地-only
+      // 规则误判为可同步（隐私/同步语义错误）；fromMap 对缺键回退 false 会
+      // 掩盖该回归，须直接断言序列化产物携带该键。
+      final serialized = localOnly.toMap();
+      expect(serialized['sync_enabled'], isFalse,
+          reason: '序列化产物必须携带 sync_enabled=false（防缺键回退掩盖回归）');
+      final restored = TrackingRule.fromMap(serialized);
       expect(restored.id, 'r1');
       expect(restored.userId, 'u1');
       expect(restored.pattern, 'chrome.exe');

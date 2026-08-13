@@ -16,10 +16,10 @@ void main() {
   test('v1 → v2：is_auto 列补默认 false + tracking_rules 表创建', () async {
     final dir = Directory.systemTemp.createTempSync('timetrack-migrate');
     final file = File('${dir.path}/v1.sqlite');
+    // **句柄释放（r8）**：裸 sqlite3 句柄任一步抛错都须关闭（防 Windows 上
+    // 句柄占用使外层 deleteSync 重试后静默放弃、残留临时文件）。
+    final db = sqlite3.open(file.path);
     try {
-      // 裸建 v1 库（仅含 AppDatabase 打开时会校验/操作的关键表；activity FK
-      // 由旧条目引用，一并建）。
-      final db = sqlite3.open(file.path);
       db.execute('PRAGMA journal_mode = WAL');
       // **版本标注**：drift 以 `PRAGMA user_version` 判断迁移——裸建的 v1 库
       // 若不设 user_version=1，drift 视为全新库走 onCreate（表已存在会出错/
@@ -184,6 +184,14 @@ void main() {
         await appDb.close();
       }
     } finally {
+      // **句柄兜底（r8）**：若建库步骤任一步抛错（DDL 笔误/SQLite 差异），
+      // db.close() 未执行——此处兜底关闭（重复 close 幂等忽略），防 Windows
+      // 句柄占用使下方 deleteSync 重试后仍残留临时文件。
+      try {
+        db.close();
+      } catch (_) {
+        // 已关闭/重复关闭忽略
+      }
       // WAL 模式可能残留 -wal/-shm 句柄占用：显式删三类文件 + 有限次重试，
       // 防临时目录残留污染测试环境。
       for (var attempt = 0; attempt < 3; attempt++) {
@@ -212,28 +220,36 @@ void main() {
       // 先执行 SELECT 1 强制触发建库生成 v2 schema。
       await seeded.customSelect('SELECT 1').get();
       await seeded.close();
+      // **句柄异常保护（r8）**：raw 的查询/DDL/校验任一步抛错都须关闭句柄。
       final raw = sqlite3.open(file.path);
-      // **前置断言（r6）**：DROP 前先确认索引确实存在——若 SELECT 1 未触发
-      // 建库（user_version 仍 0），DROP 是空操作、afterDrop 恒空，自校验
-      // 假通过且重开走 onCreate 而非 _ensureIndexes 补齐（正是要防的场景）。
-      final beforeDrop = raw.select(
-          "SELECT name FROM sqlite_master WHERE type='index' "
-          "AND name = 'idx_tracking_rules_sync'");
-      if (beforeDrop.isEmpty) {
+      try {
+        // **版本显式断言（r8）**：把"SELECT 1 触发后 user_version 写回 2"的
+        // 隐式假设固化为显式断言——若 drift 升级致 user_version 语义变化，
+        // 重开会走 onCreate（表已存在抛错）而非 _ensureIndexes 补齐，用例
+        // 报错而非真实覆盖 r3 修复场景。
+        final v2 = raw.select('PRAGMA user_version').first['user_version'];
+        expect(v2, 2, reason: '种子库必须为 v2（SELECT 1 触发建库生效）');
+        // **前置断言（r6）**：DROP 前先确认索引确实存在——若 SELECT 1 未触发
+        // 建库（user_version 仍 0），DROP 是空操作、afterDrop 恒空，自校验
+        // 假通过且重开走 onCreate 而非 _ensureIndexes 补齐（正是要防的场景）。
+        final beforeDrop = raw.select(
+            "SELECT name FROM sqlite_master WHERE type='index' "
+            "AND name = 'idx_tracking_rules_sync'");
+        if (beforeDrop.isEmpty) {
+          fail('建库后 idx_tracking_rules_sync 不存在——SELECT 1 未触发建库，用例空转');
+        }
+        raw.execute('DROP INDEX IF EXISTS idx_tracking_rules_sync');
+        // **模拟状态自校验（r5）**：断言 buggy 状态真实生效——索引确实已删，
+        // 否则用例空转（若重开仍走 onCreate 而非 _ensureIndexes 补齐则假通过）。
+        final afterDrop = raw.select(
+            "SELECT name FROM sqlite_master WHERE type='index' "
+            "AND name = 'idx_tracking_rules_sync'");
+        if (afterDrop.isNotEmpty) {
+          fail('DROP 后 idx_tracking_rules_sync 仍存在——buggy 状态模拟失败');
+        }
+      } finally {
         raw.close();
-        fail('建库后 idx_tracking_rules_sync 不存在——SELECT 1 未触发建库，用例空转');
       }
-      raw.execute('DROP INDEX IF EXISTS idx_tracking_rules_sync');
-      // **模拟状态自校验（r5）**：断言 buggy 状态真实生效——索引确实已删，
-      // 否则用例空转（若重开仍走 onCreate 而非 _ensureIndexes 补齐则假通过）。
-      final afterDrop = raw.select(
-          "SELECT name FROM sqlite_master WHERE type='index' "
-          "AND name = 'idx_tracking_rules_sync'");
-      if (afterDrop.isNotEmpty) {
-        raw.close();
-        fail('DROP 后 idx_tracking_rules_sync 仍存在——buggy 状态模拟失败');
-      }
-      raw.close();
 
       // 重新打开：_ensureIndexes 无条件补齐被删索引。
       final reopened = AppDatabase(NativeDatabase(file));
