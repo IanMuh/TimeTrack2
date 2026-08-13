@@ -40,6 +40,24 @@ Future<String> sha256File(
   return collector.digest!.toString();
 }
 
+/// 计算**任意字节流**的 SHA-256（hex 小写）——供"下载流边收边算"场景
+///（下载写临时文件的同时累计哈希，校验环节免二次读盘）。
+///
+/// 消费完 [stream]（含关闭）后返回；[stream] 中途出错（Error/异常）时
+/// 错误向上传播（converter 在 finally 中关闭，哈希状态完整）。
+Future<String> sha256Stream(Stream<List<int>> stream) async {
+  final collector = _DigestCollector();
+  final converter = crypto.sha256.startChunkedConversion(collector);
+  try {
+    await for (final chunk in stream) {
+      converter.add(chunk);
+    }
+  } finally {
+    converter.close();
+  }
+  return collector.digest!.toString();
+}
+
 /// 收集流式哈希的最终 [crypto.Digest]。
 class _DigestCollector implements Sink<crypto.Digest> {
   crypto.Digest? digest;

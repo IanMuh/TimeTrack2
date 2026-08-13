@@ -116,4 +116,40 @@ void main() {
       }
     });
   });
+
+  group('sha256Stream', () {
+    test('与 sha256Bytes 一致（分块累积，含空流）', () async {
+      final payload = List<int>.generate(100000, (i) => i % 251);
+      expect(
+        await sha256Stream(Stream.value(payload)),
+        sha256Bytes(payload),
+        reason: '单块流与字节数组哈希一致',
+      );
+      // 分块累积（模拟下载流逐块到达）。
+      final chunks = <List<int>>[];
+      for (var i = 0; i < payload.length; i += 7000) {
+        chunks.add(payload.sublist(
+          i,
+          (i + 7000) < payload.length ? i + 7000 : payload.length,
+        ));
+      }
+      expect(
+        await sha256Stream(Stream.fromIterable(chunks)),
+        sha256Bytes(payload),
+        reason: '分块流与整块哈希一致（分块不影响结果）',
+      );
+      expect(
+        await sha256Stream(const Stream.empty()),
+        sha256Bytes(const []),
+        reason: '空流哈希',
+      );
+    });
+
+    test('已知向量（abc）', () async {
+      expect(
+        await sha256Stream(Stream.value('abc'.codeUnits)),
+        'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
+      );
+    });
+  });
 }

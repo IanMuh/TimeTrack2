@@ -1,0 +1,151 @@
+/// 更新清单服务：拉取 `update.json` → 解析校验 → 与本地缓存比较。
+///
+/// 流程（计划"完整更新系统设计"·管线）：
+/// 1. 拉取 [UpdateConfig.defaultManifestUrl]（可被 --dart-define 覆盖）；
+/// 2. [UpdateManifest.fromMap] 校验（version/SemVer/sha256/url 快速失败）；
+/// 3. 与缓存清单（app_metadata `lastCheckedManifestVersion`）比较：
+///    - 远端版本 ≤ 当前应用版本 → 无更新；
+///    - 远端版本 ≤ 已忽略版本 → 无更新（"忽略此版本"持久化）；
+///    - 否则视为可用更新，缓存远端版本供后续比较。
+///
+/// 版本比较用 [AppVersion]（SemVer 2.0.0，含 pre-release 规则）。
+library;
+
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io' show SocketException;
+
+import 'package:http/http.dart' as http;
+
+import '../../constants/storage_keys.dart';
+import '../../constants/update_config.dart';
+import '../../data/database/app_database.dart';
+import '../../utils/app_version.dart';
+import '../../utils/result.dart';
+import '../../viewmodels/update/update_manifest.dart';
+
+/// 检查结果（供阶段 3 编排/UI 使用）。
+class UpdateCheckResult {
+  const UpdateCheckResult({
+    required this.available,
+    required this.latestVersion,
+    required this.required,
+    required this.releaseNotes,
+    required this.windows,
+    required this.android,
+  });
+
+  /// 是否有可用更新。
+  final bool available;
+
+  /// 最新可用版本（SemVer 字符串；无更新时为空串）。
+  final String latestVersion;
+
+  /// 是否强制更新（不可跳过）。
+  final bool required;
+
+  final String releaseNotes;
+
+  /// 各平台产物（无更新/该平台未提供时为 null）。
+  final UpdatePlatformArtifact? windows;
+  final UpdatePlatformArtifact? android;
+}
+
+/// 更新清单服务。
+class UpdateManifestService {
+  UpdateManifestService({
+    required this.database,
+    required String currentVersion,
+    http.Client? httpClient,
+    Uri? manifestUrl,
+  })  : _current = AppVersion.parse(currentVersion),
+        _http = httpClient ?? http.Client(),
+        _manifestUrl = manifestUrl ?? UpdateConfig.defaultManifestUrl;
+
+  final AppDatabase database;
+  final http.Client _http;
+  final Uri _manifestUrl;
+  final AppVersion _current;
+
+  /// 检查更新；失败返回可读原因（网络/清单损坏）。
+  Future<AppResult<UpdateCheckResult>> checkForUpdate() async {
+    final http.Response response;
+    try {
+      response = await _http
+          .get(_manifestUrl)
+          .timeout(UpdateConfig.checkTimeout);
+    } on TimeoutException {
+      return const AppFailure('更新检查超时，请稍后重试');
+    } on SocketException {
+      return const AppFailure('网络不可用，请稍后重试');
+    } on http.ClientException {
+      return const AppFailure('网络不可用，请稍后重试');
+    }
+    if (response.statusCode != 200) {
+      return AppFailure('更新清单获取失败（${response.statusCode}）');
+    }
+    final UpdateManifest manifest;
+    try {
+      manifest =
+          UpdateManifest.fromMap(jsonDecode(response.body) as Map<String, Object?>);
+    } on FormatException catch (e) {
+      return AppFailure('更新清单解析失败：${e.message}');
+    } on TypeError {
+      // jsonDecode 顶层非对象（数组/标量）。
+      return const AppFailure('更新清单结构异常');
+    }
+    return _evaluate(manifest);
+  }
+
+  /// 评估清单：版本比较 + 缓存。**纯逻辑（可单测）**——与网络解耦。
+  Future<AppResult<UpdateCheckResult>> evaluate(UpdateManifest manifest) async {
+    return _evaluate(manifest);
+  }
+
+  Future<AppResult<UpdateCheckResult>> _evaluate(
+    UpdateManifest manifest,
+  ) async {
+    final remote = AppVersion.parse(manifest.version);
+    // 远端版本 ≤ 当前应用版本 → 无更新。
+    if (!(_current < remote)) {
+      return AppSuccess(_none(manifest));
+    }
+    // "忽略此版本"：用户选择忽略的版本不再提示（远端 ≤ 已忽略版本即跳过）。
+    final ignored = await _readString(AppMetadataKeys.ignoredUpdateVersion);
+    if (ignored != null && !(AppVersion.parse(ignored) < remote)) {
+      return AppSuccess(_none(manifest));
+    }
+    // 可用更新：缓存远端版本（供"检查过但未装"的后续判断）。
+    await _writeString(AppMetadataKeys.lastCheckedManifestVersion, manifest.version);
+    return AppSuccess(UpdateCheckResult(
+      available: true,
+      latestVersion: manifest.version,
+      required: manifest.required,
+      releaseNotes: manifest.releaseNotes,
+      windows: manifest.windows,
+      android: manifest.android,
+    ));
+  }
+
+  UpdateCheckResult _none(UpdateManifest manifest) => UpdateCheckResult(
+        available: false,
+        latestVersion: '',
+        required: false,
+        releaseNotes: '',
+        windows: null,
+        android: null,
+      );
+
+  Future<String?> _readString(String key) async {
+    final query = database.select(database.appMetadata)
+      ..where((t) => t.key.equals(key));
+    final row = await query.getSingleOrNull();
+    return row?.value;
+  }
+
+  Future<void> _writeString(String key, String value) async {
+    await database.into(database.appMetadata).insertOnConflictUpdate(
+          AppMetadataCompanion.insert(key: key, value: value),
+        );
+  }
+}
