@@ -98,39 +98,65 @@ class WindowsInstaller {
   /// 应用 staging：备份当前程序目录 → 清空 → 移入 staging；失败回滚。
   ///
   /// 调用方（阶段 3/4 启动逻辑）应**先确认 exe 未被锁定**（本文件不持有 exe）；
-  /// [applyStaging] 内部做原子性：备份目录先建，任何步骤失败恢复备份。
-  /// **清空前校验 staging 含至少一个普通文件**（递归）——防仅含空子目录的
-  /// staging 通过守卫后把程序目录清成空壳。
+  /// **两阶段结构（r3 修正）**：
+  /// - **备份阶段**（守卫 + 复制 + 完成确认）：任何失败/IO 异常都**直接返回
+  ///   失败、绝不进清空路径**——程序目录仍完好，无备份可恢复时清空会造空壳
+  ///   （含 staging 不可读的 IO 异常，防从"安全中止"变为"清空程序目录"）；
+  /// - **安装阶段**（清空 + 移入 + 删备份）：备份已确认完整后才开始，失败才
+  ///   走回滚（清空与恢复各自独立 try）。
   Future<AppResult<void>> applyStaging(String stagingPath) async {
     final staging = Directory(stagingPath);
-    // backupDir 提到方法作用域（catch 回滚分支也需引用）。
     final backupDir = Directory('$programDir/.backup-${DateTime.now().millisecondsSinceEpoch}');
+    // ---- 备份阶段（失败绝不进清空路径）----
+    // 前置守卫：staging 存在且递归含至少一个普通文件（IO 异常显式捕获——
+    // 防 listSync 异常进入下方安装/回滚逻辑、在无备份时清空程序目录）。
+    bool stagingOk;
     try {
-      // 前置守卫：staging 必须存在且递归含至少一个普通文件（prepareStaging
-      // 已拒空包，此处双保险——调用方可能绕过 prepareStaging 直接传路径；
-      // IO 异常（staging 不可读）转 AppFailure 而非裸抛）。
-      if (!staging.existsSync() || !_containsRegularFile(staging)) {
-        return const AppFailure('安装暂存目录缺失或无文件，已中止（未改动程序目录）');
-      }
-      // 1. 备份当前程序目录（不含 staging 与备份自身）。
+      stagingOk = staging.existsSync() && _containsRegularFile(staging);
+    } on FileSystemException {
+      stagingOk = false;
+    }
+    if (!stagingOk) {
+      return const AppFailure('安装暂存目录缺失或无文件，已中止（未改动程序目录）');
+    }
+    try {
+      // 备份当前程序目录（不含 staging 与备份自身）。
       if (Directory(programDir).existsSync()) {
         _copyDirectory(Directory(programDir), backupDir, exclude: const {
           UpdateConfig.windowsStagingDirName,
         });
       }
-      // **备份完成确认（r2）**：备份创建失败（文件被占用/只读）时程序目录
-      // 仍完好——**绝不执行清空**（否则无备份可恢复、程序目录被清成空壳）。
-      if (!backupDir.existsSync() || backupDir.listSync().isEmpty) {
-        return const AppFailure('创建备份失败，已中止（程序目录未改动）');
+    } catch (e) {
+      // 备份阶段失败（文件被占用/只读/IO 异常）：程序目录仍完好，**绝不
+      // 清空**（无完整备份可恢复，清空会造空壳）。清理残留备份目录。
+      try {
+        if (backupDir.existsSync()) {
+          backupDir.deleteSync(recursive: true);
+        }
+      } on FileSystemException {
+        // 清理失败不影响失败结论。
       }
-      // 2. 清空程序目录（保留 staging/备份）。
+      return AppFailure('创建备份失败，已中止（程序目录未改动）：$e');
+    }
+    // 备份完成确认：必须存在且含内容（防"空备份通过"）。
+    bool backupOk;
+    try {
+      backupOk = backupDir.existsSync() && backupDir.listSync().isNotEmpty;
+    } on FileSystemException {
+      backupOk = false;
+    }
+    if (!backupOk) {
+      return const AppFailure('创建备份失败，已中止（程序目录未改动）');
+    }
+
+    // ---- 安装阶段（备份已确认完整，失败才走回滚）----
+    try {
       _clearProgramDir();
-      // 3. 移入 staging。
       for (final entry in staging.listSync()) {
         entry.renameSync('$programDir/${_basename(entry.path)}');
       }
       staging.deleteSync(recursive: true);
-      // 4. 删除备份（**best-effort**）：备份中文件被占用/杀毒扫描时删除失败
+      // 删除备份（**best-effort**）：备份中文件被占用/杀毒扫描时删除失败
       // ——安装已成功，备份删除失败不改变结果（只留备份目录待手动清理），
       // 绝不能因此进入回滚把刚装好的新文件清掉。
       try {
@@ -142,8 +168,8 @@ class WindowsInstaller {
       }
       return const AppSuccess(null);
     } catch (e) {
-      // **失败回滚（r2 修正）**：清空与恢复必须**各自独立 try**——清空失败
-      //（新文件被占用）不能阻止恢复备份。回滚自身失败时保留备份目录并明确
+      // **安装阶段回滚（r2 修正）**：清空与恢复各自独立 try——清空失败
+      //（新文件被占用）不能阻止恢复备份。回滚自身失败保留备份目录并明确
       // 告知（不误导为"已回滚"）。
       var rollbackOk = false;
       try {

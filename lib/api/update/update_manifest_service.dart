@@ -92,12 +92,21 @@ class UpdateManifestService {
       response = await _http
           .get(_manifestUrl)
           .timeout(UpdateConfig.checkTimeout);
+      // **await 期间可能已被 close（r3）**：资源已释放，不再继续评估——
+      // 防"等待期间 close → 成功继续 _evaluate 写库返回成功"违背已关闭语义。
+      if (_closed) {
+        return const AppFailure('更新服务已关闭，请重新创建');
+      }
     } on TimeoutException {
       return const AppFailure('更新检查超时，请稍后重试');
     } on SocketException {
       return const AppFailure('网络不可用，请稍后重试');
     } on http.ClientException {
       return const AppFailure('网络不可用，请稍后重试');
+    } on StateError {
+      // 自建 client 在请求期间被 close 强关时可能抛 StateError('Client is
+      // already closed')——归因"已关闭"而非裸逃逸崩溃。
+      return const AppFailure('更新服务已关闭，请重新创建');
     }
     if (response.statusCode != 200) {
       return AppFailure('更新清单获取失败（${response.statusCode}）');

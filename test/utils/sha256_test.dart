@@ -153,6 +153,18 @@ void main() {
       );
     });
 
+    test('Sha256Sink digest 幂等（r3）：重复调用不抛错且返回同一摘要', () {
+      final sink = Sha256Sink()..add('abc'.codeUnits);
+      final first = sink.digest();
+      // 第二次调用不抛 StateError（显式 _closed 标志只 close 一次）、值一致。
+      final second = sink.digest();
+      expect(second, first);
+      expect(
+        first,
+        'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
+      );
+    });
+
     test('流中途出错：异常向上传播（下载流中断关键路径，r2）', () async {
       // 文档承诺"流中途出错时错误向上传播、converter 在 finally 中关闭"——
       // 下载流中断/网络异常时哈希状态完整、不泄漏。

@@ -201,26 +201,27 @@ void main() {
       }
     });
 
-    test('applyStaging 失败回滚：恢复备份（模拟移入中途失败）', () async {
-      final root = await Directory.systemTemp.createTemp('win_rollback');
+    test('applyStaging 备份阶段保护（r3）：staging 仅含空子目录 → 拒绝且程序未动', () async {
+      // 防"仅含空子目录的 staging 通过守卫后清空程序目录成空壳"——递归文件
+      // 守卫须拒绝；程序目录在备份阶段失败时**绝不进清空路径**（无备份可恢复
+      // 时清空会造空壳）。
+      final root = await Directory.systemTemp.createTemp('win_guard');
       final program = Directory('${root.path}/program')..createSync();
       final data = Directory('${root.path}/data')..createSync();
       File('${program.path}/app.exe').writeAsStringSync('old');
       final staging = Directory('${program.path}/staging')..createSync();
-      File('${staging.path}/app.exe').writeAsStringSync('new');
-      // 制造失败：在程序目录放置一个不可删除的目录（Windows 下删递归会失败
-      // 很难稳定构造）——用注入 zipCodec 不可行；改为构造"staging 含子目录，
-      // 且程序目录含同名的只读文件"场景较复杂。退而求其次：用损坏的 staging
-      // 路径（不存在）触发失败路径，断言返回失败且旧文件保留。
+      // staging 仅含空子目录（无任何普通文件）。
+      Directory('${staging.path}/emptydir').createSync();
       try {
         final installer = WindowsInstaller(
           programDir: program.path,
           dataDir: data.path,
         );
-        final result = await installer.applyStaging('${program.path}/no-such-staging');
-        expect(result.isSuccess, isFalse, reason: 'staging 不存在 → 失败');
+        final result = await installer.applyStaging(staging.path);
+        expect(result.isSuccess, isFalse, reason: '无文件的 staging 拒绝');
+        // 程序目录原样保留（备份阶段失败不进入清空路径）。
         expect(File('${program.path}/app.exe').readAsStringSync(), 'old',
-            reason: '失败后旧程序保留（回滚/未动）');
+            reason: '程序目录未改动');
       } finally {
         await root.delete(recursive: true);
       }

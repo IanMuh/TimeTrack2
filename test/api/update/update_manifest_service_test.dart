@@ -101,6 +101,29 @@ void main() {
       expect(result.available, isTrue,
           reason: '脏忽略版本视为未忽略，正常提示更新');
     });
+
+    test('close 后 checkForUpdate 返回可读失败且不发网络请求（r3）', () async {
+      var hit = false;
+      final client = UpdateManifestService(
+        database: db,
+        currentVersion: '1.0.0',
+        manifestUrl: Uri.parse('https://x.example/update.json'),
+        httpClient: MockClient((request) async {
+          hit = true;
+          return http.Response('{}', 200, request: request);
+        }),
+      );
+      client.close();
+      final result = await client.checkForUpdate();
+      expect(result.isSuccess, isFalse, reason: '已关闭返回失败');
+      expect(
+        result.when(onSuccess: (_) => '', onFailure: (m) => m),
+        contains('已关闭'),
+      );
+      expect(hit, isFalse, reason: '已关闭不再发起网络请求');
+      // 重复 close 幂等（不抛错）。
+      client.close();
+    });
   });
 
   group('UpdateManifestService 网络层（MockClient）', () {
