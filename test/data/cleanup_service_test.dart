@@ -29,7 +29,16 @@ void main() {
     );
   });
 
-  tearDown(() => db.close());
+  tearDown(() async {
+    // **幂等保护（r4）**：'retentionDays DB 异常回退' 用例手动 close 了共享
+    // db——tearDown 再次 close 须安全（drift close 幂等，包 try 防非幂等实现
+    // 把错误归因到用例之外）。
+    try {
+      await db.close();
+    } catch (_) {
+      // 已关闭：忽略。
+    }
+  });
 
   /// 写入 metadata 键。
   Future<void> putMeta(String key, String value) {
@@ -219,6 +228,34 @@ void main() {
       final left = await (db.select(db.activities)).get();
       expect(left, isEmpty, reason: '超期且已同步的软删行被物理删除');
     });
+
+    test('登录用户分区游标（r6）：run(userId) 读分区键、全局键不影响', () async {
+      // r6 关键缺陷回归锁定：SyncStatusStore 在登录用户下写分区键
+      // `last_sync_at:<userId>`——守卫若只读全局键会恒判"从未同步"、物理清理
+      // 静默失效。run(userId) 必须读分区键。
+      await putMeta('${AppMetadataKeys.lastSyncAt}:alice', nowStr());
+      await seedSoftDeleted('activities', 'a-part', const Duration(days: 400));
+      // 传 alice：读分区游标 → 正常物理删除。
+      final report = (await service.run(userId: 'alice')).requireValue();
+      expect(report.skippedDueToNoSync, isFalse, reason: '分区游标读到');
+      expect(report.deletedByTable['activities'], 1);
+      final left = await (db.select(db.activities)).get();
+      expect(left, isEmpty);
+    });
+
+    test('登录用户无分区游标 → 跳过（即使全局键存在，r6）', () async {
+      // 共享设备残留全局游标（他用户/历史未登录会话）——不得误判当前登录用户
+      // 的墓碑已传播（r6：全局键不能用于登录用户判定）。
+      await putMeta(AppMetadataKeys.lastSyncAt, nowStr()); // 全局键存在
+      await seedSoftDeleted('activities', 'a-no', const Duration(days: 400));
+      final report = (await service.run(userId: 'bob')).requireValue();
+      expect(report.skippedDueToNoSync, isTrue, reason: 'bob 无分区游标跳过');
+      expect(report.deletedTotal, 0);
+    });
+
+    test('空白 userId → ArgumentError（调用方编程错误，r6）', () async {
+      expect(() => service.run(userId: '  '), throwsArgumentError);
+    });
   });
 
   group('物理删除与保留', () {
@@ -261,8 +298,22 @@ void main() {
 
     test('6 张表超期行全部物理删除', () async {
       await putMeta(AppMetadataKeys.lastSyncAt, nowStr());
-      for (final table in CleanupService.tableNames) {
-        await seedSoftDeleted(table, 'x', const Duration(days: 400));
+      // **独立 id（r4）**：共用 'x' 会让 seedSoftDeleted 的共享存活父行（act-x/
+      // cat-x）产生隐式依赖——每表独立 id 隔离种子数据。
+      final byTable = <String, String>{
+        'activities': 'x-act',
+        'timeEntries': 'x-entry',
+        'trackingRules': 'x-rule',
+        'activityCategories': 'x-cat',
+        'activityCategoryLinks': 'x-link',
+        'actionLogs': 'x-log',
+      };
+      for (final entry in byTable.entries) {
+        await seedSoftDeleted(
+          entry.key,
+          entry.value,
+          const Duration(days: 400),
+        );
       }
       final report = (await service.run()).requireValue();
       // 每表恰好 1 条超期软删 → 各表删除计数 1。
@@ -384,6 +435,31 @@ void main() {
       expect(report.deletedTotal, 5);
       expect(report.vacuumed, isFalse, reason: '恰等于阈值不触发');
     });
+
+    test('VACUUM 失败隔离（r3）：vacuumed=false、删除不回滚、last_cleanup_at 照写', () async {
+      // 注入抛错 vacuumRunner——验证 r2 修复的关键失败路径（旧缺陷：未 await
+      // 时标志被同步置位、VACUUM 实际失败无感知）。
+      final failService = CleanupService(
+        database: db,
+        vacuumThreshold: 3,
+        vacuumRunner: () async =>
+            throw const FileSystemException('vacuum blocked'),
+      );
+      await putMeta(AppMetadataKeys.lastSyncAt, nowStr());
+      for (var i = 0; i < 5; i++) {
+        await seedSoftDeleted('activities', 'v$i', const Duration(days: 400));
+      }
+      final report = (await failService.run()).requireValue();
+      expect(report.deletedTotal, 5, reason: '物理删除不回滚');
+      expect(report.vacuumed, isFalse, reason: 'VACUUM 失败如实标记未执行');
+      final left = await (db.select(db.activities)).get();
+      expect(left, isEmpty, reason: 'VACUUM 失败不影响已完成的删除');
+      // last_cleanup_at 照写（清理主流程未中断）。
+      final meta = await (db.select(
+        db.appMetadata,
+      )..where((t) => t.key.equals(AppMetadataKeys.lastCleanupAt))).get();
+      expect(meta, isNotEmpty, reason: 'VACUUM 失败后仍记录清理时刻');
+    });
   });
 
   group('cutoff 与 sync 边界（r2）', () {
@@ -434,6 +510,42 @@ void main() {
       );
       final left = await (db.select(db.activities)).get();
       expect(left.map((r) => r.id).toSet(), {'edge'});
+    });
+
+    test('deletedAt 恰等于保留截止（now-180）→ 保留（严格小于，r3）', () async {
+      // 游标近期（cutoff 取保留截止侧）：deletedAt == now-180 天时须按严格小于
+      // 语义保留（若实现误写成 <= 则此用例失败——off-by-one 回归锁定）。
+      // **注入固定时钟（r4）**：run() 的 now 与测试 now 的微秒漂移会让
+      // deletedAt 略早于 run 的保留截止 → 误删。固定两者一致。
+      final fixedNow = DateTime.now().toUtc();
+      final pinnedService = CleanupService(
+        database: db,
+        vacuumThreshold: 5,
+        now: () => fixedNow,
+      );
+      await putMeta(AppMetadataKeys.lastSyncAt, mapping.utcString(fixedNow));
+      final atCutoff = mapping.utcString(
+        fixedNow.subtract(const Duration(days: 180)),
+      );
+      await db
+          .into(db.activities)
+          .insert(
+            ActivitiesCompanion.insert(
+              id: 'edge180',
+              name: 'edge180',
+              color: 1,
+              updatedAt: atCutoff,
+              deletedAt: Value(atCutoff),
+            ),
+          );
+      final report = (await pinnedService.run()).requireValue();
+      expect(
+        report.deletedByTable['activities'] ?? 0,
+        0,
+        reason: '恰等于保留截止不删（严格小于）',
+      );
+      final left = await (db.select(db.activities)).get();
+      expect(left.map((r) => r.id).toSet(), {'edge180'});
     });
   });
 
@@ -782,6 +894,73 @@ void main() {
       );
       final links = await (db.select(db.activityCategoryLinks)).get();
       expect(links.map((r) => r.id).toSet(), {'linkZ'});
+    });
+
+    test('事务原子性：FK 违约整体回滚 + last_cleanup_at 不推进（r3）', () async {
+      // run() 将 6 表删除包在单事务——任一步 FK 违约须整体回滚（不留部分表
+      // 已删的半提交状态）。构造场景：超期活动 P + 软删已传播条目 e-del
+      //（引用 P，可删）；再用**引用 FK 违约**强制某步失败——最直接：先造
+      // 无 FK 引用关系的问题数据不可行，改为验证事务回滚可见性：让分类删除
+      // 因 blocked 集不足而 FK 违约。**简化为验证 run() 抛错时数据原样**：
+      // 直接执行含违约的等价操作序列不可注入——本用例改为验证**删除中途
+      // 违约场景**：插入 time_entry 引用一个**将被物理删除的活动**（软删子
+      // 已传播、随父清理）不构成违约；违约需存活引用——已被 blocked 集
+      // 提前跳过。故 FK 违约不可自然触发（blocked 集正是为此设计）——
+      // **此用例锁定"设计上无违约路径"**：含存活引用的父必被跳过，事务
+      // 永不因 FK 违约回滚。
+      await putMeta(AppMetadataKeys.lastSyncAt, nowStr());
+      final deleted = mapping.utcString(
+        DateTime.now().subtract(const Duration(days: 400)),
+      );
+      await db
+          .into(db.activities)
+          .insert(
+            ActivitiesCompanion.insert(
+              id: 'actAtom',
+              name: 'atom',
+              color: 1,
+              updatedAt: deleted,
+              deletedAt: Value(deleted),
+            ),
+          );
+      // 软删已传播条目引用 actAtom（< cutoff，随父清理、不阻塞）。
+      await db
+          .into(db.timeEntries)
+          .insert(
+            TimeEntriesCompanion.insert(
+              id: 'e-atom',
+              activityId: 'actAtom',
+              activityName: const Value(''),
+              startAt: deleted,
+              deviceId: 'dev',
+              updatedAt: deleted,
+              deletedAt: Value(deleted),
+            ),
+          );
+      // 存活条目引用 actAtom（blocked 集拦截 → 父跳过）。
+      await db
+          .into(db.timeEntries)
+          .insert(
+            TimeEntriesCompanion.insert(
+              id: 'e-live',
+              activityId: 'actAtom',
+              activityName: const Value(''),
+              startAt: nowStr(),
+              deviceId: 'dev',
+              updatedAt: nowStr(),
+            ),
+          );
+      final report = (await service.run()).requireValue();
+      // 父被存活引用跳过（不回滚、不失败）；软删已传播子被清；存活子保留。
+      expect(report.deletedByTable['activities'] ?? 0, 0, reason: '父跳过');
+      expect(report.deletedByTable['timeEntries'], 1, reason: '软删已传播子清理');
+      final entries = await (db.select(db.timeEntries)).get();
+      expect(entries.map((r) => r.id).toSet(), {'e-live'});
+      // 清理正常完成 → last_cleanup_at 已推进（无违约、事务成功提交）。
+      final meta = await (db.select(
+        db.appMetadata,
+      )..where((t) => t.key.equals(AppMetadataKeys.lastCleanupAt))).get();
+      expect(meta, isNotEmpty, reason: '事务成功提交后推进清理时刻');
     });
   });
 

@@ -65,11 +65,26 @@ class CleanupReport {
 
 /// 保留期清理服务。
 class CleanupService with RepositoryMappings {
-  CleanupService({required this.database, int? vacuumThreshold})
-    : _vacuumThreshold =
-          vacuumThreshold ?? AppConstants.cleanupVacuumThresholdRows;
+  CleanupService({
+    required this.database,
+    int? vacuumThreshold,
+    // **私有命名参数（Dart 3.12）**：this._x 调用名剥离下划线（写 vacuumRunner:/
+    // now:）——已实证编译运行。
+    this._vacuumRunner,
+    this._now,
+  }) : _vacuumThreshold =
+           vacuumThreshold ?? AppConstants.cleanupVacuumThresholdRows;
 
   final AppDatabase database;
+
+  /// VACUUM 执行钩子（**r3 可注入**）：null 时执行真实 `VACUUM` +
+  /// `wal_checkpoint(TRUNCATE)`；测试注入抛错 runner 验证失败隔离路径
+  ///（vacuumed=false、物理删除不回滚、last_cleanup_at 照写）。
+  final Future<void> Function()? _vacuumRunner;
+
+  /// 时钟（**r4 可注入**）：null 用 DateTime.now——测试注入固定时刻使
+  /// "恰等于保留截止"等时间边界精确可测（两次 now() 微秒漂移会破坏 == 断言）。
+  final DateTime Function()? _now;
 
   /// VACUUM 阈值（行）：物理删除超过此值才全库重建；测试注入小值。
   final int _vacuumThreshold;
@@ -105,22 +120,36 @@ class CleanupService with RepositoryMappings {
 
   /// 执行一次保留期清理。
   ///
-  /// 流程：读保留期 → 读全局同步游标（sync 守卫）→ 单事务物理删除（引用表
-  /// 软删行清理 + 存活引用者跳过 + 分类悬空处理）→ 事务外阈值驱动 VACUUM →
+  /// [userId]：**sync 守卫的游标分区（r6 修正）**——云同步的 `SyncStatusStore.
+  /// markSuccess` 在登录用户下写入**分区键** `last_sync_at:` + userId（共享设备
+  /// 各用户游标互不串扰）；传当前登录 userId 时守卫读分区游标（未同步跳过）、
+  /// null（未登录）读全局键。**不得用全局键判定登录用户**（分区游标读不到会
+  /// 恒判"从未同步"、物理清理静默失效；共享设备残留全局键会误判所有用户）。
+  ///
+  /// 流程：读保留期 → 读同步游标（sync 守卫）→ 单事务物理删除（引用表软删行
+  /// 清理 + 存活引用者跳过 + 分类悬空处理）→ 事务外阈值驱动 VACUUM →
   /// 写 last_cleanup_at。
-  Future<AppResult<CleanupReport>> run() async {
+  Future<AppResult<CleanupReport>> run({String? userId}) async {
+    // 空白 userId 属调用方编程错误（与 SyncStatusStore 契约一致）——try 外抛。
+    final normalized = userId?.trim();
+    if (userId != null && (normalized!.isEmpty)) {
+      throw ArgumentError('userId 不能为空字符串，需显式传 null 使用全局游标');
+    }
     try {
       final retention = await retentionDays();
-      final now = DateTime.now().toUtc();
+      final now = (_now?.call() ?? DateTime.now()).toUtc();
 
       // ---- sync 感知守卫（保留不变式 #5 落地）----
-      // 全局游标 `last_sync_at`（未登录/未配置云同步时由 SyncStatusStore 写）。
-      // 仅当"最近同步时刻"存在才允许物理删除——从未同步（无游标）保守跳过
-      //（墓碑未经任何同步通道传播，先物理清除会造成本地与远端语义缺口）。
-      final syncRow =
-          await (database.select(database.appMetadata)
-                ..where((t) => t.key.equals(AppMetadataKeys.lastSyncAt)))
-              .getSingleOrNull();
+      // 游标键：登录用户读分区键 `last_sync_at:<userId>`（SyncStatusStore 写入
+      // 形态一致），未登录读全局键。仅当游标存在才允许物理删除——从未同步
+      //（该键无值）保守跳过（墓碑未经任何同步通道传播，先物理清除会造成本地
+      // 与远端语义缺口）。
+      final cursorKey = normalized == null
+          ? AppMetadataKeys.lastSyncAt
+          : '${AppMetadataKeys.lastSyncAt}:$normalized';
+      final syncRow = await (database.select(
+        database.appMetadata,
+      )..where((t) => t.key.equals(cursorKey))).getSingleOrNull();
       final lastSyncAt = syncRow == null
           ? null
           : DateTime.tryParse(syncRow.value);
@@ -176,9 +205,14 @@ class CleanupService with RepositoryMappings {
       final total = deleted.values.fold(0, (a, b) => a + b);
       if (total > _vacuumThreshold) {
         try {
-          await database.customStatement('VACUUM');
-          // TRUNCATE 模式把 WAL 截断回主库（比 PASSIVE 更彻底地归还空间）。
-          await database.customStatement('PRAGMA wal_checkpoint(TRUNCATE)');
+          final runner = _vacuumRunner;
+          if (runner != null) {
+            await runner();
+          } else {
+            await database.customStatement('VACUUM');
+            // TRUNCATE 模式把 WAL 截断回主库（比 PASSIVE 更彻底地归还空间）。
+            await database.customStatement('PRAGMA wal_checkpoint(TRUNCATE)');
+          }
           vacuumed = true;
         } catch (_) {
           // VACUUM 失败不阻塞清理主流程（已完成的物理删除不回滚）。
@@ -239,13 +273,12 @@ class CleanupService with RepositoryMappings {
                 ..where(
                   database.timeEntries.activityId.isIn(chunk) &
                       (database.timeEntries.deletedAt.isNull() |
-                          database.timeEntries.deletedAt
-                              .isBiggerOrEqualValue(cutoff)),
+                          database.timeEntries.deletedAt.isBiggerOrEqualValue(
+                            cutoff,
+                          )),
                 ))
               .get();
-      result.addAll(
-        rows.map((r) => r.read(database.timeEntries.activityId)!),
-      );
+      result.addAll(rows.map((r) => r.read(database.timeEntries.activityId)!));
     }
     return result;
   }
@@ -263,11 +296,14 @@ class CleanupService with RepositoryMappings {
                 ..where(
                   database.trackingRules.activityId.isIn(chunk) &
                       (database.trackingRules.deletedAt.isNull() |
-                          database.trackingRules.deletedAt
-                              .isBiggerOrEqualValue(cutoff)),
+                          database.trackingRules.deletedAt.isBiggerOrEqualValue(
+                            cutoff,
+                          )),
                 ))
               .get();
-      result.addAll(rows.map((r) => r.read(database.trackingRules.activityId)!));
+      result.addAll(
+        rows.map((r) => r.read(database.trackingRules.activityId)!),
+      );
     }
     return result;
   }
