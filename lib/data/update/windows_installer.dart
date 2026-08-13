@@ -95,15 +95,20 @@ class WindowsInstaller {
   /// 失败路径清理 staging（防半解压残留被当作可安装包）。
   /// staging 目录名校验（纯函数，可单测）：返回非法原因，null 表示合法。
   ///
-  /// **r16 扩展（在 r15 基础上）**：除空串/路径分隔符外，`.` 与 `..` 同样危险
-  /// ——`'.'` 解析为 programDir 本身、`'..'` 解析为父目录，下方 staging
-  /// deleteSync(recursive) 会递归删除程序目录甚至其父目录（灾难性）；另按
-  /// Win32 创建目录时的**尾部空格/点号裁剪规范化**（CreateDirectory 规则）预先
-  /// 折叠判断：`'.. '`→`'..'`、`'. '`→`'.'`、`' '`→`''` 都会把解析目标折叠回
-  /// programDir 本身或其父目录。
+  /// **r16/r17**：除空串/路径分隔符外，`.` 与 `..` 同样危险——`'.'` 解析为
+  /// programDir 本身、`'..'` 解析为父目录，下方 staging deleteSync(recursive)
+  /// 会递归删除程序目录甚至其父目录（灾难性）。另按 Win32 CreateDirectory 的
+  /// **尾部空格/点号裁剪规范化**预先折叠判断：该规范化**同时裁剪尾部空格与
+  /// 点号**（可交错出现：`'.. .'`→`'..'`、`'. .'`→`'.'`、`'...'`→`''`）——
+  /// 须循环折叠到稳定后再判空/`.`/`..`（仅 trimRight 裁空白会漏尾部点号变体，
+  /// 这些名称在 Windows 上仍折叠回 programDir 本身或其父目录）。
   static String? stagingNameError(String name) {
     if (name.isEmpty) return 'staging 目录名配置非法（空）';
-    final normalized = name.trimRight();
+    var normalized = name;
+    while (normalized.isNotEmpty &&
+        (normalized.endsWith(' ') || normalized.endsWith('.'))) {
+      normalized = normalized.substring(0, normalized.length - 1);
+    }
     if (normalized.isEmpty) return 'staging 目录名配置非法（裁剪后为空）';
     if (normalized == '.' || normalized == '..') {
       return 'staging 目录名配置非法（裁剪后为 `.`/`..`）';

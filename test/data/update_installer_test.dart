@@ -16,10 +16,12 @@ List<int> buildZip(Map<String, String> files) {
 
 void main() {
   group('WindowsInstaller', () {
-    test('staging 目录名校验（r16 纯函数）：空/`.`/`..`/分隔符/尾部空格裁剪变体拒绝', () {
+    test('staging 目录名校验（r16/r17 纯函数）：空/`.`/`..`/分隔符/尾部空格点号裁剪变体拒绝', () {
       // WindowsInstaller.stagingNameError 纯函数——防 `$programDir/<名>` 解析
       // 到 programDir 本身（`.`/裁剪后 `.`）或其父目录（`..`）时下方
-      // deleteSync(recursive) 灾难性递归删除。
+      // deleteSync(recursive) 灾难性递归删除。**r17**：Win32 CreateDirectory
+      // 同时裁剪尾部空格与点号（可交错），尾部点号变体同样折叠回 programDir/
+      // 其父目录——须循环折叠裁剪（trimRight 只裁空白会漏）。
       for (final evil in [
         '',
         ' ',
@@ -27,6 +29,12 @@ void main() {
         '..',
         '. ',
         '.. ',
+        '...', // r17：尾部点号变体（折叠为 ''）
+        '. .', // → '.'
+        '.. .', // → '..'
+        '... ', // 点+空格交错 → ''
+        ' . ', // → ''
+        '... . ..', // → '..'
         'staging/x',
         r'staging\x',
       ]) {
@@ -364,8 +372,7 @@ void main() {
             programDir: program.path,
             dataDir: data.path,
             maxEntryCount: 2,
-          ).prepareStaging(okPath))
-              .requireValue(),
+          ).prepareStaging(okPath)).requireValue(),
           contains('${program.path}/'),
           reason: '恰好等于条目数上限的合法包放行',
         );
@@ -381,8 +388,7 @@ void main() {
             programDir: program.path,
             dataDir: data.path,
             maxEntryCount: 2,
-          ).prepareStaging(noPath))
-              .isSuccess,
+          ).prepareStaging(noPath)).isSuccess,
           isFalse,
           reason: '超过条目数上限拒绝',
         );
