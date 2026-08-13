@@ -35,6 +35,12 @@ void main() {
         r'C:\foo\..', // r25：`..` 恰为末段——先整体裁尾点会吞掉它（解析为盘根）
         '/foo/..', // r25：同上（POSIX 形态，解析为 /）
         r'C:\foo\.. \.. \Windows', // r25：段内尾部空格变体（解析为 C:\Windows）
+        r'C:\foo\.. ', // r26：末段带尾空格（r25 重排序的核心动机用例）
+        r'C:\foo\...', // r26：Win32 折叠为 ..（整体裁尾会放行）
+        r'C:\foo\.. .', // r26：交错变体（折叠为 ..）
+        r'C:\.\', // r26：解析为盘根（rootNorm 循环折叠兜底）
+        r'\\?\C:\', // r26：verbatim 命名空间前缀（折叠后 \\? → \? 绕过根判定）
+        r'\\.\C:\', // r26：设备命名空间前缀
       ]) {
         expect(
           () => WindowsInstaller(programDir: evil, dataDir: '/data'),

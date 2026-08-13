@@ -607,9 +607,11 @@ void main() {
       // r24/r25 核心防御：`await for` 循环内每块后的 `_closed` 复查——注入
       // client 不由本服务关闭、底层流不被中断，close() 后循环须立即返回
       // "已关闭"（r4 用例只覆盖响应 await 后的复查分支，未触达循环内分支）。
-      // **阻塞式 fake（r25）**：send 后逐块推流、第二块前挂起 gate——服务消费
-      // 第一块后停在循环内，此时 close() 并发触发；释放 gate 后循环顶复查
-      // `_closed` 返回"已关闭"（不等待剩余块、不写库）。
+      // **阻塞式 fake（r25/r26）**：send 立即返回、onListen 推首块——服务消费
+      // 第一块后**真正停在循环内**（等待下一块）；此时 close() 并发触发；释放
+      // gate 后循环顶复查 `_closed` 返回"已关闭"（不消费剩余块、不写库）。
+      //（r25 版在 send 内 await gate——close 落在 send 阶段、走 r4 分支，未触达
+      // 循环内复查，r26 已修正。）
       final started = Completer<void>();
       final gate = Completer<void>();
       final client = UpdateManifestService(
@@ -675,9 +677,12 @@ class _ManifestStreamClient extends http.BaseClient {
   }
 }
 
-/// 阻塞式流式 client（r25）：首块立即发射、第二块前挂起 gate——用于
-/// "流式消费期间 close() → 循环内复查"的竞态测试（started 确认服务已消费
-/// 首块、gate 控制第二块释放时机）。
+/// 阻塞式流式 client（r25/r26）：**send 立即返回 StreamedResponse**、推流挂在
+/// gate 上——`onListen` 推首块并 complete(started)，gate 释放后推剩余块并
+/// close。用于"流式消费期间 close() → **循环内** `_closed` 复查"的竞态测试：
+/// started 确认服务已消费首块、停在 `await for` 循环内等待下一块（r25 版在
+/// send 内 await gate——close 落在 send 阶段、走 r4 的 send 返回后复查分支、
+/// 未触达循环内复查，r26 修正）。
 class _BlockingStreamClient extends http.BaseClient {
   _BlockingStreamClient(this.started, this.gate);
 
@@ -686,16 +691,25 @@ class _BlockingStreamClient extends http.BaseClient {
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
-    final controller = StreamController<List<int>>();
-    // 首块（合法清单的一部分）先到；第二块（剩余部分）等 gate 释放。
-    controller.add('{'.codeUnits);
-    started.complete();
-    await gate.future;
-    controller.add('"version":"2.0.0","windows":'.codeUnits);
-    controller.add('{"url":"https://x.example/app.zip","sha256":"'.codeUnits);
-    controller.add(('b' * 64).codeUnits);
-    controller.add('"}}'.codeUnits);
-    controller.close();
+    // **late 声明（r26）**：onListen 回调引用 controller 自身——须先声明再赋值。
+    late final StreamController<List<int>> controller;
+    controller = StreamController<List<int>>(
+      onListen: () {
+        // 首块（合法清单的一部分）先到——服务消费后停在循环内等待下一块。
+        controller.add('{'.codeUnits);
+        started.complete();
+      },
+    );
+    // gate 释放后推剩余块（此时 close() 已并发触发，循环内复查须返回"已关闭"
+    // 且不再消费这些块）。
+    unawaited(() async {
+      await gate.future;
+      controller.add('"version":"2.0.0","windows":'.codeUnits);
+      controller.add('{"url":"https://x.example/app.zip","sha256":"'.codeUnits);
+      controller.add(('b' * 64).codeUnits);
+      controller.add('"}}'.codeUnits);
+      await controller.close();
+    }());
     return http.StreamedResponse(
       controller.stream,
       200,
