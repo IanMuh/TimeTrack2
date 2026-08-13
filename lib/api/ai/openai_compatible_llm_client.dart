@@ -23,6 +23,9 @@ class OpenAiCompatibleLlmClient implements LlmClient {
   })  : _http = httpClient ?? http.Client(),
         _ownsHttp = httpClient == null;
 
+  /// 已关闭时的统一失败文案（chat 入口与 3 个 catch 分支共用单一事实来源）。
+  static const closedError = '模型客户端已关闭，请重新创建';
+
   final LlmConfig config;
   final http.Client _http;
   /// 是否自建 http client（close 时释放；注入对象由调用方负责生命周期）。
@@ -50,7 +53,7 @@ class OpenAiCompatibleLlmClient implements LlmClient {
     LlmRequestOptions options = const LlmRequestOptions.none(),
   }) async {
     if (_closed) {
-      return const AppFailure('模型客户端已关闭，请重新创建');
+      return const AppFailure(closedError);
     }
     // 能力组合校验（错误早失败）：通义 tools+stream 不可并用等。
     final incompatible = capability.validateRequest(options);
@@ -85,13 +88,13 @@ class OpenAiCompatibleLlmClient implements LlmClient {
     } on TimeoutException {
       // 在途请求期间被 close（http.Client.close 会使在途 post 抛异常）——
       // 先判 _closed 再归因（防"已关闭"被误映射为网络故障）。
-      if (_closed) return const AppFailure('模型客户端已关闭，请重新创建');
+      if (_closed) return const AppFailure(closedError);
       return const AppFailure('模型请求超时，请稍后重试');
     } on SocketException {
-      if (_closed) return const AppFailure('模型客户端已关闭，请重新创建');
+      if (_closed) return const AppFailure(closedError);
       return const AppFailure('网络不可用，请稍后重试');
     } on http.ClientException {
-      if (_closed) return const AppFailure('模型客户端已关闭，请重新创建');
+      if (_closed) return const AppFailure(closedError);
       return const AppFailure('网络不可用，请稍后重试');
     } on FormatException catch (e) {
       // 响应体非法（非 JSON / choices 结构损坏）。

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -32,6 +33,21 @@ class _CloseSpyClient extends http.BaseClient {
   void close() {
     closeCount += 1;
     super.close();
+  }
+}
+
+/// 可挂起的 http client（r4 竞态测试用）：send 等待 [gate] 完成才继续——
+/// 模拟"请求在途时 close() 被并发调用，在途 post 随后抛 ClientException"。
+class _HangClient extends http.BaseClient {
+  final Completer<void> gate = Completer<void>();
+
+  /// 释放挂起的 send（在途请求随后抛 ClientException）。
+  void release() => gate.complete();
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    await gate.future;
+    throw http.ClientException('client is closed');
   }
 }
 
@@ -488,6 +504,31 @@ void main() {
           reason: '明确提示已关闭（非误导性网络错误）');
       // 重复 close 幂等（不抛错）。
       ownClient.close();
+    });
+
+    test('在途请求并发 close：catch 归因为"已关闭"而非"网络不可用"（r4）', () async {
+      // 核心竞态：chat() 已进入 await（在途 post 挂起）后 close() 被并发
+      // 调用——在途请求随后抛 ClientException，须命中 catch 内 `_closed`
+      // 判定映射为"已关闭"（防误报"网络不可用"）。
+      final hang = _HangClient();
+      final client = OpenAiCompatibleLlmClient(
+        config: config(),
+        httpClient: hang,
+      );
+      final future = client.chat(
+        messages: const [LlmMessage(role: LlmRole.user, content: 'x')],
+      );
+      // 让 chat 进入 await（send 挂起中）。
+      await pumpEventQueue();
+      client.close(); // 在途期间关闭
+      hang.release(); // 释放在途请求 → 抛 ClientException
+      final result = await future;
+      expect(result.isSuccess, isFalse);
+      final msg = result.when(onSuccess: (_) => '', onFailure: (m) => m);
+      expect(msg, contains('已关闭'),
+          reason: '在途请求期间 close → 归因"已关闭"（非"网络不可用"）');
+      expect(msg.contains('网络不可用'), isFalse,
+          reason: '不误报网络故障');
     });
   });
 }
