@@ -137,7 +137,14 @@ class AndroidInstaller {
     final fileParent = File(
       apkFilePath,
     ).parent.absolute.path.replaceAll(r'\', '/');
-    final root = Directory(cacheRoot).absolute.path.replaceAll(r'\', '/');
+    // **尾分隔符归一化（r22）**：`Directory(cacheRoot).absolute.path` 在 cacheRoot
+    // 以 `/` 结尾时保留尾斜杠（package:path normalize 保留尾部），而
+    // File.parent.absolute.path 末尾不带——严格相等下带尾斜杠传入会被误拒。
+    // 根目录为 `/` 时（长度 1）不裁剪。
+    var root = Directory(cacheRoot).absolute.path.replaceAll(r'\', '/');
+    if (root.length > 1 && root.endsWith('/')) {
+      root = root.substring(0, root.length - 1);
+    }
     if (fileParent != root) {
       return const AppFailure('安装文件必须位于应用 cache 根目录内');
     }

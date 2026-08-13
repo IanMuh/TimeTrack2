@@ -808,6 +808,19 @@ void main() {
         );
         expect(missing.isSuccess, isFalse, reason: '缺失文件失败');
 
+        // **cacheRoot 带尾斜杠（r22 正向用例）**：Directory.absolute.path 保留
+        // 尾分隔符——比较前须归一化裁剪，否则根内直子文件被误拒。
+        expect(
+          installer
+              .installValidatedApk(
+                '${dir.path}/app.apk',
+                cacheRoot: '${dir.path}/',
+              )
+              .isSuccess,
+          isTrue,
+          reason: 'cacheRoot 尾斜杠不影响校验（已归一化）',
+        );
+
         // **cache 根外文件拒绝（r20）**：产出的 content URI 指向 FileProvider
         // cache 根——源文件必须在 cache 根内（"校验的文件 == 暴露/安装的文件"）。
         // 用独立目录而非 `..` 相对路径（后者未规范化、前缀匹配会误判为根内）。
