@@ -773,6 +773,15 @@ void main() {
       );
       final left = await (db.select(db.activityCategories)).get();
       expect(left.map((r) => r.id).toSet(), {'catZ'});
+      // **link 自身保留（r5 对称）**：阻塞来源精确化——linkZ 不得被误删（防
+      // "catZ 因别的原因保留、linkZ 被误清"的组合回归无感知）。
+      expect(
+        report.deletedByTable['activityCategoryLinks'] ?? 0,
+        0,
+        reason: '软删未传播 link 自身保留（不随父清）',
+      );
+      final links = await (db.select(db.activityCategoryLinks)).get();
+      expect(links.map((r) => r.id).toSet(), {'linkZ'});
     });
   });
 
