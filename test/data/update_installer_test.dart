@@ -41,6 +41,8 @@ void main() {
         r'C:\.\', // r26：解析为盘根（rootNorm 循环折叠兜底）
         r'\\?\C:\', // r26：verbatim 命名空间前缀（折叠后 \\? → \? 绕过根判定）
         r'\\.\C:\', // r26：设备命名空间前缀
+        '//?/C:\\', // r27：正斜杠 verbatim 形式（Win32 统一规范化为 \）
+        '//./C:\\', // r27：正斜杠设备形式
       ]) {
         expect(
           () => WindowsInstaller(programDir: evil, dataDir: '/data'),

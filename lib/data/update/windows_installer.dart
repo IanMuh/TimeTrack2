@@ -89,10 +89,16 @@ class WindowsInstaller {
       (m) => m[1]!,
     ); // 折叠连续分隔符
     norm = norm.replaceAll(RegExp(r'[\\/]+$'), ''); // 去尾分隔符
-    // **Win32 verbatim/设备命名空间前缀拒绝（r26）**：`\\?\C:\`、`\\?\UNC\...`、
+    // **Win32 verbatim/设备命名空间前缀拒绝（r26/r27）**：`\\?\C:\`、`\\?\UNC\...`、
     // `\\.\C:\` 以 `\` 开头过绝对路径检查、折叠后 `\\?` → `\?` 放行——误配时
     // _clearProgramDir 递归清空盘根。显式拒绝（Windows 常规路径不使用此类前缀）。
-    if (dir.startsWith(r'\\?\') || dir.startsWith(r'\\.\')) {
+    // **正斜杠形式一并拒绝（r27）**：Win32 路径解析把 `/` 统一规范化为 `\`——
+    // `//?/C:\`、`//./C:\`（经 startsWith('/') 过绝对路径检查、折叠后 `/?/C:`
+    // 不触发根/`..` 判定）解析后同样落到 verbatim/设备命名空间。
+    if (dir.startsWith(r'\\?\') ||
+        dir.startsWith(r'\\.\') ||
+        dir.startsWith('//?/') ||
+        dir.startsWith('//./')) {
       throw ArgumentError.value(
         dir,
         'programDir',
