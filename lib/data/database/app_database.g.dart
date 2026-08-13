@@ -693,6 +693,19 @@ class $TimeEntriesTable extends TimeEntries
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _isAutoMeta = const VerificationMeta('isAuto');
+  @override
+  late final GeneratedColumn<bool> isAuto = GeneratedColumn<bool>(
+    'is_auto',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("is_auto" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -706,6 +719,7 @@ class $TimeEntriesTable extends TimeEntries
     deviceId,
     updatedAt,
     deletedAt,
+    isAuto,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -798,6 +812,12 @@ class $TimeEntriesTable extends TimeEntries
         deletedAt.isAcceptableOrUnknown(data['deleted_at']!, _deletedAtMeta),
       );
     }
+    if (data.containsKey('is_auto')) {
+      context.handle(
+        _isAutoMeta,
+        isAuto.isAcceptableOrUnknown(data['is_auto']!, _isAutoMeta),
+      );
+    }
     return context;
   }
 
@@ -851,6 +871,10 @@ class $TimeEntriesTable extends TimeEntries
         DriftSqlType.string,
         data['${effectivePrefix}deleted_at'],
       ),
+      isAuto: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}is_auto'],
+      )!,
     );
   }
 
@@ -872,6 +896,10 @@ class TimeEntryRow extends DataClass implements Insertable<TimeEntryRow> {
   final String deviceId;
   final String updatedAt;
   final String? deletedAt;
+
+  /// 自动生成标记（后台前台检测自动记录 vs 手动计时）：统计排除/批量清理/
+  /// 防误编辑的判定依据；随行 LWW 同步（并入 time_entries 行）。
+  final bool isAuto;
   const TimeEntryRow({
     required this.id,
     this.userId,
@@ -884,6 +912,7 @@ class TimeEntryRow extends DataClass implements Insertable<TimeEntryRow> {
     required this.deviceId,
     required this.updatedAt,
     this.deletedAt,
+    required this.isAuto,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -907,6 +936,7 @@ class TimeEntryRow extends DataClass implements Insertable<TimeEntryRow> {
     if (!nullToAbsent || deletedAt != null) {
       map['deleted_at'] = Variable<String>(deletedAt);
     }
+    map['is_auto'] = Variable<bool>(isAuto);
     return map;
   }
 
@@ -931,6 +961,7 @@ class TimeEntryRow extends DataClass implements Insertable<TimeEntryRow> {
       deletedAt: deletedAt == null && nullToAbsent
           ? const Value.absent()
           : Value(deletedAt),
+      isAuto: Value(isAuto),
     );
   }
 
@@ -951,6 +982,7 @@ class TimeEntryRow extends DataClass implements Insertable<TimeEntryRow> {
       deviceId: serializer.fromJson<String>(json['deviceId']),
       updatedAt: serializer.fromJson<String>(json['updatedAt']),
       deletedAt: serializer.fromJson<String?>(json['deletedAt']),
+      isAuto: serializer.fromJson<bool>(json['isAuto']),
     );
   }
   @override
@@ -968,6 +1000,7 @@ class TimeEntryRow extends DataClass implements Insertable<TimeEntryRow> {
       'deviceId': serializer.toJson<String>(deviceId),
       'updatedAt': serializer.toJson<String>(updatedAt),
       'deletedAt': serializer.toJson<String?>(deletedAt),
+      'isAuto': serializer.toJson<bool>(isAuto),
     };
   }
 
@@ -983,6 +1016,7 @@ class TimeEntryRow extends DataClass implements Insertable<TimeEntryRow> {
     String? deviceId,
     String? updatedAt,
     Value<String?> deletedAt = const Value.absent(),
+    bool? isAuto,
   }) => TimeEntryRow(
     id: id ?? this.id,
     userId: userId.present ? userId.value : this.userId,
@@ -997,6 +1031,7 @@ class TimeEntryRow extends DataClass implements Insertable<TimeEntryRow> {
     deviceId: deviceId ?? this.deviceId,
     updatedAt: updatedAt ?? this.updatedAt,
     deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
+    isAuto: isAuto ?? this.isAuto,
   );
   TimeEntryRow copyWithCompanion(TimeEntriesCompanion data) {
     return TimeEntryRow(
@@ -1017,6 +1052,7 @@ class TimeEntryRow extends DataClass implements Insertable<TimeEntryRow> {
       deviceId: data.deviceId.present ? data.deviceId.value : this.deviceId,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
       deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
+      isAuto: data.isAuto.present ? data.isAuto.value : this.isAuto,
     );
   }
 
@@ -1033,7 +1069,8 @@ class TimeEntryRow extends DataClass implements Insertable<TimeEntryRow> {
           ..write('note: $note, ')
           ..write('deviceId: $deviceId, ')
           ..write('updatedAt: $updatedAt, ')
-          ..write('deletedAt: $deletedAt')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('isAuto: $isAuto')
           ..write(')'))
         .toString();
   }
@@ -1051,6 +1088,7 @@ class TimeEntryRow extends DataClass implements Insertable<TimeEntryRow> {
     deviceId,
     updatedAt,
     deletedAt,
+    isAuto,
   );
   @override
   bool operator ==(Object other) =>
@@ -1066,7 +1104,8 @@ class TimeEntryRow extends DataClass implements Insertable<TimeEntryRow> {
           other.note == this.note &&
           other.deviceId == this.deviceId &&
           other.updatedAt == this.updatedAt &&
-          other.deletedAt == this.deletedAt);
+          other.deletedAt == this.deletedAt &&
+          other.isAuto == this.isAuto);
 }
 
 class TimeEntriesCompanion extends UpdateCompanion<TimeEntryRow> {
@@ -1081,6 +1120,7 @@ class TimeEntriesCompanion extends UpdateCompanion<TimeEntryRow> {
   final Value<String> deviceId;
   final Value<String> updatedAt;
   final Value<String?> deletedAt;
+  final Value<bool> isAuto;
   final Value<int> rowid;
   const TimeEntriesCompanion({
     this.id = const Value.absent(),
@@ -1094,6 +1134,7 @@ class TimeEntriesCompanion extends UpdateCompanion<TimeEntryRow> {
     this.deviceId = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.deletedAt = const Value.absent(),
+    this.isAuto = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   TimeEntriesCompanion.insert({
@@ -1108,6 +1149,7 @@ class TimeEntriesCompanion extends UpdateCompanion<TimeEntryRow> {
     required String deviceId,
     required String updatedAt,
     this.deletedAt = const Value.absent(),
+    this.isAuto = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        activityId = Value(activityId),
@@ -1126,6 +1168,7 @@ class TimeEntriesCompanion extends UpdateCompanion<TimeEntryRow> {
     Expression<String>? deviceId,
     Expression<String>? updatedAt,
     Expression<String>? deletedAt,
+    Expression<bool>? isAuto,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -1140,6 +1183,7 @@ class TimeEntriesCompanion extends UpdateCompanion<TimeEntryRow> {
       if (deviceId != null) 'device_id': deviceId,
       if (updatedAt != null) 'updated_at': updatedAt,
       if (deletedAt != null) 'deleted_at': deletedAt,
+      if (isAuto != null) 'is_auto': isAuto,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -1156,6 +1200,7 @@ class TimeEntriesCompanion extends UpdateCompanion<TimeEntryRow> {
     Value<String>? deviceId,
     Value<String>? updatedAt,
     Value<String?>? deletedAt,
+    Value<bool>? isAuto,
     Value<int>? rowid,
   }) {
     return TimeEntriesCompanion(
@@ -1170,6 +1215,7 @@ class TimeEntriesCompanion extends UpdateCompanion<TimeEntryRow> {
       deviceId: deviceId ?? this.deviceId,
       updatedAt: updatedAt ?? this.updatedAt,
       deletedAt: deletedAt ?? this.deletedAt,
+      isAuto: isAuto ?? this.isAuto,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -1210,6 +1256,9 @@ class TimeEntriesCompanion extends UpdateCompanion<TimeEntryRow> {
     if (deletedAt.present) {
       map['deleted_at'] = Variable<String>(deletedAt.value);
     }
+    if (isAuto.present) {
+      map['is_auto'] = Variable<bool>(isAuto.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -1230,6 +1279,7 @@ class TimeEntriesCompanion extends UpdateCompanion<TimeEntryRow> {
           ..write('deviceId: $deviceId, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('deletedAt: $deletedAt, ')
+          ..write('isAuto: $isAuto, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -4054,6 +4104,536 @@ class SyncPeersCompanion extends UpdateCompanion<SyncPeerRow> {
   }
 }
 
+class $TrackingRulesTable extends TrackingRules
+    with TableInfo<$TrackingRulesTable, TrackingRuleRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $TrackingRulesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _userIdMeta = const VerificationMeta('userId');
+  @override
+  late final GeneratedColumn<String> userId = GeneratedColumn<String>(
+    'user_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _patternMeta = const VerificationMeta(
+    'pattern',
+  );
+  @override
+  late final GeneratedColumn<String> pattern = GeneratedColumn<String>(
+    'pattern',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _matchKindMeta = const VerificationMeta(
+    'matchKind',
+  );
+  @override
+  late final GeneratedColumn<String> matchKind = GeneratedColumn<String>(
+    'match_kind',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _activityIdMeta = const VerificationMeta(
+    'activityId',
+  );
+  @override
+  late final GeneratedColumn<String> activityId = GeneratedColumn<String>(
+    'activity_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'REFERENCES activities (id)',
+    ),
+  );
+  static const VerificationMeta _syncEnabledMeta = const VerificationMeta(
+    'syncEnabled',
+  );
+  @override
+  late final GeneratedColumn<bool> syncEnabled = GeneratedColumn<bool>(
+    'sync_enabled',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("sync_enabled" IN (0, 1))',
+    ),
+    defaultValue: const Constant(true),
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<String> updatedAt = GeneratedColumn<String>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _deletedAtMeta = const VerificationMeta(
+    'deletedAt',
+  );
+  @override
+  late final GeneratedColumn<String> deletedAt = GeneratedColumn<String>(
+    'deleted_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    userId,
+    pattern,
+    matchKind,
+    activityId,
+    syncEnabled,
+    updatedAt,
+    deletedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'tracking_rules';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<TrackingRuleRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('user_id')) {
+      context.handle(
+        _userIdMeta,
+        userId.isAcceptableOrUnknown(data['user_id']!, _userIdMeta),
+      );
+    }
+    if (data.containsKey('pattern')) {
+      context.handle(
+        _patternMeta,
+        pattern.isAcceptableOrUnknown(data['pattern']!, _patternMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_patternMeta);
+    }
+    if (data.containsKey('match_kind')) {
+      context.handle(
+        _matchKindMeta,
+        matchKind.isAcceptableOrUnknown(data['match_kind']!, _matchKindMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_matchKindMeta);
+    }
+    if (data.containsKey('activity_id')) {
+      context.handle(
+        _activityIdMeta,
+        activityId.isAcceptableOrUnknown(data['activity_id']!, _activityIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_activityIdMeta);
+    }
+    if (data.containsKey('sync_enabled')) {
+      context.handle(
+        _syncEnabledMeta,
+        syncEnabled.isAcceptableOrUnknown(
+          data['sync_enabled']!,
+          _syncEnabledMeta,
+        ),
+      );
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    if (data.containsKey('deleted_at')) {
+      context.handle(
+        _deletedAtMeta,
+        deletedAt.isAcceptableOrUnknown(data['deleted_at']!, _deletedAtMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  TrackingRuleRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return TrackingRuleRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      userId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}user_id'],
+      ),
+      pattern: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}pattern'],
+      )!,
+      matchKind: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}match_kind'],
+      )!,
+      activityId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}activity_id'],
+      )!,
+      syncEnabled: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}sync_enabled'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}updated_at'],
+      )!,
+      deletedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}deleted_at'],
+      ),
+    );
+  }
+
+  @override
+  $TrackingRulesTable createAlias(String alias) {
+    return $TrackingRulesTable(attachedDatabase, alias);
+  }
+}
+
+class TrackingRuleRow extends DataClass implements Insertable<TrackingRuleRow> {
+  final String id;
+  final String? userId;
+
+  /// 匹配模式（进程名如 `chrome.exe` / 窗口标题模式）。
+  final String pattern;
+
+  /// 匹配类型（process/title，存储值见 TrackingRuleMatchKind.storageValue）。
+  final String matchKind;
+
+  /// 映射到的活动 id（可空：未指定时命中即切未分配？——设计：**必填**，
+  /// 无匹配活动的规则无意义，规则匹配到活动是映射的落点）。
+  final String activityId;
+  final bool syncEnabled;
+  final String updatedAt;
+  final String? deletedAt;
+  const TrackingRuleRow({
+    required this.id,
+    this.userId,
+    required this.pattern,
+    required this.matchKind,
+    required this.activityId,
+    required this.syncEnabled,
+    required this.updatedAt,
+    this.deletedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    if (!nullToAbsent || userId != null) {
+      map['user_id'] = Variable<String>(userId);
+    }
+    map['pattern'] = Variable<String>(pattern);
+    map['match_kind'] = Variable<String>(matchKind);
+    map['activity_id'] = Variable<String>(activityId);
+    map['sync_enabled'] = Variable<bool>(syncEnabled);
+    map['updated_at'] = Variable<String>(updatedAt);
+    if (!nullToAbsent || deletedAt != null) {
+      map['deleted_at'] = Variable<String>(deletedAt);
+    }
+    return map;
+  }
+
+  TrackingRulesCompanion toCompanion(bool nullToAbsent) {
+    return TrackingRulesCompanion(
+      id: Value(id),
+      userId: userId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(userId),
+      pattern: Value(pattern),
+      matchKind: Value(matchKind),
+      activityId: Value(activityId),
+      syncEnabled: Value(syncEnabled),
+      updatedAt: Value(updatedAt),
+      deletedAt: deletedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(deletedAt),
+    );
+  }
+
+  factory TrackingRuleRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return TrackingRuleRow(
+      id: serializer.fromJson<String>(json['id']),
+      userId: serializer.fromJson<String?>(json['userId']),
+      pattern: serializer.fromJson<String>(json['pattern']),
+      matchKind: serializer.fromJson<String>(json['matchKind']),
+      activityId: serializer.fromJson<String>(json['activityId']),
+      syncEnabled: serializer.fromJson<bool>(json['syncEnabled']),
+      updatedAt: serializer.fromJson<String>(json['updatedAt']),
+      deletedAt: serializer.fromJson<String?>(json['deletedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'userId': serializer.toJson<String?>(userId),
+      'pattern': serializer.toJson<String>(pattern),
+      'matchKind': serializer.toJson<String>(matchKind),
+      'activityId': serializer.toJson<String>(activityId),
+      'syncEnabled': serializer.toJson<bool>(syncEnabled),
+      'updatedAt': serializer.toJson<String>(updatedAt),
+      'deletedAt': serializer.toJson<String?>(deletedAt),
+    };
+  }
+
+  TrackingRuleRow copyWith({
+    String? id,
+    Value<String?> userId = const Value.absent(),
+    String? pattern,
+    String? matchKind,
+    String? activityId,
+    bool? syncEnabled,
+    String? updatedAt,
+    Value<String?> deletedAt = const Value.absent(),
+  }) => TrackingRuleRow(
+    id: id ?? this.id,
+    userId: userId.present ? userId.value : this.userId,
+    pattern: pattern ?? this.pattern,
+    matchKind: matchKind ?? this.matchKind,
+    activityId: activityId ?? this.activityId,
+    syncEnabled: syncEnabled ?? this.syncEnabled,
+    updatedAt: updatedAt ?? this.updatedAt,
+    deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
+  );
+  TrackingRuleRow copyWithCompanion(TrackingRulesCompanion data) {
+    return TrackingRuleRow(
+      id: data.id.present ? data.id.value : this.id,
+      userId: data.userId.present ? data.userId.value : this.userId,
+      pattern: data.pattern.present ? data.pattern.value : this.pattern,
+      matchKind: data.matchKind.present ? data.matchKind.value : this.matchKind,
+      activityId: data.activityId.present
+          ? data.activityId.value
+          : this.activityId,
+      syncEnabled: data.syncEnabled.present
+          ? data.syncEnabled.value
+          : this.syncEnabled,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+      deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('TrackingRuleRow(')
+          ..write('id: $id, ')
+          ..write('userId: $userId, ')
+          ..write('pattern: $pattern, ')
+          ..write('matchKind: $matchKind, ')
+          ..write('activityId: $activityId, ')
+          ..write('syncEnabled: $syncEnabled, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('deletedAt: $deletedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    userId,
+    pattern,
+    matchKind,
+    activityId,
+    syncEnabled,
+    updatedAt,
+    deletedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is TrackingRuleRow &&
+          other.id == this.id &&
+          other.userId == this.userId &&
+          other.pattern == this.pattern &&
+          other.matchKind == this.matchKind &&
+          other.activityId == this.activityId &&
+          other.syncEnabled == this.syncEnabled &&
+          other.updatedAt == this.updatedAt &&
+          other.deletedAt == this.deletedAt);
+}
+
+class TrackingRulesCompanion extends UpdateCompanion<TrackingRuleRow> {
+  final Value<String> id;
+  final Value<String?> userId;
+  final Value<String> pattern;
+  final Value<String> matchKind;
+  final Value<String> activityId;
+  final Value<bool> syncEnabled;
+  final Value<String> updatedAt;
+  final Value<String?> deletedAt;
+  final Value<int> rowid;
+  const TrackingRulesCompanion({
+    this.id = const Value.absent(),
+    this.userId = const Value.absent(),
+    this.pattern = const Value.absent(),
+    this.matchKind = const Value.absent(),
+    this.activityId = const Value.absent(),
+    this.syncEnabled = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  TrackingRulesCompanion.insert({
+    required String id,
+    this.userId = const Value.absent(),
+    required String pattern,
+    required String matchKind,
+    required String activityId,
+    this.syncEnabled = const Value.absent(),
+    required String updatedAt,
+    this.deletedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       pattern = Value(pattern),
+       matchKind = Value(matchKind),
+       activityId = Value(activityId),
+       updatedAt = Value(updatedAt);
+  static Insertable<TrackingRuleRow> custom({
+    Expression<String>? id,
+    Expression<String>? userId,
+    Expression<String>? pattern,
+    Expression<String>? matchKind,
+    Expression<String>? activityId,
+    Expression<bool>? syncEnabled,
+    Expression<String>? updatedAt,
+    Expression<String>? deletedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (userId != null) 'user_id': userId,
+      if (pattern != null) 'pattern': pattern,
+      if (matchKind != null) 'match_kind': matchKind,
+      if (activityId != null) 'activity_id': activityId,
+      if (syncEnabled != null) 'sync_enabled': syncEnabled,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (deletedAt != null) 'deleted_at': deletedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  TrackingRulesCompanion copyWith({
+    Value<String>? id,
+    Value<String?>? userId,
+    Value<String>? pattern,
+    Value<String>? matchKind,
+    Value<String>? activityId,
+    Value<bool>? syncEnabled,
+    Value<String>? updatedAt,
+    Value<String?>? deletedAt,
+    Value<int>? rowid,
+  }) {
+    return TrackingRulesCompanion(
+      id: id ?? this.id,
+      userId: userId ?? this.userId,
+      pattern: pattern ?? this.pattern,
+      matchKind: matchKind ?? this.matchKind,
+      activityId: activityId ?? this.activityId,
+      syncEnabled: syncEnabled ?? this.syncEnabled,
+      updatedAt: updatedAt ?? this.updatedAt,
+      deletedAt: deletedAt ?? this.deletedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (userId.present) {
+      map['user_id'] = Variable<String>(userId.value);
+    }
+    if (pattern.present) {
+      map['pattern'] = Variable<String>(pattern.value);
+    }
+    if (matchKind.present) {
+      map['match_kind'] = Variable<String>(matchKind.value);
+    }
+    if (activityId.present) {
+      map['activity_id'] = Variable<String>(activityId.value);
+    }
+    if (syncEnabled.present) {
+      map['sync_enabled'] = Variable<bool>(syncEnabled.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<String>(updatedAt.value);
+    }
+    if (deletedAt.present) {
+      map['deleted_at'] = Variable<String>(deletedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('TrackingRulesCompanion(')
+          ..write('id: $id, ')
+          ..write('userId: $userId, ')
+          ..write('pattern: $pattern, ')
+          ..write('matchKind: $matchKind, ')
+          ..write('activityId: $activityId, ')
+          ..write('syncEnabled: $syncEnabled, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -4069,6 +4649,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $ActionLogsTable actionLogs = $ActionLogsTable(this);
   late final $AppMetadataTable appMetadata = $AppMetadataTable(this);
   late final $SyncPeersTable syncPeers = $SyncPeersTable(this);
+  late final $TrackingRulesTable trackingRules = $TrackingRulesTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -4082,6 +4663,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     actionLogs,
     appMetadata,
     syncPeers,
+    trackingRules,
   ];
 }
 
@@ -4154,6 +4736,24 @@ final class $$ActivitiesTableReferences
     final cache = $_typedResult.readTableOrNull(
       _activityCategoryLinksRefsTable($_db),
     );
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: cache),
+    );
+  }
+
+  static MultiTypedResultKey<$TrackingRulesTable, List<TrackingRuleRow>>
+  _trackingRulesRefsTable(_$AppDatabase db) => MultiTypedResultKey.fromTable(
+    db.trackingRules,
+    aliasName: 'activities__id__tracking_rules__activity_id',
+  );
+
+  $$TrackingRulesTableProcessedTableManager get trackingRulesRefs {
+    final manager = $$TrackingRulesTableTableManager(
+      $_db,
+      $_db.trackingRules,
+    ).filter((f) => f.activityId.id.sqlEquals($_itemColumn<String>('id')!));
+
+    final cache = $_typedResult.readTableOrNull(_trackingRulesRefsTable($_db));
     return ProcessedTableManager(
       manager.$state.copyWith(prefetchedData: cache),
     );
@@ -4262,6 +4862,31 @@ class $$ActivitiesTableFilterComposer
                     $removeJoinBuilderFromRootComposer,
               ),
         );
+    return f(composer);
+  }
+
+  Expression<bool> trackingRulesRefs(
+    Expression<bool> Function($$TrackingRulesTableFilterComposer f) f,
+  ) {
+    final $$TrackingRulesTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.trackingRules,
+      getReferencedColumn: (t) => t.activityId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$TrackingRulesTableFilterComposer(
+            $db: $db,
+            $table: $db.trackingRules,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
     return f(composer);
   }
 }
@@ -4411,6 +5036,31 @@ class $$ActivitiesTableAnnotationComposer
         );
     return f(composer);
   }
+
+  Expression<T> trackingRulesRefs<T extends Object>(
+    Expression<T> Function($$TrackingRulesTableAnnotationComposer a) f,
+  ) {
+    final $$TrackingRulesTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.trackingRules,
+      getReferencedColumn: (t) => t.activityId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$TrackingRulesTableAnnotationComposer(
+            $db: $db,
+            $table: $db.trackingRules,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
 }
 
 class $$ActivitiesTableTableManager
@@ -4429,6 +5079,7 @@ class $$ActivitiesTableTableManager
           PrefetchHooks Function({
             bool timeEntriesRefs,
             bool activityCategoryLinksRefs,
+            bool trackingRulesRefs,
           })
         > {
   $$ActivitiesTableTableManager(_$AppDatabase db, $ActivitiesTable table)
@@ -4499,12 +5150,17 @@ class $$ActivitiesTableTableManager
               )
               .toList(),
           prefetchHooksCallback:
-              ({timeEntriesRefs = false, activityCategoryLinksRefs = false}) {
+              ({
+                timeEntriesRefs = false,
+                activityCategoryLinksRefs = false,
+                trackingRulesRefs = false,
+              }) {
                 return PrefetchHooks(
                   db: db,
                   explicitlyWatchedTables: [
                     if (timeEntriesRefs) db.timeEntries,
                     if (activityCategoryLinksRefs) db.activityCategoryLinks,
+                    if (trackingRulesRefs) db.trackingRules,
                   ],
                   addJoins: null,
                   getPrefetchedDataCallback: (items) async {
@@ -4551,6 +5207,27 @@ class $$ActivitiesTableTableManager
                               ),
                           typedResults: items,
                         ),
+                      if (trackingRulesRefs)
+                        await $_getPrefetchedData<
+                          ActivityRow,
+                          $ActivitiesTable,
+                          TrackingRuleRow
+                        >(
+                          currentTable: table,
+                          referencedTable: $$ActivitiesTableReferences
+                              ._trackingRulesRefsTable(db),
+                          managerFromTypedResult: (p0) =>
+                              $$ActivitiesTableReferences(
+                                db,
+                                table,
+                                p0,
+                              ).trackingRulesRefs,
+                          referencedItemsForCurrentItem:
+                              (item, referencedItems) => referencedItems.where(
+                                (e) => e.activityId == item.id,
+                              ),
+                          typedResults: items,
+                        ),
                     ];
                   },
                 );
@@ -4574,6 +5251,7 @@ typedef $$ActivitiesTableProcessedTableManager =
       PrefetchHooks Function({
         bool timeEntriesRefs,
         bool activityCategoryLinksRefs,
+        bool trackingRulesRefs,
       })
     >;
 typedef $$TimeEntriesTableCreateCompanionBuilder =
@@ -4589,6 +5267,7 @@ typedef $$TimeEntriesTableCreateCompanionBuilder =
       required String deviceId,
       required String updatedAt,
       Value<String?> deletedAt,
+      Value<bool> isAuto,
       Value<int> rowid,
     });
 typedef $$TimeEntriesTableUpdateCompanionBuilder =
@@ -4604,6 +5283,7 @@ typedef $$TimeEntriesTableUpdateCompanionBuilder =
       Value<String> deviceId,
       Value<String> updatedAt,
       Value<String?> deletedAt,
+      Value<bool> isAuto,
       Value<int> rowid,
     });
 
@@ -4685,6 +5365,11 @@ class $$TimeEntriesTableFilterComposer
 
   ColumnFilters<String> get deletedAt => $composableBuilder(
     column: $table.deletedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get isAuto => $composableBuilder(
+    column: $table.isAuto,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -4771,6 +5456,11 @@ class $$TimeEntriesTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<bool> get isAuto => $composableBuilder(
+    column: $table.isAuto,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   $$ActivitiesTableOrderingComposer get activityId {
     final $$ActivitiesTableOrderingComposer composer = $composerBuilder(
       composer: this,
@@ -4838,6 +5528,9 @@ class $$TimeEntriesTableAnnotationComposer
   GeneratedColumn<String> get deletedAt =>
       $composableBuilder(column: $table.deletedAt, builder: (column) => column);
 
+  GeneratedColumn<bool> get isAuto =>
+      $composableBuilder(column: $table.isAuto, builder: (column) => column);
+
   $$ActivitiesTableAnnotationComposer get activityId {
     final $$ActivitiesTableAnnotationComposer composer = $composerBuilder(
       composer: this,
@@ -4901,6 +5594,7 @@ class $$TimeEntriesTableTableManager
                 Value<String> deviceId = const Value.absent(),
                 Value<String> updatedAt = const Value.absent(),
                 Value<String?> deletedAt = const Value.absent(),
+                Value<bool> isAuto = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => TimeEntriesCompanion(
                 id: id,
@@ -4914,6 +5608,7 @@ class $$TimeEntriesTableTableManager
                 deviceId: deviceId,
                 updatedAt: updatedAt,
                 deletedAt: deletedAt,
+                isAuto: isAuto,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -4929,6 +5624,7 @@ class $$TimeEntriesTableTableManager
                 required String deviceId,
                 required String updatedAt,
                 Value<String?> deletedAt = const Value.absent(),
+                Value<bool> isAuto = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => TimeEntriesCompanion.insert(
                 id: id,
@@ -4942,6 +5638,7 @@ class $$TimeEntriesTableTableManager
                 deviceId: deviceId,
                 updatedAt: updatedAt,
                 deletedAt: deletedAt,
+                isAuto: isAuto,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -6928,6 +7625,387 @@ typedef $$SyncPeersTableProcessedTableManager =
       SyncPeerRow,
       PrefetchHooks Function()
     >;
+typedef $$TrackingRulesTableCreateCompanionBuilder =
+    TrackingRulesCompanion Function({
+      required String id,
+      Value<String?> userId,
+      required String pattern,
+      required String matchKind,
+      required String activityId,
+      Value<bool> syncEnabled,
+      required String updatedAt,
+      Value<String?> deletedAt,
+      Value<int> rowid,
+    });
+typedef $$TrackingRulesTableUpdateCompanionBuilder =
+    TrackingRulesCompanion Function({
+      Value<String> id,
+      Value<String?> userId,
+      Value<String> pattern,
+      Value<String> matchKind,
+      Value<String> activityId,
+      Value<bool> syncEnabled,
+      Value<String> updatedAt,
+      Value<String?> deletedAt,
+      Value<int> rowid,
+    });
+
+final class $$TrackingRulesTableReferences
+    extends
+        BaseReferences<_$AppDatabase, $TrackingRulesTable, TrackingRuleRow> {
+  $$TrackingRulesTableReferences(
+    super.$_db,
+    super.$_table,
+    super.$_typedResult,
+  );
+
+  static $ActivitiesTable _activityIdTable(_$AppDatabase db) =>
+      db.activities.createAlias('tracking_rules__activity_id__activities__id');
+
+  $$ActivitiesTableProcessedTableManager get activityId {
+    final $_column = $_itemColumn<String>('activity_id')!;
+
+    final manager = $$ActivitiesTableTableManager(
+      $_db,
+      $_db.activities,
+    ).filter((f) => f.id.sqlEquals($_column));
+    final item = $_typedResult.readTableOrNull(_activityIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: [item]),
+    );
+  }
+}
+
+class $$TrackingRulesTableFilterComposer
+    extends Composer<_$AppDatabase, $TrackingRulesTable> {
+  $$TrackingRulesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get userId => $composableBuilder(
+    column: $table.userId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get pattern => $composableBuilder(
+    column: $table.pattern,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get matchKind => $composableBuilder(
+    column: $table.matchKind,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get syncEnabled => $composableBuilder(
+    column: $table.syncEnabled,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  $$ActivitiesTableFilterComposer get activityId {
+    final $$ActivitiesTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.activityId,
+      referencedTable: $db.activities,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$ActivitiesTableFilterComposer(
+            $db: $db,
+            $table: $db.activities,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$TrackingRulesTableOrderingComposer
+    extends Composer<_$AppDatabase, $TrackingRulesTable> {
+  $$TrackingRulesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get userId => $composableBuilder(
+    column: $table.userId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get pattern => $composableBuilder(
+    column: $table.pattern,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get matchKind => $composableBuilder(
+    column: $table.matchKind,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get syncEnabled => $composableBuilder(
+    column: $table.syncEnabled,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  $$ActivitiesTableOrderingComposer get activityId {
+    final $$ActivitiesTableOrderingComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.activityId,
+      referencedTable: $db.activities,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$ActivitiesTableOrderingComposer(
+            $db: $db,
+            $table: $db.activities,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$TrackingRulesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $TrackingRulesTable> {
+  $$TrackingRulesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get userId =>
+      $composableBuilder(column: $table.userId, builder: (column) => column);
+
+  GeneratedColumn<String> get pattern =>
+      $composableBuilder(column: $table.pattern, builder: (column) => column);
+
+  GeneratedColumn<String> get matchKind =>
+      $composableBuilder(column: $table.matchKind, builder: (column) => column);
+
+  GeneratedColumn<bool> get syncEnabled => $composableBuilder(
+    column: $table.syncEnabled,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  GeneratedColumn<String> get deletedAt =>
+      $composableBuilder(column: $table.deletedAt, builder: (column) => column);
+
+  $$ActivitiesTableAnnotationComposer get activityId {
+    final $$ActivitiesTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.activityId,
+      referencedTable: $db.activities,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$ActivitiesTableAnnotationComposer(
+            $db: $db,
+            $table: $db.activities,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$TrackingRulesTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $TrackingRulesTable,
+          TrackingRuleRow,
+          $$TrackingRulesTableFilterComposer,
+          $$TrackingRulesTableOrderingComposer,
+          $$TrackingRulesTableAnnotationComposer,
+          $$TrackingRulesTableCreateCompanionBuilder,
+          $$TrackingRulesTableUpdateCompanionBuilder,
+          (TrackingRuleRow, $$TrackingRulesTableReferences),
+          TrackingRuleRow,
+          PrefetchHooks Function({bool activityId})
+        > {
+  $$TrackingRulesTableTableManager(_$AppDatabase db, $TrackingRulesTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$TrackingRulesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$TrackingRulesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$TrackingRulesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String?> userId = const Value.absent(),
+                Value<String> pattern = const Value.absent(),
+                Value<String> matchKind = const Value.absent(),
+                Value<String> activityId = const Value.absent(),
+                Value<bool> syncEnabled = const Value.absent(),
+                Value<String> updatedAt = const Value.absent(),
+                Value<String?> deletedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => TrackingRulesCompanion(
+                id: id,
+                userId: userId,
+                pattern: pattern,
+                matchKind: matchKind,
+                activityId: activityId,
+                syncEnabled: syncEnabled,
+                updatedAt: updatedAt,
+                deletedAt: deletedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                Value<String?> userId = const Value.absent(),
+                required String pattern,
+                required String matchKind,
+                required String activityId,
+                Value<bool> syncEnabled = const Value.absent(),
+                required String updatedAt,
+                Value<String?> deletedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => TrackingRulesCompanion.insert(
+                id: id,
+                userId: userId,
+                pattern: pattern,
+                matchKind: matchKind,
+                activityId: activityId,
+                syncEnabled: syncEnabled,
+                updatedAt: updatedAt,
+                deletedAt: deletedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable(table),
+                  $$TrackingRulesTableReferences(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: ({activityId = false}) {
+            return PrefetchHooks(
+              db: db,
+              explicitlyWatchedTables: [],
+              addJoins:
+                  <
+                    T extends TableManagerState<
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic
+                    >
+                  >(state) {
+                    if (activityId) {
+                      state =
+                          state.withJoin(
+                                currentTable: table,
+                                currentColumn: table.activityId,
+                                referencedTable: $$TrackingRulesTableReferences
+                                    ._activityIdTable(db),
+                                referencedColumn: $$TrackingRulesTableReferences
+                                    ._activityIdTable(db)
+                                    .id,
+                              )
+                              as T;
+                    }
+
+                    return state;
+                  },
+              getPrefetchedDataCallback: (items) async {
+                return [];
+              },
+            );
+          },
+        ),
+      );
+}
+
+typedef $$TrackingRulesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $TrackingRulesTable,
+      TrackingRuleRow,
+      $$TrackingRulesTableFilterComposer,
+      $$TrackingRulesTableOrderingComposer,
+      $$TrackingRulesTableAnnotationComposer,
+      $$TrackingRulesTableCreateCompanionBuilder,
+      $$TrackingRulesTableUpdateCompanionBuilder,
+      (TrackingRuleRow, $$TrackingRulesTableReferences),
+      TrackingRuleRow,
+      PrefetchHooks Function({bool activityId})
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -6948,4 +8026,6 @@ class $AppDatabaseManager {
       $$AppMetadataTableTableManager(_db, _db.appMetadata);
   $$SyncPeersTableTableManager get syncPeers =>
       $$SyncPeersTableTableManager(_db, _db.syncPeers);
+  $$TrackingRulesTableTableManager get trackingRules =>
+      $$TrackingRulesTableTableManager(_db, _db.trackingRules);
 }

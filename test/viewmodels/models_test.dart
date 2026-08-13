@@ -164,6 +164,26 @@ void main() {
       expect(restored.deviceId, 'unknown');
       expect(restored.endAt, isNull);
       expect(restored.isRunning, isTrue);
+      // is_auto 缺键 → 回退 false（旧数据/旧 bundle 无此字段）。
+      expect(restored.isAuto, isFalse, reason: 'is_auto 缺键容错回退 false');
+    });
+
+    test('is_auto 解析与 round-trip 保真（自动记录标记）', () {
+      // 正例：true 解析 + round-trip 保真
+      final auto = entry.copyWith(isAuto: true);
+      final restored = TimeEntry.fromMap(auto.toMap());
+      expect(restored.isAuto, isTrue, reason: 'is_auto=true 保真');
+      // 数字 0/1 形态兼容（存储格式统一 0/1 数字与 true/false，readBool 兼容）
+      final numeric = TimeEntry.fromMap({
+        'id': 'e',
+        'start_at': '2026-08-10T04:00:00Z',
+        'updated_at': '2026-08-10T04:00:00Z',
+        'is_auto': 1,
+      });
+      expect(numeric.isAuto, isTrue, reason: 'is_auto=1（数字）识别为 true');
+      // 手动条目（缺省/显式 false）仍为 false
+      final manual = entry.copyWith(isAuto: false);
+      expect(TimeEntry.fromMap(manual.toMap()).isAuto, isFalse);
     });
 
     test('round-trip 保真（含快照与删除状态）', () {

@@ -50,6 +50,35 @@ class TimeEntries extends Table {
   TextColumn get deviceId => text()();
   TextColumn get updatedAt => text()();
   TextColumn get deletedAt => text().nullable()();
+  /// 自动生成标记（后台前台检测自动记录 vs 手动计时）：统计排除/批量清理/
+  /// 防误编辑的判定依据；随行 LWW 同步（并入 time_entries 行）。
+  BoolColumn get isAuto => boolean().withDefault(const Constant(false))();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// 数据类：后台自动记录映射规则（进程/窗口标题模式 → 活动）。
+///
+/// - `sync_enabled`：**per-rule 同步开关**——true 的规则参与云同步（schema.sql
+///   tracking_rules 表 + RLS + 引擎行级过滤），false 仅存本地（不进远端、
+///   不被远端覆盖）；
+/// - 软删统一 `deleted_at`（LWW 删除永远赢）；`user_id` 归属（同步表模式与
+///   5 张业务表一致）。
+@DataClassName('TrackingRuleRow')
+class TrackingRules extends Table {
+  TextColumn get id => text()();
+  TextColumn get userId => text().nullable()();
+  /// 匹配模式（进程名如 `chrome.exe` / 窗口标题模式）。
+  TextColumn get pattern => text()();
+  /// 匹配类型（process/title，存储值见 TrackingRuleMatchKind.storageValue）。
+  TextColumn get matchKind => text()();
+  /// 映射到的活动 id（可空：未指定时命中即切未分配？——设计：**必填**，
+  /// 无匹配活动的规则无意义，规则匹配到活动是映射的落点）。
+  TextColumn get activityId => text().references(Activities, #id)();
+  BoolColumn get syncEnabled => boolean().withDefault(const Constant(true))();
+  TextColumn get updatedAt => text()();
+  TextColumn get deletedAt => text().nullable()();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -163,6 +192,7 @@ class SyncPeers extends Table {
     ActionLogs,
     AppMetadata,
     SyncPeers,
+    TrackingRules,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -172,7 +202,7 @@ class AppDatabase extends _$AppDatabase {
   factory AppDatabase.open() => AppDatabase(driftDatabase(name: 'timetrack'));
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -190,6 +220,23 @@ class AppDatabase extends _$AppDatabase {
         },
         onCreate: (m) async {
           await m.createAll();
+        },
+        onUpgrade: (m, from, to) async {
+          // 模块 2c'：TimeEntries 加 is_auto 列 + 新增 tracking_rules 表。
+          if (from < 2) {
+            // 不用 drift 的 addColumn：其对带 CHECK 约束/默认值的列生成的
+            // `ADD COLUMN ... CHECK (...)` 会被 SQLite 拒绝（ADD COLUMN 禁止
+            // CHECK 约束），列静默不生效（旧行读取 is_auto 为 NULL 崩溃）。
+            // 手工 ALTER（经本类 customStatement——迁移回调内可用，之前失败
+            // 是夹具没设 user_version、迁移未触发所致）省略 CHECK（bool 亲和
+            // 类型 0/1，drift 写入恒 0/1；CHECK 仅为生成层的保险约束，缺失
+            // 不影响读写正确性）。
+            await customStatement(
+              'ALTER TABLE time_entries ADD COLUMN is_auto '
+              'BOOLEAN NOT NULL DEFAULT false',
+            );
+            await m.createTable(trackingRules);
+          }
         },
       );
 

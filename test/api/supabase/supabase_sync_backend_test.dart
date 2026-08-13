@@ -10,6 +10,7 @@ import 'package:timetrack2/data/repositories/action_log_repository.dart';
 import 'package:timetrack2/data/repositories/activity_repository.dart';
 import 'package:timetrack2/data/repositories/category_repository.dart';
 import 'package:timetrack2/data/repositories/settings_repository.dart';
+import 'package:timetrack2/data/repositories/tracking_rule_repository.dart';
 import 'package:timetrack2/data/repositories/time_entry_repository.dart';
 
 import 'memory_remote.dart';
@@ -198,6 +199,7 @@ void main() {
         timeEntries: entries,
         actionLogs: actionLogs,
         settings: settings,
+        trackingRules: TrackingRuleRepository(database: db),
       );
     }
 

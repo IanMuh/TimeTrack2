@@ -3,30 +3,30 @@
 > 供中断后快速恢复。权威细节以 `TimeTrack2 从零重建执行计划（完整最终版）.md` 为准；
 > 开发纪律见 `AGENTS.md`（逐模块确认、ocr 审查循环至清零、无用户指示不 push）。
 
-## 当前状态（2026-08-11）
+## 当前状态（2026-08-12）
 
 **阶段 0-1 完成并推送**（ocr 全模块清零，200 测试）：
 - viewmodels（领域模型 deletedAt/parentId/容错）→ utils（CLI 解析器/SemVer/时间/SHA-256）→ constants（配置/指令定义）→ data（drift 8 表 + 5 仓储）
 - 门禁：analyze 0 / 测试全绿 / Windows Release 构建通过
 
-**阶段 2 进行中（2a/2b 已合并 main，2c 待审批，2d 待开始）**：
+**阶段 2 进行中（2a/2b/2c 已合并 main，2c' 待开始）**：
 - 2a 同步包 + 文件互通：已合并 main
 - 2b LAN：已合并 main（PR #2）；协议/服务器/客户端 + 真 HttpServer 测试
-- 2c 云同步：已完成、ocr 2 轮清零（98 条）、280 测试、已推送 PR #3（待审批）
-  - `api/supabase/`：SyncBackend 抽象 + NoopSyncBackend（未配置离线）、CloudSyncEngine
-    （先拉后推/推送防旧/游标=最大行时间/in-flight 互斥/settings 归属过滤）、
-    RemoteTableGateway 抽象 + Supabase 实现（uuid 归属/idKey/tie-breaker/onConflict/
-    重试 3 次/表名白名单）、SupabaseAuthService（OTP 登录/快照流/脱敏）、
-    SyncStatusStore（单事务读/单调性/损坏显式失败/lastTarget 仅成功写）
-  - `supabase/schema.sql`：6 表镜像（user_id uuid、color bigint）+ 递归软删触发器
-    （WITH RECURSIVE + greatest() LWW + FOR KEY SHARE）+ 3 校验触发器 + RLS + 增量索引
-  - 测试：引擎 mock（先拉后推/分页精确/增量 since/删除传播双向/LWW/并发互斥/边界行）
-    + 状态存储 + schema 结构锁定
+- 2c 云同步：已合并 main（PR #3）；ocr 增量 r50→r55 收敛至 0 评论 + 分支门禁 39 条（含 1 critical schema 0x、1 high 校验触发器）全部修复复验；381 测试
+  - `api/supabase/`：SyncBackend 抽象 + NoopSyncBackend、CloudSyncEngine（先拉后推/推送防旧/游标=最大行时间/in-flight 互斥/settings 归属过滤）、RemoteTableGateway 抽象 + Supabase 实现、SupabaseAuthService（OTP 登录/快照流/脱敏）、SyncStatusStore（单事务读/单调性/未来游标自愈/损坏显式失败）
+  - `supabase/schema.sql`：6 表镜像 + 递归软删触发器（WITH RECURSIVE + greatest() LWW + pg_trigger_depth 嵌套守卫）+ 分类/活动级联软删 links + 外键校验（仅引用字段变更时 + 显式归属）+ RLS + 增量索引
+- **2c' 后台自动记录数据层（已批准，待开始）**：TimeEntry 加 `is_auto` 列 + 新增 `tracking_rules` 表（`sync_enabled` per-rule 同步开关）+ 同步引擎行级过滤（规则进云同步：schema.sql + RLS + RemoteTables 白名单 + memory_remote + 引擎测试扩展）
+  - 背景：用户新增需求「应用后台运行时查看前台程序、自动记录事项」，已确认双平台（Windows/Android）+ 全自动 + 规则可配置进/不进同步；方案调研完成（Windows：dart:ffi + win32 轮询 GetForegroundWindow；Android：usage_stats + specialUse 前台服务 + UsageStats 特殊权限）；平台检测层归阶段 3/4（见执行计划「后台自动记录设计」）
 
 ## 阶段 2 剩余模块（按序）
+- 2c' 后台自动记录数据层（见上）
 - 2d AI 预留：`api/ai/` LlmClient 接口 + OpenAI 兼容骨架
 - 2e 更新：`api/update/`（清单/下载/校验）+ `data/update/`（Windows staging/Android FileProvider 安装器）
 - 2f 清理：`data/cleanup/` 保留期 180 天 + VACUUM
+
+## 阶段 3/4 新增落点（后台自动记录，登记非本期）
+- 阶段 3：前台检测状态机（ForegroundDetector 接口 + 规则匹配 + 生成记录指令，接入 CommandDispatcher）
+- 阶段 4：规则配置页 + 授权引导页（Android 使用情况访问/Windows 说明）+ 托盘驻留关窗不退出 + Android 前台服务常驻通知 + Windows FFI 检测器；阶段 5 增补后台自动记录验收（Play 受限权限声明 + 隐私政策 + Data safety）
 
 ## 关键约定（实现勿破坏）
 - 三通道（云/LAN/文件）统一行级 LWW：`updated_at` 比较，删除=软删行推进 updated_at 传播（无独立删除列表）

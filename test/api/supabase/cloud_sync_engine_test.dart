@@ -10,18 +10,21 @@ import 'package:timetrack2/data/repositories/activity_repository.dart';
 import 'package:timetrack2/data/repositories/category_repository.dart';
 import 'package:timetrack2/data/repositories/settings_repository.dart';
 import 'package:timetrack2/data/repositories/time_entry_repository.dart';
+import 'package:timetrack2/data/repositories/tracking_rule_repository.dart';
 import 'package:timetrack2/viewmodels/action_log.dart';
 import 'package:timetrack2/viewmodels/activity.dart';
 import 'package:timetrack2/viewmodels/activity_category.dart';
 import 'package:timetrack2/viewmodels/profile_settings.dart' as settings_vm;
 import 'package:timetrack2/viewmodels/time_entry.dart';
+import 'package:timetrack2/viewmodels/tracking_rule.dart';
 
 import 'memory_remote.dart';
 
 /// 云同步测试环境：内存库 + 内存远端 + 引擎。
 class CloudHarness {
   CloudHarness._(this.db, this.activities, this.categories, this.settings,
-      this.actionLogs, this.entries, this.statusStore, this.remote, this.engine);
+      this.actionLogs, this.entries, this.statusStore, this.remote, this.engine,
+      this.trackingRules);
 
   static CloudHarness create({int pageSize = 999}) {
     final remote = MemoryRemote();
@@ -50,6 +53,7 @@ class CloudHarness {
       settingsRepository: settings,
     );
     final statusStore = SyncStatusStore(database: db);
+    final trackingRules = TrackingRuleRepository(database: db);
     final engine = CloudSyncEngine(
       database: db,
       gateway: remote,
@@ -59,10 +63,11 @@ class CloudHarness {
       timeEntries: entries,
       actionLogs: actionLogs,
       settings: settings,
+      trackingRules: trackingRules,
       pageSize: pageSize,
     );
     return CloudHarness._(db, activities, categories, settings, actionLogs,
-        entries, statusStore, remote, engine);
+        entries, statusStore, remote, engine, trackingRules);
   }
 
   final AppDatabase db;
@@ -74,6 +79,7 @@ class CloudHarness {
   final SyncStatusStore statusStore;
   final MemoryRemote remote;
   final CloudSyncEngine engine;
+  final TrackingRuleRepository trackingRules;
 
   /// 引擎单用户测试的约定用户：与 memory_remote 的 seed 默认归属同源
   ///（seed 未显式带 user_id 的行注入该值；两处共享单一事实来源防漂移）。
@@ -1167,6 +1173,97 @@ void main() {
       }
     });
 
+    test('tracking_rules：sync_enabled=true 规则推送/拉取，false 仅存本地（模块 2c-foreground）', () async {
+      final h = CloudHarness.create();
+      try {
+        // 规则 activity_id 引用 activities（本地 FK ON）——先落本地活动，
+        // 否则本地 saveRule 因 FK 悬挂失败（远端 seed 不解决本地引用）。
+        await h.db.into(h.db.activities).insert(
+              ActivitiesCompanion.insert(
+                id: 'rule-activity',
+                userId: const Value(null),
+                name: '规则活动',
+                color: 0xff2563eb,
+                isFavorite: const Value(false),
+                updatedAt: '2026-08-12T10:00:00.000000Z',
+              ),
+            );
+        // 远端活动（规则 activity_id 引用它——先推送活动保证引用成立）。
+        final remoteActivity = Activity(
+          id: 'rule-activity',
+          name: '规则活动',
+          color: 0xff2563eb,
+          isFavorite: false,
+          updatedAt: DateTime(2026, 8, 12, 10),
+        );
+        h.remote.seed(RemoteTables.activities, remoteActivity.toMap());
+        // 本地同步规则（sync_enabled=true）+ 本地-only 规则（sync_enabled=false）
+        final t0 = DateTime.utc(2026, 8, 12, 4);
+        await h.trackingRules.saveRule(
+          TrackingRule(
+            id: 'r-sync',
+            pattern: 'chrome.exe',
+            matchKind: TrackingRuleMatchKind.process,
+            activityId: 'rule-activity',
+            syncEnabled: true,
+            updatedAt: t0,
+          ),
+        );
+        await h.trackingRules.saveRule(
+          TrackingRule(
+            id: 'r-local',
+            pattern: 'secret-app.exe',
+            matchKind: TrackingRuleMatchKind.process,
+            activityId: 'rule-activity',
+            syncEnabled: false,
+            updatedAt: t0.add(const Duration(minutes: 1)),
+          ),
+        );
+
+        await h.engine.syncNow(userId: CloudHarness.userId);
+
+        // 推送：sync_enabled=true 的规则上云并补填 user_id；false 的规则不进远端
+        final remoteRules = h.remote.tables[RemoteTables.trackingRules];
+        expect(remoteRules, isNotNull, reason: 'tracking_rules 应推送到远端');
+        expect(remoteRules!.containsKey('r-sync'), isTrue,
+            reason: 'sync_enabled=true 规则上云');
+        expect(remoteRules['r-sync']!['user_id'], CloudHarness.userId,
+            reason: '规则推送补填 user_id');
+        expect(remoteRules['r-sync']!['sync_enabled'], true,
+            reason: 'sync_enabled 字段保真');
+        expect(remoteRules.containsKey('r-local'), isFalse,
+            reason: 'sync_enabled=false 规则不进远端（本地偏好不泄漏到云）');
+
+        // 拉取：远端规则 → 本地 LWW 应用（含补填归属 + 快照）。
+        // updatedAt 须**晚于**第一次同步推进的游标（增量窗口 >= since），
+        // 且落在 markSuccess 合理性容差内（now+2min < now+5min）——与
+        // profile_settings 拉回用例同模式。
+        final remoteRule = TrackingRule(
+          id: 'r-remote',
+          pattern: 'code.exe',
+          matchKind: TrackingRuleMatchKind.process,
+          activityId: 'rule-activity',
+          syncEnabled: true,
+          userId: CloudHarness.userId,
+          updatedAt: DateTime.now().toUtc().add(const Duration(minutes: 2)),
+        );
+        h.remote.seed(RemoteTables.trackingRules, remoteRule.toMap());
+        await h.engine.syncNow(userId: CloudHarness.userId);
+        final localRule = await h.trackingRules.ruleById('r-remote');
+        expect(localRule, isNotNull, reason: '远端规则拉回本地');
+        expect(localRule!.pattern, 'code.exe');
+        expect(localRule.syncEnabled, isTrue);
+        // 本地-only 规则仍保留（拉取不覆盖本地 sync_enabled=false 的规则）
+        final localOnly = await h.trackingRules.ruleById('r-local');
+        expect(localOnly, isNotNull, reason: '本地-only 规则不被远端影响');
+        expect(localOnly!.syncEnabled, isFalse);
+      } finally {
+        await h.close();
+      }
+    });
+  });
+
+  group('CloudSyncEngine 推送（其余表冒烟）', () {
     test('分类推送：本地新分类（含 parentId）推送且补填 user_id', () async {
       final h = CloudHarness.create();
       try {

@@ -107,8 +107,8 @@ class SupabaseRemoteTables with RepositoryMappings implements RemoteTableGateway
   @visibleForTesting
   static const remoteMaxPageSize = _remoteMaxPageSize;
 
-  /// 允许访问的表（5 张业务表 + profile_settings）：防未知表名经 `.from()`
-  /// 误操作非白名单表（纵深防御）。
+  /// 允许访问的表（5 张业务表 + profile_settings + tracking_rules）：防未知表名
+  /// 经 `.from()` 误操作非白名单表（纵深防御）。
   static const _allowedTables = <String>{
     'activities',
     'activity_categories',
@@ -116,6 +116,7 @@ class SupabaseRemoteTables with RepositoryMappings implements RemoteTableGateway
     'time_entries',
     'action_logs',
     'profile_settings',
+    'tracking_rules',
   };
 
   /// 拉取分页大小上限：**max(服务端 db-max-rows 1000) - 1**——hasMore 需探测

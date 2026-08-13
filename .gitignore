@@ -69,3 +69,4 @@ secrets.*
 
 # ZCode 会话内部文件
 .zcode/
+_tmp_*.json

@@ -184,7 +184,7 @@ void main() {
       RegExp(pattern, caseSensitive: false).hasMatch(schema);
 
   group('supabase/schema.sql 表结构', () {
-    test('6 张业务表齐全（与本地 drift 镜像）', () {
+    test('7 张同步表齐全（与本地 drift 镜像）', () {
       for (final table in [
         'activities',
         'activity_categories',
@@ -192,6 +192,8 @@ void main() {
         'time_entries',
         'action_logs',
         'profile_settings',
+        // 模块 2c' 第 7 张同步表（后台自动记录映射规则）
+        'tracking_rules',
       ]) {
         expect(
           has('CREATE TABLE IF NOT EXISTS $table'
@@ -212,6 +214,16 @@ void main() {
         'action_logs': ['user_id', 'updated_at', 'deleted_at'],
         // profile_settings 无 deleted_at（配置不软删）
         'profile_settings': ['user_id', 'updated_at'],
+        // tracking_rules 软删体系 + is_auto 无关（映射规则表）
+        'tracking_rules': [
+          'user_id',
+          'updated_at',
+          'deleted_at',
+          'pattern',
+          'match_kind',
+          'activity_id',
+          'sync_enabled',
+        ],
       };
       for (final entry in tables.entries) {
         final table = entry.key;
@@ -245,6 +257,17 @@ void main() {
           reason: '$table 的 user_id 应为 uuid（匹配 auth.uid()）',
         );
       }
+      // time_entries 必须带 is_auto（模块 2c'：后台自动记录标记，镜像本地
+      // drift 列）——缺失会令云端收不到该字段、LWW 整行替换时本地标记被丢。
+      final timeEntryBlock = RegExp(
+        r'CREATE TABLE IF NOT EXISTS TIME_ENTRIES \(([^;]*)\)',
+        caseSensitive: false,
+      ).firstMatch(schema)!.group(1)!;
+      expect(
+        RegExp(r'\bIS_AUTO\b', caseSensitive: false).hasMatch(timeEntryBlock),
+        isTrue,
+        reason: 'time_entries 必须带 is_auto 列（自动记录标记，镜像本地 drift）',
+      );
       // parent_id 自引用外键（仅 activity_categories 需要）
       final categoryBlock = RegExp(
         r'CREATE TABLE IF NOT EXISTS ACTIVITY_CATEGORIES \(([^;]*)\)',
@@ -492,7 +515,7 @@ void main() {
   });
 
   group('RLS 与外键校验', () {
-    test('6 表逐一启用 RLS', () {
+    test('7 表逐一启用 RLS', () {
       for (final table in [
         'activities',
         'activity_categories',
@@ -500,13 +523,14 @@ void main() {
         'time_entries',
         'action_logs',
         'profile_settings',
+        'tracking_rules',
       ]) {
         expect(has("ALTER TABLE $table ENABLE ROW LEVEL SECURITY"), isTrue,
             reason: '$table 未启用 RLS');
       }
     });
 
-    test('6 表逐一有 SELECT/INSERT/UPDATE 策略且绑定 auth.uid()', () {
+    test('7 表逐一有 SELECT/INSERT/UPDATE 策略且绑定 auth.uid()', () {
       // 按命令类型拆分（FOR SELECT/INSERT/UPDATE）；**不建 FOR DELETE**——
       // 物理删除会绕过级联软删产生悬挂引用，破坏"删除永远赢"。
       for (final table in [
@@ -516,6 +540,7 @@ void main() {
         'time_entries',
         'action_logs',
         'profile_settings',
+        'tracking_rules',
       ]) {
         // **标识符转义（r53）**：表名/策略名经 RegExp.escape 后插入正则——
         // 当前标识符均为字母/下划线不触发元字符，但未来引入含 `.`/`+`/`(`
@@ -615,7 +640,7 @@ void main() {
   });
 
   group('增量索引', () {
-    test('6 表 (user_id, updated_at) 增量索引齐全（表名与列组合绑定）', () {
+    test('7 表 (user_id, updated_at) 增量索引齐全（表名与列组合绑定）', () {
       const indexTables = {
         'idx_activities_sync': 'activities',
         'idx_activity_categories_sync': 'activity_categories',
@@ -623,6 +648,8 @@ void main() {
         'idx_time_entries_sync': 'time_entries',
         'idx_action_logs_sync': 'action_logs',
         'idx_profile_settings_sync': 'profile_settings',
+        // 模块 2c'：tracking_rules 同步索引
+        'idx_tracking_rules_sync': 'tracking_rules',
       };
       for (final entry in indexTables.entries) {
         expect(

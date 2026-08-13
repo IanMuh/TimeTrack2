@@ -107,6 +107,7 @@ CREATE TABLE IF NOT EXISTS time_entries (
   end_at         text,
   note           text NOT NULL DEFAULT '',
   device_id      text NOT NULL,
+  is_auto        boolean NOT NULL DEFAULT false, -- 后台自动记录 vs 手动计时（模块 2c'）
   updated_at     text NOT NULL,
   deleted_at     text
 );
@@ -141,6 +142,20 @@ CREATE TABLE IF NOT EXISTS profile_settings (
   updated_at text NOT NULL
 );
 
+-- 后台自动记录映射规则（模块 2c' 第 7 张同步表）
+-- 客户端按 sync_enabled=true 行级过滤：本表只承载参与同步的规则（本地-only
+-- 规则 sync_enabled=false 永不推送、不被远端覆盖）。软删统一 deleted_at。
+CREATE TABLE IF NOT EXISTS tracking_rules (
+  id          text PRIMARY KEY,
+  user_id     uuid REFERENCES auth.users(id) ON DELETE CASCADE,
+  pattern     text NOT NULL,
+  match_kind  text NOT NULL,           -- 'process' / 'title'
+  activity_id text NOT NULL,           -- 映射到的活动（必填：无活动映射的规则无意义）
+  sync_enabled boolean NOT NULL DEFAULT true,
+  updated_at  text NOT NULL,
+  deleted_at  text
+);
+
 -- =============================================================
 -- 增量索引（云同步 since 游标查询）
 -- =============================================================
@@ -156,6 +171,8 @@ CREATE INDEX IF NOT EXISTS idx_action_logs_sync
   ON action_logs (user_id, updated_at);
 CREATE INDEX IF NOT EXISTS idx_profile_settings_sync
   ON profile_settings (user_id, updated_at);
+CREATE INDEX IF NOT EXISTS idx_tracking_rules_sync
+  ON tracking_rules (user_id, updated_at);
 
 -- 分类 parent_id 递归查询索引（穿透已删节点）
 CREATE INDEX IF NOT EXISTS idx_activity_categories_parent
@@ -392,6 +409,7 @@ ALTER TABLE activity_category_links ENABLE ROW LEVEL SECURITY;
 ALTER TABLE time_entries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE action_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE profile_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tracking_rules ENABLE ROW LEVEL SECURITY;
 
 -- 策略：用户只能读写自己的行（写入强制 user_id = auth.uid()，防越权写他人数据）。
 -- 按命令类型拆分 SELECT/INSERT/UPDATE（**不建 FOR DELETE 策略**）：禁止客户端
@@ -437,5 +455,12 @@ CREATE POLICY profile_settings_select_own ON profile_settings
 CREATE POLICY profile_settings_insert_own ON profile_settings
   FOR INSERT TO authenticated WITH CHECK (user_id = auth.uid());
 CREATE POLICY profile_settings_update_own ON profile_settings
+  FOR UPDATE TO authenticated USING (user_id = auth.uid())
+  WITH CHECK (user_id = auth.uid());
+CREATE POLICY tracking_rules_select_own ON tracking_rules
+  FOR SELECT TO authenticated USING (user_id = auth.uid());
+CREATE POLICY tracking_rules_insert_own ON tracking_rules
+  FOR INSERT TO authenticated WITH CHECK (user_id = auth.uid());
+CREATE POLICY tracking_rules_update_own ON tracking_rules
   FOR UPDATE TO authenticated USING (user_id = auth.uid())
   WITH CHECK (user_id = auth.uid());

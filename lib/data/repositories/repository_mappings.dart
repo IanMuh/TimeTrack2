@@ -1,10 +1,11 @@
 import 'package:drift/drift.dart';
 
+import '../../viewmodels/action_log.dart';
 import '../../viewmodels/activity.dart';
 import '../../viewmodels/activity_category.dart';
-import '../../viewmodels/action_log.dart';
 import '../../viewmodels/profile_settings.dart';
 import '../../viewmodels/time_entry.dart';
+import '../../viewmodels/tracking_rule.dart';
 import '../database/app_database.dart'
     hide ProfileSettings; // 表类与 viewmodels 模型重名，此处用模型。
 
@@ -66,6 +67,7 @@ mixin RepositoryMappings {
       deviceId: row.deviceId,
       updatedAt: readUtc(row.updatedAt),
       deletedAt: readNullableUtc(row.deletedAt),
+      isAuto: row.isAuto,
     );
   }
 
@@ -83,6 +85,7 @@ mixin RepositoryMappings {
       deviceId: Value(entry.deviceId),
       updatedAt: Value(utcString(entry.updatedAt)),
       deletedAt: Value(entry.deletedAt == null ? null : utcString(entry.deletedAt!)),
+      isAuto: Value(entry.isAuto),
     );
   }
 
@@ -213,6 +216,38 @@ mixin RepositoryMappings {
       deviceId: Value(log.deviceId),
       updatedAt: Value(utcString(log.updatedAt)),
       deletedAt: Value(log.deletedAt == null ? null : utcString(log.deletedAt!)),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // TrackingRule
+  // ---------------------------------------------------------------------------
+
+  /// TrackingRuleRow -> TrackingRule。
+  TrackingRule trackingRuleFromRow(TrackingRuleRow row) {
+    return TrackingRule(
+      id: row.id,
+      userId: row.userId,
+      pattern: row.pattern,
+      matchKind: TrackingRuleMatchKind.fromStorageValue(row.matchKind),
+      activityId: row.activityId,
+      syncEnabled: row.syncEnabled,
+      updatedAt: readUtc(row.updatedAt),
+      deletedAt: readNullableUtc(row.deletedAt),
+    );
+  }
+
+  /// TrackingRule -> companion。
+  TrackingRulesCompanion trackingRuleToCompanion(TrackingRule rule) {
+    return TrackingRulesCompanion(
+      id: Value(rule.id),
+      userId: Value(rule.userId),
+      pattern: Value(rule.pattern),
+      matchKind: Value(rule.matchKind.storageValue),
+      activityId: Value(rule.activityId),
+      syncEnabled: Value(rule.syncEnabled),
+      updatedAt: Value(utcString(rule.updatedAt)),
+      deletedAt: Value(rule.deletedAt == null ? null : utcString(rule.deletedAt!)),
     );
   }
 
