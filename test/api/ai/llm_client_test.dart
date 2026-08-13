@@ -6,6 +6,35 @@ import 'package:http/testing.dart';
 import 'package:timetrack2/api/ai/llm_types.dart';
 import 'package:timetrack2/api/ai/openai_compatible_llm_client.dart';
 
+/// 记录 close 调用的 spy http client（r3）：MockClient 的 close() 是 no-op、
+/// 不记录状态——无法区分"注入对象是否被错误关闭"；继承 [http.BaseClient]
+/// 覆写 [http.BaseClient.close] 计数，才能对"注入不释放"语义形成真实回归保护。
+class _CloseSpyClient extends http.BaseClient {
+  int closeCount = 0;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    final body = jsonEncode({
+      'choices': [
+        {'message': {'role': 'assistant', 'content': 'ok'}},
+      ],
+    });
+    return http.StreamedResponse(
+      Stream.value(utf8.encode(body)),
+      200,
+      contentLength: body.length,
+      headers: {'content-type': 'application/json'},
+      request: request,
+    );
+  }
+
+  @override
+  void close() {
+    closeCount += 1;
+    super.close();
+  }
+}
+
 void main() {
   group('LlmCapability 能力标记与组合矩阵', () {
     test('预置 provider 能力快照', () {
@@ -431,44 +460,21 @@ void main() {
       );
     });
 
-    test('close 生命周期：自建释放 / 注入不释放 / 关闭后 chat 拒绝（r2）', () async {
-      // 注入对象所有权归调用方：close 不得关闭注入的 http client——
-      // 同一注入 client 在 A.close() 后仍可被新 client B 复用成功请求
-      //（若被 A 关闭，B 的请求会抛异常）。
-      var injectedRequests = 0;
-      final injected = MockClient((request) async {
-        injectedRequests += 1;
-        return http.Response(
-          jsonEncode({
-            'choices': [
-              {'message': {'role': 'assistant', 'content': 'ok'}},
-            ],
-          }),
-          200,
-          headers: {'content-type': 'application/json'},
-          request: request,
-        );
-      });
+    test('close 生命周期：自建释放 / 注入不释放 / 关闭后 chat 拒绝（r3）', () async {
+      // 注入对象所有权归调用方：close 不得关闭注入的 http client——用 spy
+      // client 记录 close 调用（MockClient 的 close 是 no-op、无法观测）。
+      final spy = _CloseSpyClient();
       final clientA = OpenAiCompatibleLlmClient(
         config: config(),
-        httpClient: injected,
+        httpClient: spy,
       );
       expect((await clientA.chat(
         messages: const [LlmMessage(role: LlmRole.user, content: 'x')],
       ))
           .isSuccess, isTrue);
       clientA.close();
-      // B 复用同一注入 client：请求成功（未被 A 关闭）。
-      final clientB = OpenAiCompatibleLlmClient(
-        config: config(),
-        httpClient: injected,
-      );
-      expect((await clientB.chat(
-        messages: const [LlmMessage(role: LlmRole.user, content: 'x')],
-      ))
-          .isSuccess, isTrue,
-          reason: '注入 client 未被 close（所有权归调用方）');
-      expect(injectedRequests, 2);
+      expect(spy.closeCount, 0,
+          reason: '注入 client 的 close 从未被调用（所有权归调用方）');
 
       // 自建 client：close 后 chat 明确拒绝（非误导性"网络不可用"）。
       final ownClient = OpenAiCompatibleLlmClient(config: config());

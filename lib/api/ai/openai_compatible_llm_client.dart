@@ -83,15 +83,21 @@ class OpenAiCompatibleLlmClient implements LlmClient {
       }
       return parseChatResponseBody(response.body);
     } on TimeoutException {
+      // 在途请求期间被 close（http.Client.close 会使在途 post 抛异常）——
+      // 先判 _closed 再归因（防"已关闭"被误映射为网络故障）。
+      if (_closed) return const AppFailure('模型客户端已关闭，请重新创建');
       return const AppFailure('模型请求超时，请稍后重试');
     } on SocketException {
+      if (_closed) return const AppFailure('模型客户端已关闭，请重新创建');
       return const AppFailure('网络不可用，请稍后重试');
     } on http.ClientException {
+      if (_closed) return const AppFailure('模型客户端已关闭，请重新创建');
       return const AppFailure('网络不可用，请稍后重试');
     } on FormatException catch (e) {
       // 响应体非法（非 JSON / choices 结构损坏）。
       return AppFailure('模型响应无法解析：${e.message}');
-    }  }
+    }
+  }
 
   /// 构造 OpenAI 兼容聊天请求体（**纯函数**，可单测）。
   ///
