@@ -28,11 +28,17 @@ class OpenAiCompatibleLlmClient implements LlmClient {
   /// 是否自建 http client（close 时释放；注入对象由调用方负责生命周期）。
   final bool _ownsHttp;
 
+  /// 已关闭标记：close 后 chat() 明确拒绝（防"已关闭 client 抛
+  /// ClientException 被误映射为网络不可用"的误导性错误；重复 close 幂等）。
+  bool _closed = false;
+
   @override
   LlmCapability get capability => config.capability;
 
   @override
   void close() {
+    if (_closed) return;
+    _closed = true;
     if (_ownsHttp) {
       _http.close();
     }
@@ -43,6 +49,9 @@ class OpenAiCompatibleLlmClient implements LlmClient {
     required List<LlmMessage> messages,
     LlmRequestOptions options = const LlmRequestOptions.none(),
   }) async {
+    if (_closed) {
+      return const AppFailure('模型客户端已关闭，请重新创建');
+    }
     // 能力组合校验（错误早失败）：通义 tools+stream 不可并用等。
     final incompatible = capability.validateRequest(options);
     if (incompatible != null) {

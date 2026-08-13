@@ -52,7 +52,10 @@ class LlmRequestOptions {
             'temperature 必须在 0~2 之间'),
         assert(maxTokens == null || maxTokens > 0, 'maxTokens 必须为正') {
     final temp = temperature;
-    if (temp != null && (temp < 0 || temp > 2)) {
+    // NaN 显式排除：`NaN < 0` 与 `NaN > 2` 均为 false，仅 range 判断会漏检
+    //（double.parse('NaN') 可来自二期设置页输入）；NaN 传 JSON 会抛
+    // JsonUnsupportedObjectError 逃逸现有 catch。
+    if (temp != null && (temp.isNaN || temp < 0 || temp > 2)) {
       throw ArgumentError.value(temp, 'temperature', '必须在 0~2 之间');
     }
     final tokens = maxTokens;
@@ -215,13 +218,14 @@ class LlmConfig {
       );
     }
     // 允许根路径下的单段路径（如自托管 `https://host:8080/v1`——OpenAI
-    // 兼容层常以 /v1 为前缀）；**不去空段**（`https://host//v1` 双斜杠路径
-    // 会拼出错误端点，须拒绝）。
-    if (uri.pathSegments.length > 1) {
+    // 兼容层常以 /v1 为前缀）。**双斜杠路径拒绝**：Dart 的 `Uri.pathSegments`
+    // 会跳过前导/尾随空段（`//v1` → `['v1']`、`//` → `[]`），单独用
+    // pathSegments 长度无法识别——直接检查原始 path 是否含 `//`。
+    if (uri.path.contains('//') || uri.pathSegments.length > 1) {
       throw ArgumentError.value(
         value,
         'baseUrl',
-        'baseUrl 至多一个路径段（如 /v1），不支持深层路径',
+        'baseUrl 至多一个路径段（如 /v1），不支持深层路径/双斜杠',
       );
     }
     return trimmed.endsWith('/') ? trimmed.substring(0, trimmed.length - 1) : trimmed;

@@ -138,10 +138,17 @@ void main() {
         'https://api.example.com#frag',
         'https://user:pass@api.example.com',
         'https://api.example.com//v1', // 双斜杠路径
+        'https://api.example.com//', // 裸双斜杠尾路径
       ]) {
         expect(() => config(bad), throwsArgumentError,
             reason: '非法 baseUrl 应拒绝：$bad');
       }
+    });
+
+    test('temperature NaN 拒绝（NaN 比较恒 false 的漏检防护）', () {
+      expect(() => LlmRequestOptions(temperature: double.nan),
+          throwsA(anyOf(isA<AssertionError>(), isA<ArgumentError>())),
+          reason: 'NaN 温度拒绝（防 JsonUnsupportedObjectError 逃逸）');
     });
 
     test('apiKey 空串/空白归一化为 null；timeout 非正运行时拒绝', () {
@@ -238,6 +245,19 @@ void main() {
       );
       expect(ollamaBody.containsKey('response_format'), isFalse,
           reason: 'Ollama 无 response_format 不携带');
+    });
+
+    test('stream + useJsonMode 同时开启：两者均携带（正交组合，r2）', () {
+      // 流式与 JSON 模式是独立能力——同时请求应同时携带，防未来把两者
+      // 重新耦合的回归。
+      final body = OpenAiCompatibleLlmClient.buildChatRequestBody(
+        config: deepseekConfig,
+        messages: const [LlmMessage(role: LlmRole.user, content: 'x')],
+        options: LlmRequestOptions(stream: true, useJsonMode: true),
+      );
+      expect(body['stream'], isTrue, reason: '流式携带');
+      expect(body['response_format'], {'type': 'json_object'},
+          reason: 'JSON 模式独立携带（与 stream 正交）');
     });
 
     test('LlmRequestOptions 边界：temperature 越界 / maxTokens 非正拒绝', () {
@@ -409,6 +429,59 @@ void main() {
         isFalse,
         reason: '不泄露底层异常类型',
       );
+    });
+
+    test('close 生命周期：自建释放 / 注入不释放 / 关闭后 chat 拒绝（r2）', () async {
+      // 注入对象所有权归调用方：close 不得关闭注入的 http client——
+      // 同一注入 client 在 A.close() 后仍可被新 client B 复用成功请求
+      //（若被 A 关闭，B 的请求会抛异常）。
+      var injectedRequests = 0;
+      final injected = MockClient((request) async {
+        injectedRequests += 1;
+        return http.Response(
+          jsonEncode({
+            'choices': [
+              {'message': {'role': 'assistant', 'content': 'ok'}},
+            ],
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+          request: request,
+        );
+      });
+      final clientA = OpenAiCompatibleLlmClient(
+        config: config(),
+        httpClient: injected,
+      );
+      expect((await clientA.chat(
+        messages: const [LlmMessage(role: LlmRole.user, content: 'x')],
+      ))
+          .isSuccess, isTrue);
+      clientA.close();
+      // B 复用同一注入 client：请求成功（未被 A 关闭）。
+      final clientB = OpenAiCompatibleLlmClient(
+        config: config(),
+        httpClient: injected,
+      );
+      expect((await clientB.chat(
+        messages: const [LlmMessage(role: LlmRole.user, content: 'x')],
+      ))
+          .isSuccess, isTrue,
+          reason: '注入 client 未被 close（所有权归调用方）');
+      expect(injectedRequests, 2);
+
+      // 自建 client：close 后 chat 明确拒绝（非误导性"网络不可用"）。
+      final ownClient = OpenAiCompatibleLlmClient(config: config());
+      ownClient.close();
+      final afterClose = await ownClient.chat(
+        messages: const [LlmMessage(role: LlmRole.user, content: 'x')],
+      );
+      expect(afterClose.isSuccess, isFalse, reason: '关闭后 chat 失败');
+      final msg = afterClose.when(onSuccess: (_) => '', onFailure: (m) => m);
+      expect(msg, contains('已关闭'),
+          reason: '明确提示已关闭（非误导性网络错误）');
+      // 重复 close 幂等（不抛错）。
+      ownClient.close();
     });
   });
 }
