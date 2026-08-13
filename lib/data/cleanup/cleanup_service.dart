@@ -142,36 +142,28 @@ class CleanupService with RepositoryMappings {
           : retentionCutoff;
       final cutoffStr = utcString(cutoff);
 
-      // ---- 物理删除（单事务；FK 引用先清理、存活引用者跳过）----
+      // ---- 物理删除（单事务；FK 引用先处理、被引用者跳过）----
+      // 顺序设计（r2/r4/r5）：
+      // 1. 先算 activities 可删集（排除"存活或软删未传播"引用者——父被物理
+      //    删除会制造悬空/未传播子行 FK 违约）；
+      // 2. 引用表只删**通用 `< cutoff` 软删行**（已传播+超期的子墓碑，含引用
+      //    将删父的——父是否真删不影响子自身清理合法性，无需专用分支）；
+      // 3. 分类：可删集排除被 link.categoryId 引用（存活/未传播）者，parentId
+      //    置空（**含软删子**——父被物理删后子引用悬空，防自引用 FK），再删；
+      // 4. 最后删 activities（此时引用它的软删行已随通用清理移除）。
       final deleted = <String, int>{};
       await database.transaction(() async {
-        // 待删活动父 id 集（超期软删 activities）。
-        final expiredActivityIds = await _expiredActivityIds(cutoffStr);
-        // 引用表：删除引用将删父的**软删**行（任意超期——父已移除，子墓碑
-        // 失去参照价值）+ 超期软删行。
-        deleted['activityCategoryLinks'] = await _deleteExpiredLinks(
-          cutoffStr,
-          expiredActivityIds,
-        );
-        deleted['trackingRules'] = await _deleteExpiredTrackingRules(
-          cutoffStr,
-          expiredActivityIds,
-        );
-        deleted['timeEntries'] = await _deleteExpiredTimeEntries(
-          cutoffStr,
-          expiredActivityIds,
-        );
+        final deletableActivities = await _deletableActivityIds(cutoffStr);
+        deleted['activityCategoryLinks'] = await _deleteExpiredLinks(cutoffStr);
+        deleted['trackingRules'] = await _deleteExpiredTrackingRules(cutoffStr);
+        deleted['timeEntries'] = await _deleteExpiredTimeEntries(cutoffStr);
         deleted['actionLogs'] = await _deleteExpiredActionLogs(cutoffStr);
-        // 分类：引用将删分类集的行（**含软删**——软删子 parentId 指向将被
-        // 物理删除的父同样触发自引用 FK）parent_id 置 NULL，再删超期分类。
         deleted['activityCategories'] = await _deleteExpiredCategories(
           cutoffStr,
           now,
         );
-        // activities：可删 = 待删 − 存活引用者（防悬空条目、不回滚全部）。
-        deleted['activities'] = await _deleteExpiredActivities(
-          cutoffStr,
-          expiredActivityIds,
+        deleted['activities'] = await _deleteActivitiesByIds(
+          deletableActivities,
         );
       });
 
@@ -218,28 +210,114 @@ class CleanupService with RepositoryMappings {
   // 谓词统一：`deletedAt < cutoff` 严格小于）
   // ---------------------------------------------------------------------------
 
-  /// activities：可删 = 待删集 − 存活引用者（3 张引用表中 `deleted_at IS NULL`
-  /// 且 `activity_id` 指向待删父的行——父被物理删除会制造悬空条目，宁可留待
-  /// 下一轮）。引用表的软删行已在各自方法中清理。
-  Future<int> _deleteExpiredActivities(
-    String cutoff,
-    List<String> expiredIds,
-  ) async {
-    if (expiredIds.isEmpty) return 0;
-    final surviving = <String>{}
-      ..addAll(await _survivingTimeEntryReferents(expiredIds))
-      ..addAll(await _survivingRuleReferents(expiredIds))
-      ..addAll(await _survivingLinkReferents(expiredIds));
-    final deletable = expiredIds
-        .where((id) => !surviving.contains(id))
-        .toList();
-    if (deletable.isEmpty) return 0;
-    final query = database.delete(database.activities)
-      ..where((t) => t.id.isIn(deletable));
-    return query.go();
+  /// **可删活动集**：超期软删 − 阻塞引用者（3 张引用表中 `deleted_at IS NULL
+  /// OR deleted_at >= cutoff` 且 activity_id ∈ 待删的行——存活或软删未传播的
+  /// 引用者在父被物理删除后制造悬空条目/FK 违约，宁可留待下一轮；软删已传播
+  /// 子行由各表通用 `< cutoff` 清理先行移除、不阻塞父）。
+  Future<List<String>> _deletableActivityIds(String cutoff) async {
+    final expired = await _expiredActivityIds(cutoff);
+    if (expired.isEmpty) return const [];
+    final blocked = <String>{}
+      ..addAll(await _blockingTimeEntryReferents(expired, cutoff))
+      ..addAll(await _blockingRuleReferents(expired, cutoff))
+      ..addAll(await _blockingLinkReferents(expired, cutoff));
+    return expired.where((id) => !blocked.contains(id)).toList();
   }
 
-  /// 超期软删 activities 的 id 集（引用清理/存活引用者判定用）。
+  /// 阻塞父删除的 time_entries 引用者：`activity_id IN (ids) AND (deleted_at
+  /// IS NULL OR deleted_at >= cutoff)`（存活或软删未传播）。**IN 分块（r3）**：
+  /// 软删大量累积时单次 IN 逼近 SQLite 绑定参数上限——按块遍历合并。
+  Future<Set<String>> _blockingTimeEntryReferents(
+    List<String> parentIds,
+    String cutoff,
+  ) async {
+    final result = <String>{};
+    for (final chunk in _chunks(parentIds)) {
+      final rows =
+          await (database.selectOnly(database.timeEntries)
+                ..addColumns([database.timeEntries.activityId])
+                ..where(
+                  database.timeEntries.activityId.isIn(chunk) &
+                      (database.timeEntries.deletedAt.isNull() |
+                          database.timeEntries.deletedAt
+                              .isBiggerOrEqualValue(cutoff)),
+                ))
+              .get();
+      result.addAll(
+        rows.map((r) => r.read(database.timeEntries.activityId)!),
+      );
+    }
+    return result;
+  }
+
+  /// 阻塞父删除的 tracking_rules 引用者（同 [_blockingTimeEntryReferents]）。
+  Future<Set<String>> _blockingRuleReferents(
+    List<String> parentIds,
+    String cutoff,
+  ) async {
+    final result = <String>{};
+    for (final chunk in _chunks(parentIds)) {
+      final rows =
+          await (database.selectOnly(database.trackingRules)
+                ..addColumns([database.trackingRules.activityId])
+                ..where(
+                  database.trackingRules.activityId.isIn(chunk) &
+                      (database.trackingRules.deletedAt.isNull() |
+                          database.trackingRules.deletedAt
+                              .isBiggerOrEqualValue(cutoff)),
+                ))
+              .get();
+      result.addAll(rows.map((r) => r.read(database.trackingRules.activityId)!));
+    }
+    return result;
+  }
+
+  /// 阻塞父删除的 links 引用者（同 [_blockingTimeEntryReferents]）。
+  Future<Set<String>> _blockingLinkReferents(
+    List<String> parentIds,
+    String cutoff,
+  ) async {
+    final result = <String>{};
+    for (final chunk in _chunks(parentIds)) {
+      final rows =
+          await (database.selectOnly(database.activityCategoryLinks)
+                ..addColumns([database.activityCategoryLinks.activityId])
+                ..where(
+                  database.activityCategoryLinks.activityId.isIn(chunk) &
+                      (database.activityCategoryLinks.deletedAt.isNull() |
+                          database.activityCategoryLinks.deletedAt
+                              .isBiggerOrEqualValue(cutoff)),
+                ))
+              .get();
+      result.addAll(
+        rows.map((r) => r.read(database.activityCategoryLinks.activityId)!),
+      );
+    }
+    return result;
+  }
+
+  /// 删除指定 id 集（分块防 IN 超限）。
+  Future<int> _deleteActivitiesByIds(List<String> ids) async {
+    if (ids.isEmpty) return 0;
+    var count = 0;
+    for (final chunk in _chunks(ids)) {
+      count += await (database.delete(
+        database.activities,
+      )..where((t) => t.id.isIn(chunk))).go();
+    }
+    return count;
+  }
+
+  /// id 列表分块（SQLite 绑定参数上限防护；块大小 500 远低于新构建 32766、
+  /// 兼容旧构建 999）。
+  Iterable<List<String>> _chunks(List<String> ids) sync* {
+    const size = 500;
+    for (var i = 0; i < ids.length; i += size) {
+      yield ids.sublist(i, i + size > ids.length ? ids.length : i + size);
+    }
+  }
+
+  /// 超期软删 activities 的 id 集（可删判定用）。
   Future<List<String>> _expiredActivityIds(String cutoff) async {
     final rows =
         await (database.selectOnly(database.activities)
@@ -252,120 +330,40 @@ class CleanupService with RepositoryMappings {
     return rows.map((r) => r.read(database.activities.id)!).toList();
   }
 
-  /// 存活 time_entries 引用者 id 集：`deleted_at IS NULL AND activity_id IN (ids)`。
-  Future<Set<String>> _survivingTimeEntryReferents(List<String> ids) async {
-    final rows =
-        await (database.selectOnly(database.timeEntries)
-              ..addColumns([database.timeEntries.activityId])
-              ..where(
-                database.timeEntries.deletedAt.isNull() &
-                    database.timeEntries.activityId.isIn(ids),
-              ))
-            .get();
-    return rows.map((r) => r.read(database.timeEntries.activityId)!).toSet();
-  }
-
-  /// 存活 tracking_rules 引用者（同 [_survivingTimeEntryReferents]）。
-  Future<Set<String>> _survivingRuleReferents(List<String> ids) async {
-    final rows =
-        await (database.selectOnly(database.trackingRules)
-              ..addColumns([database.trackingRules.activityId])
-              ..where(
-                database.trackingRules.deletedAt.isNull() &
-                    database.trackingRules.activityId.isIn(ids),
-              ))
-            .get();
-    return rows.map((r) => r.read(database.trackingRules.activityId)!).toSet();
-  }
-
-  /// 存活 links 引用者（同 [_survivingTimeEntryReferents]）。
-  Future<Set<String>> _survivingLinkReferents(List<String> ids) async {
-    final rows =
-        await (database.selectOnly(database.activityCategoryLinks)
-              ..addColumns([database.activityCategoryLinks.activityId])
-              ..where(
-                database.activityCategoryLinks.deletedAt.isNull() &
-                    database.activityCategoryLinks.activityId.isIn(ids),
-              ))
-            .get();
-    return rows
-        .map((r) => r.read(database.activityCategoryLinks.activityId)!)
-        .toSet();
-  }
-
-  /// timeEntries：删除引用将删父的软删行 + 超期软删行。
-  Future<int> _deleteExpiredTimeEntries(
-    String cutoff,
-    List<String> expiredIds,
-  ) async {
-    var count = 0;
-    if (expiredIds.isNotEmpty) {
-      count +=
-          await (database.delete(database.timeEntries)..where(
-                (t) => t.deletedAt.isNotNull() & t.activityId.isIn(expiredIds),
-              ))
-              .go();
-    }
-    count +=
-        await (database.delete(database.timeEntries)..where(
-              (t) =>
-                  t.deletedAt.isNotNull() &
-                  t.deletedAt.isSmallerThanValue(cutoff),
-            ))
-            .go();
-    return count;
+  /// timeEntries：只删通用 `< cutoff` 软删行（含引用将删父的——父是否真删
+  /// 不影响子自身清理合法性；未传播子行保留、阻塞父删除）。
+  Future<int> _deleteExpiredTimeEntries(String cutoff) async {
+    final query = database.delete(database.timeEntries)
+      ..where(
+        (t) => t.deletedAt.isNotNull() & t.deletedAt.isSmallerThanValue(cutoff),
+      );
+    return query.go();
   }
 
   /// trackingRules：同上。
-  Future<int> _deleteExpiredTrackingRules(
-    String cutoff,
-    List<String> expiredIds,
-  ) async {
-    var count = 0;
-    if (expiredIds.isNotEmpty) {
-      count +=
-          await (database.delete(database.trackingRules)..where(
-                (t) => t.deletedAt.isNotNull() & t.activityId.isIn(expiredIds),
-              ))
-              .go();
-    }
-    count +=
-        await (database.delete(database.trackingRules)..where(
-              (t) =>
-                  t.deletedAt.isNotNull() &
-                  t.deletedAt.isSmallerThanValue(cutoff),
-            ))
-            .go();
-    return count;
+  Future<int> _deleteExpiredTrackingRules(String cutoff) async {
+    final query = database.delete(database.trackingRules)
+      ..where(
+        (t) => t.deletedAt.isNotNull() & t.deletedAt.isSmallerThanValue(cutoff),
+      );
+    return query.go();
   }
 
-  /// links：同上。
-  Future<int> _deleteExpiredLinks(
-    String cutoff,
-    List<String> expiredIds,
-  ) async {
-    var count = 0;
-    if (expiredIds.isNotEmpty) {
-      count +=
-          await (database.delete(database.activityCategoryLinks)..where(
-                (t) => t.deletedAt.isNotNull() & t.activityId.isIn(expiredIds),
-              ))
-              .go();
-    }
-    count +=
-        await (database.delete(database.activityCategoryLinks)..where(
-              (t) =>
-                  t.deletedAt.isNotNull() &
-                  t.deletedAt.isSmallerThanValue(cutoff),
-            ))
-            .go();
-    return count;
+  /// links：同上（activityId 与 categoryId 两方向引用将删父的软删已传播行
+  /// 均被通用 `< cutoff` 覆盖）。
+  Future<int> _deleteExpiredLinks(String cutoff) async {
+    final query = database.delete(database.activityCategoryLinks)
+      ..where(
+        (t) => t.deletedAt.isNotNull() & t.deletedAt.isSmallerThanValue(cutoff),
+      );
+    return query.go();
   }
 
-  /// 分类：引用将删分类集的行（**含软删**——软删子 parentId 指向被物理删除
-  /// 的父同样触发自引用 FK）parent_id 置 NULL，再删超期软删分类行。
+  /// 分类：可删 = 超期 − 被 link.categoryId 引用（存活或软删未传播）者；
+  /// 引用将删分类的行（**含软删**——父被物理删后引用悬空，防自引用 FK）
+  /// parent_id 置 NULL；再删可删分类。分块防 IN 超限。
   Future<int> _deleteExpiredCategories(String cutoff, DateTime now) async {
-    final rows =
+    final expiredRows =
         await (database.selectOnly(database.activityCategories)
               ..addColumns([database.activityCategories.id])
               ..where(
@@ -375,24 +373,47 @@ class CleanupService with RepositoryMappings {
                     ),
               ))
             .get();
-    final expiredIds = rows
+    final expired = expiredRows
         .map((r) => r.read(database.activityCategories.id)!)
         .toList();
-    if (expiredIds.isNotEmpty) {
+    if (expired.isEmpty) return 0;
+    // 阻塞分类删除的 link 引用者（categoryId 方向，存活或软删未传播）。
+    final blocked = <String>{};
+    for (final chunk in _chunks(expired)) {
+      final rows =
+          await (database.selectOnly(database.activityCategoryLinks)
+                ..addColumns([database.activityCategoryLinks.categoryId])
+                ..where(
+                  database.activityCategoryLinks.categoryId.isIn(chunk) &
+                      (database.activityCategoryLinks.deletedAt.isNull() |
+                          database.activityCategoryLinks.deletedAt
+                              .isBiggerOrEqualValue(cutoff)),
+                ))
+              .get();
+      blocked.addAll(
+        rows.map((r) => r.read(database.activityCategoryLinks.categoryId)!),
+      );
+    }
+    final deletable = expired.where((id) => !blocked.contains(id)).toList();
+    if (deletable.isEmpty) return 0;
+    // parentId 置空：引用将删分类的所有行（含软删——置空无害且防 FK）。
+    for (final chunk in _chunks(deletable)) {
       await (database.update(
         database.activityCategories,
-      )..where((t) => t.parentId.isIn(expiredIds))).write(
+      )..where((t) => t.parentId.isIn(chunk))).write(
         ActivityCategoriesCompanion(
           parentId: const Value(null),
           updatedAt: Value(utcString(now)),
         ),
       );
     }
-    final query = database.delete(database.activityCategories)
-      ..where(
-        (t) => t.deletedAt.isNotNull() & t.deletedAt.isSmallerThanValue(cutoff),
-      );
-    return query.go();
+    var count = 0;
+    for (final chunk in _chunks(deletable)) {
+      count += await (database.delete(
+        database.activityCategories,
+      )..where((t) => t.id.isIn(chunk))).go();
+    }
+    return count;
   }
 
   /// actionLogs：无 FK references（activityId/entryId 为 nullable 无外键），

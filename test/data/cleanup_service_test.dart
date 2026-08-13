@@ -411,10 +411,10 @@ void main() {
         DateTime.now().subtract(const Duration(days: 200)),
       );
       await putMeta(AppMetadataKeys.lastSyncAt, syncAt);
-      // 造 deletedAt 精确等于游标时刻的软删活动。
-      final atCutoff = mapping.utcString(
-        DateTime.now().subtract(const Duration(days: 200)),
-      );
+      // **复用游标字符串（r2 修正）**：两次 DateTime.now() 计算会有微秒级漂移
+      //（utcString 固定 6 位微秒）——atCutoff 实际几乎恒 > syncAt，用例退化为
+      // 测 `deletedAt > cutoff` 而非 == 边界；复用 syncAt 保证精确相等。
+      final atCutoff = syncAt;
       await db
           .into(db.activities)
           .insert(
@@ -504,7 +504,9 @@ void main() {
               deletedAt: Value(parentDeleted),
             ),
           );
-      // 软删未超期（10 天前）条目引用 P——父被物理移除后此墓碑失去参照价值。
+      // 软删**未超期**（10 天前，早于游标=now 但晚于 cutoff=now-180）条目引用
+      // P——**未传播到远端的墓碑**（r5 修正）：不得随父物理清除（否则下次同步
+      // 时子行从远端复活/语义缺口）；且阻塞父删除（父被物理删会 FK 违约）。
       final childDeleted = mapping.utcString(
         DateTime.now().subtract(const Duration(days: 10)),
       );
@@ -522,11 +524,134 @@ void main() {
             ),
           );
       final report = (await service.run()).requireValue();
-      // 活动被删（无存活引用）；软删子条目随父清理（引用清理分支）。
-      expect(report.deletedByTable['activities'], 1, reason: 'P 被删');
-      expect(report.deletedByTable['timeEntries'], 1, reason: '引用 P 的软删子清理');
+      // 未传播子行阻塞父删除：P 保留、e-soft 保留（r5 修复后语义）。
+      expect(report.deletedByTable['activities'] ?? 0, 0, reason: '未传播子行阻塞父删除');
+      expect(
+        report.deletedByTable['timeEntries'] ?? 0,
+        0,
+        reason: '未传播子行保留（不做物理清除）',
+      );
+      final activities = await (db.select(db.activities)).get();
+      expect(activities.map((r) => r.id).toSet(), {'actP'});
       final entries = await (db.select(db.timeEntries)).get();
-      expect(entries, isEmpty);
+      expect(entries.map((r) => r.id).toSet(), {'e-soft'});
+    });
+
+    test('trackingRules/links 存活引用同样阻塞父删除（r2 对称）', () async {
+      await putMeta(AppMetadataKeys.lastSyncAt, nowStr());
+      final deleted = mapping.utcString(
+        DateTime.now().subtract(const Duration(days: 400)),
+      );
+      await db
+          .into(db.activities)
+          .insert(
+            ActivitiesCompanion.insert(
+              id: 'actR',
+              name: 'R',
+              color: 1,
+              updatedAt: deleted,
+              deletedAt: Value(deleted),
+            ),
+          );
+      await db
+          .into(db.activities)
+          .insert(
+            ActivitiesCompanion.insert(
+              id: 'actL',
+              name: 'L',
+              color: 1,
+              updatedAt: deleted,
+              deletedAt: Value(deleted),
+            ),
+          );
+      // 存活 tracking_rule 引用 actR；存活 link 引用 actL（link 的 FK 依赖
+      // category 先建——插入顺序：分类 → link）。
+      await db
+          .into(db.trackingRules)
+          .insert(
+            TrackingRulesCompanion.insert(
+              id: 'rule-alive',
+              pattern: 'p',
+              matchKind: 'process',
+              activityId: 'actR',
+              updatedAt: nowStr(),
+            ),
+          );
+      await db
+          .into(db.activityCategories)
+          .insert(
+            ActivityCategoriesCompanion.insert(
+              id: 'cat-alive',
+              name: 'cat',
+              color: 1,
+              updatedAt: nowStr(),
+            ),
+          );
+      await db
+          .into(db.activityCategoryLinks)
+          .insert(
+            ActivityCategoryLinksCompanion.insert(
+              id: 'link-alive',
+              activityId: 'actL',
+              categoryId: 'cat-alive',
+              updatedAt: nowStr(),
+            ),
+          );
+      final report = (await service.run()).requireValue();
+      expect(
+        report.deletedByTable['activities'] ?? 0,
+        0,
+        reason: 'trackingRules/links 存活引用均阻塞父删除',
+      );
+      final left = await (db.select(db.activities)).get();
+      expect(left.map((r) => r.id).toSet(), {'actR', 'actL'});
+    });
+
+    test('软删未超期子分类引用将删父 → parentId 置 NULL 且 updatedAt 更新（r2）', () async {
+      await putMeta(AppMetadataKeys.lastSyncAt, nowStr());
+      final parentDeleted = mapping.utcString(
+        DateTime.now().subtract(const Duration(days: 400)),
+      );
+      await db
+          .into(db.activityCategories)
+          .insert(
+            ActivityCategoriesCompanion.insert(
+              id: 'parent3',
+              name: 'parent3',
+              color: 1,
+              updatedAt: parentDeleted,
+              deletedAt: Value(parentDeleted),
+              parentId: const Value(null),
+            ),
+          );
+      // 软删未超期子分类（10 天前）引用 parent3——父被物理删除时子引用悬空
+      //（自引用 FK）；即使子自身未到保留期，parentId 也须置 NULL。
+      final childDeleted = mapping.utcString(
+        DateTime.now().subtract(const Duration(days: 10)),
+      );
+      await db
+          .into(db.activityCategories)
+          .insert(
+            ActivityCategoriesCompanion.insert(
+              id: 'child3',
+              name: 'child3',
+              color: 1,
+              updatedAt: childDeleted,
+              deletedAt: Value(childDeleted),
+              parentId: const Value('parent3'),
+            ),
+          );
+      final report = (await service.run()).requireValue();
+      expect(report.deletedByTable['activityCategories'], 1, reason: '父被删');
+      final child = (await (db.select(
+        db.activityCategories,
+      )..where((t) => t.id.equals('child3'))).get()).single;
+      expect(child.parentId, isNull, reason: '软删未传播子 parentId 置空（防自引用 FK）');
+      expect(
+        child.updatedAt,
+        isNot(childDeleted),
+        reason: 'parentId 置空更新 updatedAt（不再等于原软删时刻）',
+      );
     });
   });
 
@@ -574,7 +699,15 @@ void main() {
         }
         final report = (await fileService.run()).requireValue();
         expect(report.deletedTotal, 5);
+        // **强断言（r3）**：仅 `report.vacuumed == true` 无法区分"VACUUM 真实完成"
+        // 与"标志误置"（旧缺陷正是未 await 时标志被同步置位）——VACUUM 把
+        // freelist_count（空闲页）清零（删除行遗留的空闲页被重写回收）：
+        // 删除 5 行前 fileService 运行时页有可回收空间，VACUUM 后空闲页必须为 0。
         expect(report.vacuumed, isTrue, reason: '文件库 WAL 下 VACUUM 真实执行');
+        final freelist = (await fileDb
+            .customSelect('PRAGMA freelist_count')
+            .getSingle()).data.values.first as int;
+        expect(freelist, 0, reason: 'VACUUM 后空闲页归零（空间真实回收）');
         // VACUUM 后库仍可查询（重写未损坏）。
         final left = await (fileDb.select(fileDb.activities)).get();
         expect(left, isEmpty);
