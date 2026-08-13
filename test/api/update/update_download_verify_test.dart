@@ -184,7 +184,7 @@ void main() {
       }
     });
 
-    test('下载总字节上限（r19）：声明超限前置拒绝 / 分块流超限流式中断且无残留', () async {
+    test('下载总字节上限（r19/r20）：声明超限前置拒绝 / 分块流超限流式中断且无残留', () async {
       final dir = await Directory.systemTemp.createTemp('dl_cap');
       try {
         // 场景 A：响应头 contentLength 超 maxCompressedBytes → send 后立即
@@ -197,6 +197,13 @@ void main() {
         );
         final resultA = await downloaderA.download('https://x.example/app.zip');
         expect(resultA.isSuccess, isFalse, reason: '声明超限失败');
+        // **精确文案（r20）**：独立异常类型返回"体积超上限"——不复用
+        // FormatException 的"下载地址非法"误导。
+        expect(
+          resultA.when(onSuccess: (_) => '', onFailure: (m) => m),
+          contains('体积超上限'),
+          reason: '超限文案精确（非"地址非法"）',
+        );
         expect(declaredOver.calls, 1, reason: '4xx/超限不重试');
         // 场景 B：分块流实际超限（声明 contentLength 小、实际持续发送）→
         // 流式累计检查中断下载、半成品清理、无残留。
@@ -208,6 +215,27 @@ void main() {
         final resultB = await downloaderB.download('https://x.example/app.zip');
         expect(resultB.isSuccess, isFalse, reason: '分块流超限失败');
         expect(dir.listSync(), isEmpty, reason: '超限中断后半成品已清理（无残留）');
+      } finally {
+        await dir.delete(recursive: true);
+      }
+    });
+
+    test('下载总字节上限边界（r20）：恰好等于上限成功', () async {
+      // 上限语义为"严格大于才拒绝"——恰好等于 maxCompressedBytes 的合法包须
+      // 放行（防未来误把等值判为超限的回归无感知）。
+      final dir = await Directory.systemTemp.createTemp('dl_cap_boundary');
+      final atLimit = UpdateConfig.maxCompressedBytes;
+      final downloader = UpdateDownloader(
+        tempDirectory: dir,
+        httpClient: _AtLimitClient(atLimit),
+      );
+      try {
+        final result = (await downloader.download(
+          'https://x.example/app.zip',
+        )).requireValue();
+        expect(result.totalBytes, atLimit, reason: '恰好等于上限下载成功');
+        final file = File(result.filePath);
+        expect(file.lengthSync(), atLimit);
       } finally {
         await dir.delete(recursive: true);
       }
@@ -487,23 +515,49 @@ class _ChunkedHttpClient extends http.BaseClient {
   }
 }
 
-/// 分块流总字节数超上限 client（r19）：声明 contentLength 为小值、实际分块
-/// 超上限持续发送（模拟无 Content-Length 的分块响应绕过前置检查）。
+/// 分块流总字节数超上限 client（r19/r20）：声明 contentLength 为小值、实际
+/// 分块超上限持续发送（模拟无 Content-Length 的分块响应绕过前置检查）。
+/// **async* 惰性逐块生成（r20）**：订阅前不缓存全部块（StreamController 在
+/// 监听前 add 会全量缓冲、约 200MB 内存峰值）——消费一块产出一块，下载器超限
+/// 中断（抛 DownloadSizeExceededException）取消订阅后生成器随之停止；块数按
+/// maxCompressedBytes 动态推导（防常量上调后用例静默失效）。
 class _OversizeChunkedHttpClient extends http.BaseClient {
+  /// 惰性逐块生成：超过 maxCompressedBytes 一个额外块（1MB）。
+  Stream<List<int>> _oversizeChunks() async* {
+    final chunkCount = (UpdateConfig.maxCompressedBytes ~/ (1024 * 1024)) + 2;
+    for (var i = 0; i < chunkCount; i++) {
+      yield List<int>.filled(1024 * 1024, 7);
+    }
+  }
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    return http.StreamedResponse(
+      _oversizeChunks(),
+      200,
+      contentLength: 1, // 前置检查按声明（1 字节）通过——实际流超限由流式检查拦。
+      headers: {'content-type': 'application/octet-stream'},
+      request: request,
+    );
+  }
+}
+
+/// 恰好等于上限 client（r20）：contentLength 与单块均恰为 maxCompressedBytes——
+/// 上限语义"严格大于才拒绝"，等值必须成功。
+class _AtLimitClient extends http.BaseClient {
+  _AtLimitClient(this.bytes);
+
+  final int bytes;
+
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
     final controller = StreamController<List<int>>();
-    // 分块持续发送至超上限 250MB（> maxCompressedBytes 200MB；downloadStreamTimeout
-    // 是相邻块空闲超时——只要持续推块不触顶；流式累计检查须在超限时中断下载、
-    // 清理半成品）。逐块消费峰值内存小，写到约 200MB 即中断。
-    for (var i = 0; i < 250; i++) {
-      controller.add(List<int>.filled(1024 * 1024, 7));
-    }
+    controller.add(List<int>.filled(bytes, 7));
     controller.close();
     return http.StreamedResponse(
       controller.stream,
       200,
-      contentLength: 1, // 前置检查按声明（1 字节）通过——实际流超限由流式检查拦。
+      contentLength: bytes,
       headers: {'content-type': 'application/octet-stream'},
       request: request,
     );

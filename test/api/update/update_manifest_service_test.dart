@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show HttpException, TlsException;
 
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -326,6 +327,59 @@ void main() {
         result.when(onSuccess: (_) => '', onFailure: (m) => m),
         contains('已关闭'),
         reason: '消息匹配归因已关闭',
+      );
+    });
+
+    test('HttpException/TlsException → 可读失败（r19 补测）', () async {
+      // http 包仅把 send 阶段与部分流中错误包装为 ClientException、其余透传
+      // ——dart:io 的 HttpException/TlsException（握手失败/证书校验失败）须被
+      // 捕获返回可读失败而非逃逸。
+      final clientHttp = UpdateManifestService(
+        database: db,
+        currentVersion: '1.0.0',
+        manifestUrl: Uri.parse('https://x.example/update.json'),
+        httpClient: MockClient(
+          (_) async => throw HttpException('connection reset by peer'),
+        ),
+      );
+      final resultHttp = await clientHttp.checkForUpdate();
+      expect(resultHttp.isSuccess, isFalse, reason: 'HttpException 返回可读失败');
+      expect(
+        resultHttp.when(onSuccess: (_) => '', onFailure: (m) => m),
+        contains('网络不可用'),
+      );
+
+      final clientTls = UpdateManifestService(
+        database: db,
+        currentVersion: '1.0.0',
+        manifestUrl: Uri.parse('https://x.example/update.json'),
+        httpClient: MockClient(
+          (_) async => throw const TlsException('handshake failed'),
+        ),
+      );
+      final resultTls = await clientTls.checkForUpdate();
+      expect(resultTls.isSuccess, isFalse, reason: 'TlsException 返回可读失败');
+      expect(
+        resultTls.when(onSuccess: (_) => '', onFailure: (m) => m),
+        contains('网络不可用'),
+      );
+
+      // _closed=true 时归因"已关闭"（与其它网络分支一致）。
+      final clientTlsClosed = UpdateManifestService(
+        database: db,
+        currentVersion: '1.0.0',
+        manifestUrl: Uri.parse('https://x.example/update.json'),
+        httpClient: MockClient(
+          (_) async => throw const TlsException('handshake failed'),
+        ),
+      );
+      clientTlsClosed.close();
+      final resultClosed = await clientTlsClosed.checkForUpdate();
+      expect(resultClosed.isSuccess, isFalse);
+      expect(
+        resultClosed.when(onSuccess: (_) => '', onFailure: (m) => m),
+        contains('已关闭'),
+        reason: '已关闭归因关闭而非网络',
       );
     });
 

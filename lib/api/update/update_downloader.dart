@@ -17,6 +17,7 @@ import 'dart:io'
         Directory,
         File,
         FileSystemException,
+        HttpClient,
         HttpException,
         SocketException,
         TlsException,
@@ -24,10 +25,21 @@ import 'dart:io'
 import 'dart:math';
 
 import 'package:http/http.dart' as http;
+import 'package:http/io_client.dart';
 
 import '../../constants/update_config.dart';
 import '../../utils/result.dart';
 import '../../utils/sha256.dart';
+
+/// 下载总字节数超上限（[UpdateConfig.maxCompressedBytes]，r19）。
+///
+/// **独立类型（r20）**：不复用 FormatException——`download()` 的
+/// `on FormatException` 分支会把它固定映射为"下载地址非法"（误导排障）；
+/// 单独捕获返回"更新包体积超上限"。永久性错误（不重试——重试同一 URL 结果
+/// 不变）。
+class DownloadSizeExceededException implements Exception {
+  const DownloadSizeExceededException();
+}
 
 /// 下载结果。
 class DownloadResult {
@@ -54,10 +66,18 @@ class UpdateDownloader {
     this._tempDirectory,
     int? retryCount,
     Duration? retryBaseDelay,
-  }) : _http = httpClient ?? http.Client(),
+  }) : _http = httpClient ?? _defaultClient(),
        _ownsHttp = httpClient == null,
        _retryCount = retryCount ?? UpdateConfig.downloadRetryCount,
        _retryBaseDelay = retryBaseDelay ?? UpdateConfig.retryBaseDelay;
+
+  /// 默认底层 client（r20）：显式 `autoUncompress = false`——`Accept-Encoding:
+  /// identity` 只是告知服务器、不保证禁用 dart:io 的自动解压（解压与否取决于
+  /// 响应 `Content-Encoding` 头）。产物（zip/apk）本已压缩、二次压缩无意义；
+  /// 禁用自动解压使流内字节 = 文件实际字节 = contentLength 口径一致（进度回调
+  /// 不超 100%、DownloadResult.totalBytes 与清单 SHA-256 口径一致）。
+  static http.Client _defaultClient() =>
+      IOClient(HttpClient()..autoUncompress = false);
 
   final http.Client _http;
 
@@ -137,6 +157,10 @@ class UpdateDownloader {
       } on HttpStatusException catch (e) {
         // 服务端明确拒绝（4xx/5xx）：不重试，文案带状态码（区别于瞬态网络）。
         return AppFailure('下载失败（HTTP ${e.statusCode}）');
+      } on DownloadSizeExceededException {
+        // 下载总字节数超上限（r19/r20）：永久性错误，不重试——文案精确（不复用
+        // FormatException 的"地址非法"误导）。
+        return const AppFailure('更新包体积超上限');
       } on FileSystemException {
         // 本地写盘失败（目录不可写/磁盘满）：重试无意义，直接失败。
         return const AppFailure('下载写入失败，请检查磁盘空间后重试');
@@ -239,8 +263,11 @@ class UpdateDownloader {
     final declaredTotal = response.contentLength;
     if (declaredTotal != null &&
         declaredTotal > UpdateConfig.maxCompressedBytes) {
-      response.stream.drain<void>().ignore();
-      throw const FormatException('更新包体积超上限');
+      // **取消订阅立即中止（r20）**：drain() 会把整个超限响应体下载完（本功能
+      // 恰要防御恶意大响应——浪费带宽/占用连接）；listen(null).cancel() 立即
+      // 停止消费、释放连接。
+      response.stream.listen(null).cancel().ignore();
+      throw const DownloadSizeExceededException();
     }
     final sink = file.openWrite();
     var received = 0;
@@ -260,13 +287,13 @@ class UpdateDownloader {
         sink.add(chunk);
         received += chunk.length;
         shaBuilder.add(chunk);
-        // **总字节上限流式检查（r19）**：超出即中断下载（防分块响应无
-        // Content-Length 时绕过前置检查写满磁盘）。**抛 FormatException（与
-        // 前置检查同类型）而非 StateError（r19）**：StateError 是 Error 非
+        // **总字节上限流式检查（r19/r20）**：超出即中断下载（防分块响应无
+        // Content-Length 时绕过前置检查写满磁盘）。**抛 DownloadSizeExceededException
+        //（与前置检查同类型）而非 StateError（r19）**：StateError 是 Error 非
         // Exception——catch(_) rethrow 后 download() 的 `on Exception` 分类
         // 分支不匹配、直接从 download() 逃逸破坏"恒返回 AppResult"契约。
         if (received > UpdateConfig.maxCompressedBytes) {
-          throw const FormatException('更新包体积超上限');
+          throw const DownloadSizeExceededException();
         }
         // **onProgress 异常隔离（r14/r16）**：UI 层回调抛错不应归因下载失败/
         // 触发重试——只记录不中断；stderr 写自身保护（已关闭/管道断开时

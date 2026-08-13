@@ -426,9 +426,10 @@ void main() {
     });
 
     test('zip bomb 防护：目录条目也计入条目数上限（r19）', () async {
-      // r19 修正：只计文件条目会让"海量目录条目"包在 decodeBytes 阶段物化
-      // 海量 ArchiveFile 对象而 fileCount 恒为 0——上限形同虚设（OOM 风险）。
-      // 目录条目统一计数且检查在任何 content 解压前。
+      // r19 修正：只计文件条目会让"海量目录条目"包 fileCount 恒为 0——上限
+      // 形同虚设。目录条目统一计数（检查位于任何 content 解压前）。
+      // **覆盖边界（r20）**：本用例仅锁定"目录条目计入条目数"的计数语义；
+      // decodeBytes 阶段的全量物化防护需流式解码（后续优化），不在本用例范围。
       final root = await Directory.systemTemp.createTemp('win_dircount');
       final program = Directory('${root.path}/program')..createSync();
       final data = Directory('${root.path}/data')..createSync();
@@ -447,6 +448,14 @@ void main() {
           maxEntryCount: 3,
         ).prepareStaging(zipPath);
         expect(result.isSuccess, isFalse, reason: '目录条目计入条目数上限');
+        // **拒绝原因精确锁定（r20）**：须命中"条目数超上限"而非其它失败
+        //（路径校验/空包等无关路径——防实现退化为"不计数目录但仍因别的原因
+        // 拒绝"时用例无声通过）。
+        expect(
+          result.when(onSuccess: (_) => '', onFailure: (m) => m),
+          contains('条目数超上限'),
+          reason: '目录条目计入条目数上限（拒绝原因精确断言）',
+        );
       } finally {
         await root.delete(recursive: true);
       }
@@ -736,19 +745,60 @@ void main() {
       const installer = AndroidInstaller();
       try {
         File('${dir.path}/app.apk').writeAsBytesSync([1, 2, 3]);
-        final ok = installer.installValidatedApk('${dir.path}/app.apk');
+        final ok = installer.installValidatedApk(
+          '${dir.path}/app.apk',
+          cacheRoot: dir.path,
+        );
         expect(ok.isSuccess, isTrue, reason: '有效 APK 产出安装意图');
         final intent = ok.requireValue();
         expect(intent.action, 'android.intent.action.VIEW');
-        expect(intent.dataUri, startsWith('content://'));
+        // **完整 URI 断言（r20）**：锁定"校验→URI→Intent"一体产出的 URI 与
+        // 源文件一致（防 apkFileName 提取/路径段拼接出错暴露错误文件）。
+        expect(
+          intent.dataUri,
+          'content://com.github.ianmuh.timetrack2.fileprovider/cache/app.apk',
+        );
         expect(intent.flags, 0x00000001);
 
         // 缺失文件 → 可读失败（不产出部分结果）
-        final missing = installer.installValidatedApk('${dir.path}/nope.apk');
+        final missing = installer.installValidatedApk(
+          '${dir.path}/nope.apk',
+          cacheRoot: dir.path,
+        );
         expect(missing.isSuccess, isFalse, reason: '缺失文件失败');
+
+        // **cache 根外文件拒绝（r20）**：产出的 content URI 指向 FileProvider
+        // cache 根——源文件必须在 cache 根内（"校验的文件 == 暴露/安装的文件"）。
+        // 用独立目录而非 `..` 相对路径（后者未规范化、前缀匹配会误判为根内）。
+        final outside = Directory('${dir.path}.outside')..createSync();
+        try {
+          File('${outside.path}/app.apk').writeAsBytesSync([1, 2, 3]);
+          final outOfRoot = installer.installValidatedApk(
+            '${outside.path}/app.apk',
+            cacheRoot: dir.path,
+          );
+          expect(outOfRoot.isSuccess, isFalse, reason: 'cache 根外文件拒绝');
+          expect(
+            outOfRoot.when(onSuccess: (_) => '', onFailure: (m) => m),
+            contains('cache 根目录内'),
+            reason: '拒绝原因精确（cache 根约束）',
+          );
+        } finally {
+          await outside.delete(recursive: true);
+        }
       } finally {
         await dir.delete(recursive: true);
       }
+    });
+
+    test('tryInstallApk 未实现（r20）：显式 UnsupportedError（防无守卫静默调用）', () {
+      // 平台守卫级入口（TOCTOU/父级链接兜底）阶段 4 实现——现不得被当作已加固
+      // 入口静默调用。
+      const installer = AndroidInstaller();
+      expect(
+        () => installer.tryInstallApk('/cache/app.apk', cacheRoot: '/cache'),
+        throwsUnsupportedError,
+      );
     });
 
     test('content URI 文件名编码（r2）：特殊字符编码 / `..` 拒绝', () {

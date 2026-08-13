@@ -154,9 +154,12 @@ class WindowsInstaller {
       var totalUncompressed = 0;
       for (final file in archive.files) {
         // **条目数对全部条目计数（r19）**：只计文件条目会让"几十万条 d0/、
-        // d1/… 目录条目"的包在 decodeBytes 阶段即物化海量 ArchiveFile 对象、
-        // fileCount 恒为 0——上限形同虚设（OOM 风险）。文件+目录统一计数，
-        // 且检查位于任何 content 解压之前（上限检查先于惰性解压）。
+        // d1/… 目录条目"的包 fileCount 恒为 0——上限形同虚设。文件+目录统一
+        // 计数，且检查位于任何 content 解压之前（先于惰性解压触发）。
+        // **边界如实声明（r20）**：decodeBytes 已把全部条目物化为 ArchiveFile
+        // 对象（本检查发生在物化之后）——海量目录条目包在计数守卫触发前仍会
+        // 分配对象内存；该阶段防护需流式解码（decodeStream 逐条目计数/解压），
+        // 记入后续优化（与 zip bomb 剩余内存风险同类）。
         fileCount += 1;
         if (fileCount > maxEntryCount) {
           throw StateError('更新包条目数超上限');
@@ -330,10 +333,11 @@ class WindowsInstaller {
                 )
                 .where((e) => e.path != backupDir.path)
                 .toList()
-              ..sort(
-                (a, b) =>
-                    b.uri.pathSegments.last.compareTo(a.uri.pathSegments.last),
-              );
+              // **按 `.backup-<毫秒>` 时间戳降序（r20 修正）**：Directory 的
+              // uri.pathSegments.last 对目录 URI（尾斜杠）恒返回空串——比较器
+              // 全为 0、sort 顺序任意、skip(1) 可能删掉最新备份；用 _basename
+              //（split 分隔符取末段）按备份名降序，保证保留最新一个。
+              ..sort((a, b) => _basename(b.path).compareTo(_basename(a.path)));
         if (stale.isNotEmpty) {
           for (final old in stale.skip(1)) {
             old.deleteSync(recursive: true);

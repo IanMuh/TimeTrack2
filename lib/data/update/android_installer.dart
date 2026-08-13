@@ -12,7 +12,12 @@
 library;
 
 import 'dart:io'
-    show File, FileSystemEntity, FileSystemEntityType, FileSystemException;
+    show
+        Directory,
+        File,
+        FileSystemEntity,
+        FileSystemEntityType,
+        FileSystemException;
 
 import '../../utils/result.dart';
 
@@ -104,31 +109,50 @@ class AndroidInstaller {
     );
   }
 
-  /// **单一安全入口（r19）**：内部依次 [ensureApkValid] → [apkContentUri] →
-  /// [installIntentFor]，把"文件校验→URI 构造→Intent"固化为一条不可拆分路径，
-  /// 杜绝调用方绕过校验直接拿 installIntentFor 构造 GRANT 意图暴露 cache 根
-  /// 之外的文件（校验与 startActivity 之间文件被替换的 TOCTOU 残余风险由平台
-  /// 层 [tryInstallApk] 兜底）。任一环失败返回可读原因（不产生部分结果）。
+  /// **单一安全入口（r19/r20）**：内部依次 [ensureApkValid] → 父目录校验 →
+  /// [apkContentUri] → [installIntentFor]，把"文件校验→cache 根内约束→URI
+  /// 构造→Intent"固化为一条不可拆分路径，杜绝调用方绕过校验直接拿
+  /// [installIntentFor] 构造 GRANT 意图暴露 cache 根之外的文件。任一环失败返回
+  /// 可读原因（不产生部分结果）。
+  ///
+  /// **[cacheRoot]（r20 新增）**：APK 必须位于应用 cache 根目录内——产出的
+  /// `content://…/cache/<名>` URI 指向 FileProvider 的 cache 根，若源文件在
+  /// 别处则"校验的文件 ≠ GRANT 暴露/安装的文件"（核心不变量被破坏）。父目录
+  /// 按规范化绝对路径比较（防相对路径/尾分隔符差异绕过）。
   AppResult<({String action, String dataUri, String mimeType, int flags})>
-  installValidatedApk(String apkFilePath) {
+  installValidatedApk(String apkFilePath, {required String cacheRoot}) {
     final check = ensureApkValid(apkFilePath);
     if (check is AppFailure<void>) {
       return AppFailure(check.message);
+    }
+    final fileParent = File(
+      apkFilePath,
+    ).parent.absolute.path.replaceAll(r'\', '/');
+    final root = Directory(cacheRoot).absolute.path.replaceAll(r'\', '/');
+    if (fileParent != root && !fileParent.startsWith('$root/')) {
+      return const AppFailure('安装文件必须位于应用 cache 根目录内');
     }
     final contentUri = apkContentUri(apkFileName(apkFilePath));
     final intent = installIntentFor(contentUri);
     return AppSuccess(intent);
   }
 
-  /// **平台守卫级安装入口（r19）**：兜底 [installValidatedApk] 无法覆盖的两类
-  /// 残余风险——(1) 校验与系统安装器读取之间文件被替换（TOCTOU）；(2) cache
-  /// 根目录本身或上级路径被替换为指向外部的符号链接（守卫只查末尾分量）。
-  /// 平台层（阶段 4）须在**同一文件系统快照内**完成：读取 cache 根目录的
-  /// FileProvider 实际文件路径（含上级路径解析）→ stat/type 复核为常规文件且
-  /// 位于 cache 根内 → 再 startActivity。实现时可先把文件路径解析出真实路径，
-  /// 本入口保持"仅凭文件路径构造安全 Intent"的纯函数职责。
+  /// **平台守卫级安装入口（r19，阶段 4 实现，r20 标记未实现）**：兜底
+  /// [installValidatedApk] 无法覆盖的两类残余风险——(1) 校验与系统安装器读取
+  /// 之间文件被替换（TOCTOU）；(2) cache 根目录本身或上级路径被替换为指向
+  /// 外部的符号链接（守卫只查末尾分量）。平台层（阶段 4）须在**同一文件系统
+  /// 快照内**完成：读取 cache 根目录的 FileProvider 实际文件路径（含上级路径
+  /// 解析）→ stat/type 复核为常规文件且位于 cache 根内 → 再 startActivity。
+  ///
+  /// **r20 起显式抛 UnsupportedError（而非静默转发 installValidatedApk）**：
+  /// 该入口命名易被误当作已加固的安装入口直接接入生产调用——在阶段 4 真正
+  /// 实现前禁止无守卫静默调用。
   AppResult<({String action, String dataUri, String mimeType, int flags})>
-  tryInstallApk(String apkFilePath) => installValidatedApk(apkFilePath);
+  tryInstallApk(String apkFilePath, {required String cacheRoot}) {
+    throw UnsupportedError(
+      'tryInstallApk 为阶段 4 平台守卫级入口，尚未实现——请使用 installValidatedApk 并自行保证 cache 根内约束',
+    );
+  }
 
   /// 从文件路径提取文件名（`cache/<名>` URI 的构造依据）。
   static String apkFileName(String filePath) =>
