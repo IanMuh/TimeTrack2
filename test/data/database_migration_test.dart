@@ -147,6 +147,16 @@ void main() {
             reason: '迁移后 idx_tracking_rules_sync 索引存在（同步查询路径）');
         expect(indexNames, contains('idx_tracking_rules_activity'),
             reason: '迁移后 idx_tracking_rules_activity 索引存在');
+        // **索引定义校验（r3）**：仅名称存在不足以防"同名但列错误"的回归——
+        // 校验同步索引确实覆盖 (user_id, updated_at) 两列（列序一致），否则
+        // rulesSince 查询路径实际未获得预期索引。
+        final syncIndexCols = await appDb
+            .customSelect("SELECT name FROM pragma_index_info("
+                "'idx_tracking_rules_sync') ORDER BY seqno")
+            .get();
+        expect(syncIndexCols.map((r) => r.data['name']).toList(),
+            ['user_id', 'updated_at'],
+            reason: 'idx_tracking_rules_sync 必须覆盖 (user_id, updated_at)');
 
         // 旧数据保留
         final rows = await (appDb.select(appDb.timeEntries)).get();

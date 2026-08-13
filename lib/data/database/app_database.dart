@@ -237,19 +237,10 @@ class AppDatabase extends _$AppDatabase {
               'BOOLEAN NOT NULL DEFAULT false',
             );
             await m.createTable(trackingRules);
-            // **迁移路径补建 tracking_rules 索引（r2）**：`@TableIndex` 注解
-            // 仅在新库 onCreate 的 createAll() 时建索引，`m.createTable` 不建
-            // ——迁移库若不补建，同步引擎 rulesSince 的 (user_id, updated_at)
-            // 查询与 activity_id 反查会全表扫描（与 _ensureIndexes 的
-            // 无条件补齐策略一致，IF NOT EXISTS 幂等）。
-            await customStatement(
-              'CREATE INDEX IF NOT EXISTS idx_tracking_rules_sync '
-              'ON tracking_rules (user_id, updated_at)',
-            );
-            await customStatement(
-              'CREATE INDEX IF NOT EXISTS idx_tracking_rules_activity '
-              'ON tracking_rules (activity_id)',
-            );
+            // **迁移路径（r2）**：`@TableIndex` 注解仅在新库 onCreate 的
+            // createAll() 时建索引，`m.createTable` 不建——迁移库的索引由
+            // beforeOpen 的 [_ensureIndexes] 无条件补齐（见该方法的 tracking_rules
+            // 段），此处不重复建。
           }
         },
       );
@@ -313,6 +304,19 @@ class AppDatabase extends _$AppDatabase {
     await customStatement(
       'CREATE INDEX IF NOT EXISTS idx_action_logs_entry_active '
       'ON action_logs (entry_id, occurred_at) WHERE deleted_at IS NULL',
+    );
+    // tracking_rules 同步索引（**每次打开无条件补齐，r3**）：@TableIndex 仅
+    // 新库 createAll 建、迁移库 m.createTable 不建——放这里幂等补齐，同时
+    // 覆盖 新建库 / v1→v2 首次升级 / 已升到 v2 的存量库（上个 buggy 版本
+    // 升级后缺索引）三条路径；同步引擎 rulesSince 的 (user_id, updated_at)
+    // 查询与 activity_id 反查依赖。
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_tracking_rules_sync '
+      'ON tracking_rules (user_id, updated_at)',
+    );
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_tracking_rules_activity '
+      'ON tracking_rules (activity_id)',
     );
   }
 }
