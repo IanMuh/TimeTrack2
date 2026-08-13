@@ -828,7 +828,7 @@ void main() {
       expect(left.map((r) => r.id).toSet(), {'actR', 'actL'});
     });
 
-    test('软删未超期子分类引用将删父 → parentId 置 NULL 且 updatedAt 更新（r2）', () async {
+    test('软删未超期子分类引用将删父 → parentId 置 NULL 且墓碑子 updatedAt 不被刷新（r12）', () async {
       await putMeta(AppMetadataKeys.lastSyncAt, nowStr());
       final parentDeleted = mapping.utcString(
         DateTime.now().subtract(const Duration(days: 400)),
