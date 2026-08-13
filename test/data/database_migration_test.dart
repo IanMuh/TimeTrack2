@@ -196,4 +196,51 @@ void main() {
       }
     }
   });
+
+  test('已 v2 存量库缺索引：重开时 _ensureIndexes 幂等补齐（r3 核心修复）', () async {
+    // r3 修复的核心场景：上个 buggy 版本已升到 v2（user_version=2）的库——
+    // onUpgrade 不再触发，若缺 tracking_rules 索引则**永远**缺（rulesSince 的
+    // (user_id, updated_at) 查询持续全表扫描）。修复把索引移入 _ensureIndexes
+    //（每次打开无条件幂等补齐），本用例锁定该行为。
+    final dir = Directory.systemTemp.createTempSync('timetrack-migrate2');
+    final file = File('${dir.path}/v2.sqlite');
+    try {
+      // 构造 v2 库：正常打开（含全部表/索引）后 DROP 同步索引模拟 buggy 状态。
+      final seeded = AppDatabase(NativeDatabase(file));
+      await seeded.close();
+      final raw = sqlite3.open(file.path);
+      raw.execute('DROP INDEX IF EXISTS idx_tracking_rules_sync');
+      raw.close();
+
+      // 重新打开：_ensureIndexes 无条件补齐被删索引。
+      final reopened = AppDatabase(NativeDatabase(file));
+      try {
+        final indexes = await reopened
+            .customSelect("SELECT name FROM sqlite_master WHERE type='index' "
+                "AND tbl_name='tracking_rules'")
+            .get();
+        final names = indexes.map((r) => r.data['name']).toSet();
+        expect(names, contains('idx_tracking_rules_sync'),
+            reason: '重开后 idx_tracking_rules_sync 被 _ensureIndexes 补齐');
+        final syncIndexCols = await reopened
+            .customSelect("SELECT name FROM pragma_index_info("
+                "'idx_tracking_rules_sync') ORDER BY seqno")
+            .get();
+        expect(syncIndexCols.map((r) => r.data['name']).toList(),
+            ['user_id', 'updated_at'],
+            reason: '补齐的索引列定义正确（(user_id, updated_at)）');
+      } finally {
+        await reopened.close();
+      }
+    } finally {
+      for (var attempt = 0; attempt < 3; attempt++) {
+        try {
+          dir.deleteSync(recursive: true);
+          break;
+        } on FileSystemException {
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+        }
+      }
+    }
+  });
 }
