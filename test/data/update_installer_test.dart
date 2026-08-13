@@ -16,6 +16,44 @@ List<int> buildZip(Map<String, String> files) {
 
 void main() {
   group('WindowsInstaller', () {
+    test('programDir 合理性校验（r23/r24）：危险路径构造抛 ArgumentError', () {
+      // r23 防御核心：applyStaging/_clearProgramDir 递归清空 programDir——
+      // 误配为空/相对/根/含 `..` 段会复制整棵目录树/递归清空根目录（不可恢复
+      // 大范围数据丢失）。**构造内 throw（release 构建 assert 被剥离仍生效）**。
+      // r24：`C:\\`（连续分隔符，`\1` 字面量替换 bug 修复前会绕过）、`C:\ `
+      //（尾部空格折叠）、`C:\foo\..\..`（`..` 段解析为盘根）均须拒绝。
+      for (final evil in [
+        '',
+        'relative/path',
+        '/',
+        r'\',
+        r'C:\',
+        r'C:\\', // 连续分隔符（r24：`\1` 字面量 bug 会绕过根判定）
+        r'C:\ ', // 尾部空格折叠为 C:\
+        r'C:\foo\..\..', // .. 段解析为盘根
+        r'C:\..\..\',
+      ]) {
+        expect(
+          () => WindowsInstaller(programDir: evil, dataDir: '/data'),
+          throwsArgumentError,
+          reason: '危险 programDir 拒绝：$evil',
+        );
+      }
+      // 合法绝对路径放行（构造不抛）。
+      for (final ok in [
+        r'C:\Program Files\TimeTrack',
+        '/opt/timetrack',
+        r'C:\app\.\bin', // 含 `.` 段（仅 `..` 段拒绝；`.bin` 非完整段）
+        r'C:\foo\bar',
+      ]) {
+        expect(
+          () => WindowsInstaller(programDir: ok, dataDir: '/data'),
+          returnsNormally,
+          reason: '合法 programDir 放行：$ok',
+        );
+      }
+    });
+
     test('staging 目录名校验（r16/r17 纯函数）：空/`.`/`..`/分隔符/尾部空格点号裁剪变体拒绝', () {
       // WindowsInstaller.stagingNameError 纯函数——防 `$programDir/<名>` 解析
       // 到 programDir 本身（`.`/裁剪后 `.`）或其父目录（`..`）时下方

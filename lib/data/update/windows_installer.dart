@@ -61,7 +61,10 @@ class WindowsInstaller {
   /// 校验：非空 + 绝对路径 + 非根目录。**根判定按 Win32 规范化折叠**（与
   /// stagingNameError 同策略）：裁剪尾部空格/点号、折叠连续分隔符、去尾分隔符
   /// 后判定——`C:\\`（连续分隔符）、`C:\ `（尾部空格折叠为 `C:\`）均解析到
-  /// 盘根、须拒绝。返回原值（路径归一化由 File/Directory 运行时处理）。
+  /// 盘根、须拒绝；**含 `..` 段（r24）**（`C:\foo\..\..` 解析为盘根、任意
+  /// 上级目录——`_clearProgramDir` 递归清空该目录）同样拒绝（与 zip-slip/
+  /// stagingNameError 对 `.`/`..` 的灾难性判定一致）。返回原值（路径归一化由
+  /// File/Directory 运行时处理）。
   static String _checkedProgramDir(String dir) {
     if (dir.isEmpty) {
       throw ArgumentError.value(dir, 'programDir', '不得为空');
@@ -74,8 +77,23 @@ class WindowsInstaller {
       throw ArgumentError.value(dir, 'programDir', '必须为绝对路径');
     }
     var norm = dir.replaceAll(RegExp(r'[ .]+$'), ''); // 尾部空格/点号（Win32 裁剪）
-    norm = norm.replaceAll(RegExp(r'([\\/])[\\/]+'), r'\1'); // 折叠连续分隔符
+    // **replaceAllMapped 折叠连续分隔符（r24 实证）**：`String.replaceAll` 的
+    // 替换串**不解释任何组引用**（`\1`、`$1` 均为字面量——`C:\\` 折叠后变
+    // `C:\1`/`C:$1` 绕过根判定、递归清盘根的灾难路径）——须用 replaceAllMapped
+    // 回调取捕获组。
+    norm = norm.replaceAllMapped(
+      RegExp(r'([\\/])[\\/]+'),
+      (m) => m[1]!,
+    ); // 折叠连续分隔符
     norm = norm.replaceAll(RegExp(r'[\\/]+$'), ''); // 去尾分隔符
+    // **`..` 段拒绝（r24）**：`C:\foo\..\..` 规范化后非根形态、但文件系统解析
+    // 为盘根——`_clearProgramDir` 递归清空盘根/上级目录（大范围数据丢失）。
+    // 只拒绝**完整段**为 `..`（`C:\..\app` 合法放行、`..` 嵌中间也放行——
+    // 与 zip-slip 的段级策略一致）。
+    final segments = norm.replaceAll(r'\', '/').split('/');
+    if (segments.any((s) => s == '..')) {
+      throw ArgumentError.value(dir, 'programDir', '不得包含 `..` 段');
+    }
     final isRoot =
         norm.isEmpty ||
         norm == '/' ||

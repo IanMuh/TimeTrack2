@@ -551,14 +551,18 @@ void main() {
       );
 
       // 场景 B：无 Content-Length、分块流实际超限 → 流式累计检查中断。
+      // **提前取消观测（r24）**：锁定"流式逐块累计超限即中断"——若实现退化为
+      // 先整体缓冲再检查（toBytes），订阅不会被提前取消（cancelled == false），
+      // 用例失败（防 OOM 防护回归为"缓冲后检查"时无感知）。
+      final streamClientB = _ManifestStreamClient(
+        [good, List<int>.filled(max, 1)], // 总计 > 2MB
+        contentLength: null,
+      );
       final clientB = UpdateManifestService(
         database: db,
         currentVersion: '1.0.0',
         manifestUrl: Uri.parse('https://x.example/update.json'),
-        httpClient: _ManifestStreamClient(
-          [good, List<int>.filled(max, 1)], // 总计 > 2MB
-          contentLength: null,
-        ),
+        httpClient: streamClientB,
       );
       final resultB = await clientB.checkForUpdate();
       expect(resultB.isSuccess, isFalse, reason: '分块流超限中断');
@@ -566,6 +570,7 @@ void main() {
         resultB.when(onSuccess: (_) => '', onFailure: (m) => m),
         contains('体积超上限'),
       );
+      expect(streamClientB.cancelled, isTrue, reason: '超限中断提前取消订阅（非整体缓冲后检查）');
 
       // 场景 C：恰好等于上限（严格大于语义）——2MB 合法清单放行。
       final padded = <int>[
@@ -577,6 +582,13 @@ void main() {
         ),
       ];
       // 补齐到恰好 max 字节（尾部空格不影响 jsonDecode）。
+      // **前提断言（r24）**：配置常量调小到小于 JSON 载荷时 setRange 越界抛
+      // RangeError（晦涩失败）——显式断言前提使失败信息可读。
+      expect(
+        padded.length,
+        lessThanOrEqualTo(max),
+        reason: 'maxManifestBytes 须大于等于 JSON 载荷（配置被调小？）',
+      );
       final atLimit = List<int>.filled(max, 32);
       atLimit.setRange(0, padded.length, padded);
       final clientC = UpdateManifestService(
@@ -593,17 +605,25 @@ void main() {
   });
 }
 
-/// 流式清单响应 client（r23）：逐块发射 + 可选 contentLength（null 模拟无
-/// Content-Length 的分块响应）。
+/// 流式清单响应 client（r23/r24）：逐块发射 + 可选 contentLength（null 模拟无
+/// Content-Length 的分块响应）。**订阅取消观测（r24）**：`onCancel` 记录监听者
+/// 提前取消——用于断言流式超限中断确实取消订阅（防实现退化为整体缓冲后检查）。
 class _ManifestStreamClient extends http.BaseClient {
   _ManifestStreamClient(this.chunks, {this.contentLength});
 
   final List<List<int>> chunks;
   final int? contentLength;
 
+  /// 监听者提前取消订阅（流式中断/前置拒绝路径）——正常消费完成不置位。
+  bool cancelled = false;
+
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
-    final controller = StreamController<List<int>>();
+    final controller = StreamController<List<int>>(
+      onCancel: () {
+        cancelled = true;
+      },
+    );
     for (final c in chunks) {
       controller.add(c);
     }

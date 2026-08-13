@@ -91,6 +91,13 @@ class UpdateManifestService {
     }
   }
 
+  /// **取消流订阅并吞掉流错误（r24 辅助）**：错误响应体/已关闭后不消费——
+  /// 无界消费耗带宽占连接；listen 需 onError 处理器防流错误成为未捕获异步
+  /// 异常；cancel 立即停止读取、释放连接。3 处调用点统一（防后续调整漏改）。
+  static void _cancelStream(http.StreamedResponse response) {
+    response.stream.listen(null, onError: (_) {}).cancel().ignore();
+  }
+
   /// 检查更新；失败返回可读原因（网络/清单损坏/已关闭）。
   Future<AppResult<UpdateCheckResult>> checkForUpdate() async {
     if (_closed) {
@@ -104,7 +111,7 @@ class UpdateManifestService {
       // **await 期间可能已被 close（r3）**：资源已释放，不再继续评估——
       // 防"等待期间 close → 成功继续 _evaluate 写库返回成功"违背已关闭语义。
       if (_closed) {
-        response.stream.listen(null, onError: (_) {}).cancel().ignore();
+        _cancelStream(response);
         return const AppFailure(_closedMessage);
       }
     } on TimeoutException {
@@ -144,7 +151,7 @@ class UpdateManifestService {
     if (response.statusCode != 200) {
       // **取消订阅立即中止（r23）**：错误响应体无界消费会耗带宽/占连接——
       // 与下载器非 200 分支一致。
-      response.stream.listen(null, onError: (_) {}).cancel().ignore();
+      _cancelStream(response);
       return AppFailure('更新清单获取失败（${response.statusCode}）');
     }
     // **清单响应体大小上限（r23 流式）**：`http.get` 会先把整个响应体缓冲进
@@ -152,21 +159,35 @@ class UpdateManifestService {
     // `_http.send` 拿 StreamedResponse 后**逐块消费**：contentLength 前置拦截 +
     // 流式累计超限即中止（与下载器 _maxBytes 同款方案）。防恶意服务器在
     // checkTimeout 内高速推流超大清单耗尽内存。
+    // **总时限（r24）**：`stream.timeout` 是相邻事件**空闲**超时——恶意慢速
+    // 服务器 1 字节/7.9s 推流可无限挂起（旧 `_http.get` 8s 总时限保证失效）。
+    // 记录截止时间、每块复查，超时抛 TimeoutException（与下载器语义对齐：
+    // 头超时 + 体超时分离，此处体读取受同一 checkTimeout 总时限约束）。
     final maxManifestBytes = UpdateConfig.maxManifestBytes;
     if (response.contentLength != null &&
         response.contentLength! > maxManifestBytes) {
-      response.stream.listen(null, onError: (_) {}).cancel().ignore();
+      _cancelStream(response);
       return const AppFailure('更新清单体积超上限');
     }
     final builder = BytesBuilder(copy: false);
     var received = 0;
+    final deadline = DateTime.now().add(UpdateConfig.checkTimeout);
     try {
       await for (final chunk in response.stream.timeout(
         UpdateConfig.checkTimeout,
       )) {
+        if (DateTime.now().isAfter(deadline)) {
+          throw TimeoutException('更新清单读取超时');
+        }
         received += chunk.length;
         if (received > maxManifestBytes) {
           throw const ManifestTooLargeException();
+        }
+        // **循环内 _closed 复查（r24）**：注入 client 不由本服务关闭、底层流
+        // 不被中断——close() 期间循环仍会消费完整响应体；每块后立即返回（
+        // await for 退出自动取消订阅、释放连接）。
+        if (_closed) {
+          return const AppFailure(_closedMessage);
         }
         builder.add(chunk);
       }
