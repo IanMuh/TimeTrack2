@@ -213,6 +213,16 @@ void main() {
       await seeded.customSelect('SELECT 1').get();
       await seeded.close();
       final raw = sqlite3.open(file.path);
+      // **前置断言（r6）**：DROP 前先确认索引确实存在——若 SELECT 1 未触发
+      // 建库（user_version 仍 0），DROP 是空操作、afterDrop 恒空，自校验
+      // 假通过且重开走 onCreate 而非 _ensureIndexes 补齐（正是要防的场景）。
+      final beforeDrop = raw.select(
+          "SELECT name FROM sqlite_master WHERE type='index' "
+          "AND name = 'idx_tracking_rules_sync'");
+      if (beforeDrop.isEmpty) {
+        raw.close();
+        fail('建库后 idx_tracking_rules_sync 不存在——SELECT 1 未触发建库，用例空转');
+      }
       raw.execute('DROP INDEX IF EXISTS idx_tracking_rules_sync');
       // **模拟状态自校验（r5）**：断言 buggy 状态真实生效——索引确实已删，
       // 否则用例空转（若重开仍走 onCreate 而非 _ensureIndexes 补齐则假通过）。
