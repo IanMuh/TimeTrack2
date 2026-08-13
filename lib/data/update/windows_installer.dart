@@ -25,15 +25,16 @@ class WindowsInstaller {
     required this.programDir,
     required this.dataDir,
     ZipDecoder? zipCodec,
-    // 公开参数名 + 初始化列表赋值给私有字段（不依赖 Dart 私有命名参数
-    // 特性——跨库调用名直白为 copyFileOverride，测试/外部可引用）。
-    void Function(String from, String to)? copyFileOverride,
-  })  : zipCodec = zipCodec ?? ZipDecoder(),
-        _copyFileOverride = copyFileOverride;
+    // **私有字段初始化形参（Dart 3.12 特性）**：`this._x` 命名参数跨库调用名
+    // 剥离下划线（调用方写 `copyFileOverride:`）——已用最小程序实证编译运行。
+    this._copyFileOverride,
+  }) : zipCodec = zipCodec ?? ZipDecoder();
   /// 程序目录（exe 所在，安装目标）。
   final String programDir;
 
-  /// 数据目录（待安装标记等放这里，与程序目录分离）。
+  /// 数据目录（待安装标记等放这里，与程序目录分离——**本文件不直接使用**，
+  /// 待安装标记的读写属阶段 3/4 启动逻辑；此处保留为构造契约的声明性占位，
+  /// 防调用方遗漏该目录约定）。
   final String dataDir;
 
   /// zip 解码器（可注入替换，测试用）。
@@ -68,15 +69,28 @@ class WindowsInstaller {
       }
       staging.createSync(recursive: true);
       final bytes = File(zipPath).readAsBytesSync();
+      // **zip bomb 防护（r9）**：恶意/异常更新包可用高压缩比条目（zip bomb）
+      // 使进程 OOM 或磁盘写满——解压前校验包大小与单条目/累计解压体积上限。
       final archive = zipCodec.decodeBytes(bytes);
       var fileCount = 0;
+      var totalUncompressed = 0;
       for (final file in archive.files) {
         if (file.isFile) {
           final name = file.name;
-          // zip-slip 防护：拒绝路径穿越（`..` 段/绝对路径/盘符路径）——否则
-          // 恶意 zip 可把文件写入 staging 之外（如覆盖程序目录/系统路径）。
+          // zip-slip 防护：拒绝路径穿越（`..` 段/绝对路径/盘符路径/尾部空格
+          // 规范化绕过/保留设备名）——否则恶意 zip 可把文件写入 staging 之外
+          //（如覆盖程序目录/系统路径）。
           if (_isUnsafePath(name)) {
             throw StateError('更新包包含非法路径条目（路径穿越风险）：$name');
+          }
+          // 单条目解压后大小上限（zip bomb 高压缩比条目）。
+          if (file.size > UpdateConfig.maxUncompressedEntryBytes) {
+            throw StateError('更新包条目解压后体积超上限：$name');
+          }
+          totalUncompressed += file.size;
+          // 累计解压体积上限。
+          if (totalUncompressed > UpdateConfig.maxTotalUncompressedBytes) {
+            throw StateError('更新包解压总体积超上限');
           }
           final out = File('${staging.path}/$name');
           out.createSync(recursive: true);
@@ -199,6 +213,17 @@ class WindowsInstaller {
             entry.renameSync('$programDir/${_basename(entry.path)}');
           }
           rollbackOk = true;
+          // **回滚成功后清理（r9）**：备份条目全部移出后 backupDir 成空目录
+          // 未删除——多次失败会累积陈旧空备份目录；staging 中未移入的条目
+          // 残留原 staging 目录。均 best-effort 清理。
+          try {
+            backupDir.deleteSync(recursive: true);
+            if (staging.existsSync()) {
+              staging.deleteSync(recursive: true);
+            }
+          } on FileSystemException {
+            // 清理失败不影响回滚成功结论。
+          }
         }
       } catch (_) {
         // 恢复失败：备份目录仍在，供手动恢复。
@@ -229,8 +254,26 @@ class WindowsInstaller {
     // 拼接后含内嵌冒号会引发路径解析歧义/非预期行为。
     if (name.length >= 2 && name[1] == ':') return true;
     final segments = name.replaceAll(r'\', '/').split('/');
-    return segments.any((s) => s == '..' || s.isEmpty && segments.length > 1);
+    return segments.any((s) {
+      // **Windows 路径规范化（r9）**：Win32 打开路径时会去除每个组件**尾部
+      // 的空格/点号**——`.. `、`. ` 会被解析为 `..`/`.`，直接判 `s == '..'`
+      // 会漏掉 `.. /evil.txt` 这类绕过（写入时解析为 `$staging/../evil.txt`）。
+      // 先修剪尾部空格/点号再判。
+      final trimmed = s.replaceAll(RegExp(r'[. ]+$'), '');
+      if (trimmed.isEmpty) return segments.length > 1;
+      if (trimmed == '.' || trimmed == '..') return true;
+      // **保留设备名（r9）**：CON/NUL/PRN/AUX/COM1-9/LPT1-9（带扩展名同拒）
+      // ——防设备访问/挂起（恶意 zip 写入 `nul` 等）。
+      if (_windowsReservedDevice.hasMatch(trimmed)) return true;
+      return false;
+    });
   }
+
+  /// Windows 保留设备名（不带/带扩展名均拒绝）。
+  static final _windowsReservedDevice = RegExp(
+    r'^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\..*)?$',
+    caseSensitive: false,
+  );
 
   /// 跨平台 basename：**不用 `uri.pathSegments.last`**——目录 URI 以 `/` 结尾，
   /// 其 last 段为空串（Windows 上 `File/Directory.path` 混用反斜杠/正斜杠时

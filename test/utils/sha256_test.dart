@@ -4,6 +4,9 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timetrack2/utils/sha256.dart';
 
+/// 'abc' 的 SHA-256 已知向量（RFC 6234）——多处用例共享，防向量调整漏改。
+const _sha256Abc = 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad';
+
 void main() {
   // 已知向量（RFC 6234 / 常见校验值）。
   group('sha256Bytes / sha256String', () {
@@ -17,7 +20,7 @@ void main() {
     test('abc', () {
       expect(
         sha256String('abc'),
-        'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
+        _sha256Abc,
       );
     });
 
@@ -149,7 +152,7 @@ void main() {
     test('已知向量（abc）', () async {
       expect(
         await sha256Stream(Stream.value('abc'.codeUnits)),
-        'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
+        _sha256Abc,
       );
     });
 
@@ -161,7 +164,7 @@ void main() {
       expect(second, first);
       expect(
         first,
-        'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
+        _sha256Abc,
       );
     });
 
@@ -181,7 +184,7 @@ void main() {
       // 错误后仍可用（converter 关闭不泄漏）：新流哈希与已知向量精确一致。
       expect(
         await sha256Stream(Stream.value('abc'.codeUnits)),
-        'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
+        _sha256Abc,
         reason: '错误后新流哈希仍与已知向量一致',
       );
     });

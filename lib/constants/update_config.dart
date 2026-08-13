@@ -69,4 +69,10 @@ class UpdateConfig {
 
   /// 校验失败后的重下次数（先删本地文件再重下）。
   static const redownloadAfterVerificationFailure = 1;
+
+  /// **zip bomb 防护上限（r9）**：单条目解压后体积上限（500 MB）。
+  static const maxUncompressedEntryBytes = 500 * 1024 * 1024;
+
+  /// **zip bomb 防护上限（r9）**：累计解压总体积上限（1 GB）。
+  static const maxTotalUncompressedBytes = 1024 * 1024 * 1024;
 }

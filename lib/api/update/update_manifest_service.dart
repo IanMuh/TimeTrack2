@@ -58,7 +58,7 @@ class UpdateManifestService {
     required String currentVersion,
     http.Client? httpClient,
     Uri? manifestUrl,
-  })  : _current = AppVersion.parse(currentVersion),
+  })  : _current = AppVersion.parse(currentVersion), // 前置条件：currentVersion 必须合法 SemVer（构造期同步抛 FormatException）
         _http = httpClient ?? http.Client(),
         _ownsHttp = httpClient == null,
         _manifestUrl = manifestUrl ?? UpdateConfig.defaultManifestUrl;
@@ -130,7 +130,12 @@ class UpdateManifestService {
   }
 
   /// 评估清单：版本比较 + 缓存。**纯逻辑（可单测）**——与网络解耦。
+  /// **入口复查 _closed（r9）**：与 checkForUpdate 的关闭语义统一——close 后
+  /// 立即失败（防先做一次不必要的 DB 读、到写库前才拒绝）。
   Future<AppResult<UpdateCheckResult>> evaluate(UpdateManifest manifest) async {
+    if (_closed) {
+      return const AppFailure('更新服务已关闭，请重新创建');
+    }
     return _evaluate(manifest);
   }
 

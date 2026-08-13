@@ -103,6 +103,14 @@ void main() {
           'C:/evil.txt', // 盘符绝对路径
           'C:\\evil.txt',
           'C:evil.txt', // 盘符相对路径
+          '../../evil.txt', // 多级穿越
+          'a/../../evil.txt', // 嵌套穿越
+          '.. /evil.txt', // 尾部空格规范化绕过（Win32 去除组件尾部空格 → `..`）
+          '. ./evil.txt', // 尾部空格 → `.`
+          'a/.. ./b.txt', // 段内尾部空格（非首段）
+          'NUL', // 保留设备名
+          'CON.txt',
+          'COM1',
         ].indexed) {
           final zipPath = '${root.path}/evil$i.zip';
           File(zipPath).writeAsBytesSync(buildZip({evil: 'evil'}));
@@ -290,15 +298,34 @@ void main() {
       }
     });
 
-    test('checkWritable：可写目录 true / 只读目录 false', () async {
+    test('checkWritable：可写目录 true；只读目录 false（POSIX chmod，r9）', () async {
       final root = await Directory.systemTemp.createTemp('win_write');
       final writable = Directory('${root.path}/w')..createSync();
+      final ro = Directory('${root.path}/ro')..createSync();
       try {
         final installer = WindowsInstaller(
           programDir: writable.path,
           dataDir: '${root.path}/data',
         );
         expect(installer.checkWritable(), isTrue, reason: '临时目录可写');
+        // **只读分支（r9）**：Windows 目录只读位语义与 Unix 不同（chmod 0555
+        // 在 Windows 上几乎无效、以管理员运行也可写）——只读分支用 POSIX
+        // chmod 构造并跳过 Windows（防平台语义差异误报）。
+        if (!Platform.isWindows) {
+          Process.runSync('chmod', ['0555', ro.path]);
+          try {
+            expect(
+              WindowsInstaller(
+                programDir: ro.path,
+                dataDir: '${root.path}/data',
+              ).checkWritable(),
+              isFalse,
+              reason: '只读目录不可写（写探针抛 FileSystemException）',
+            );
+          } finally {
+            Process.runSync('chmod', ['0755', ro.path]);
+          }
+        }
       } finally {
         await root.delete(recursive: true);
       }
@@ -308,8 +335,8 @@ void main() {
   group('AndroidInstaller（纯函数）', () {
     test('content URI 构造 + Intent 标志', () {
       const installer = AndroidInstaller();
-      final uri = installer.apkContentUri('/cache', 'app.apk');
-      expect(uri, 'content://com.example.timetrack2.fileprovider/cache/app.apk');
+      final uri = installer.apkContentUri('app.apk');
+      expect(uri, 'content://com.github.ianmuh.timetrack2.fileprovider/cache/app.apk');
       final intent = installer.installIntentFor(uri);
       expect(intent.action, 'android.intent.action.VIEW');
       expect(intent.dataUri, uri, reason: 'data URI 参与结果（防误传）');
@@ -318,39 +345,53 @@ void main() {
       expect(intent.flags, 0x00000001, reason: 'FLAG_GRANT_READ_URI_PERMISSION');
     });
 
+    test('installIntentFor authority 校验（r9）：非本应用 FileProvider URI 拒绝', () {
+      const installer = AndroidInstaller();
+      // 误传 file:// 或其它 provider 的 URI——配合 GRANT 标志会向安装器授予
+      // 对非预期文件的读取权限，须拒绝。
+      expect(
+        () => installer.installIntentFor('file:///tmp/app.apk'),
+        throwsArgumentError,
+      );
+      expect(
+        () => installer.installIntentFor('content://other.provider/cache/app.apk'),
+        throwsArgumentError,
+      );
+    });
+
     test('content URI 文件名编码（r2）：特殊字符编码 / `..` 拒绝', () {
       const installer = AndroidInstaller();
       // 空格/`#`/`?`/`%` 编码（防 URI 解析错误）
       expect(
-        installer.apkContentUri('/cache', 'my app v1.2.apk'),
-        'content://com.example.timetrack2.fileprovider/cache/my%20app%20v1.2.apk',
+        installer.apkContentUri('my app v1.2.apk'),
+        'content://com.github.ianmuh.timetrack2.fileprovider/cache/my%20app%20v1.2.apk',
       );
       expect(
-        installer.apkContentUri('/cache', 'my#app?100%.apk'),
-        'content://com.example.timetrack2.fileprovider/cache/my%23app%3F100%25.apk',
+        installer.apkContentUri('my#app?100%.apk'),
+        'content://com.github.ianmuh.timetrack2.fileprovider/cache/my%23app%3F100%25.apk',
       );
       // 路径分隔符 / 裸 `..`/`.`/空串拒绝（Uri.encodeComponent 不编码 `.`——
       // 裸 `..` 会产生带穿越段的 URI，须显式拒绝）
       expect(
-        () => installer.apkContentUri('/cache', '../evil.apk'),
+        () => installer.apkContentUri('../evil.apk'),
         throwsArgumentError,
         reason: '文件名含路径分隔符拒绝',
       );
       expect(
-        () => installer.apkContentUri('/cache', r'..\evil.apk'),
+        () => installer.apkContentUri(r'..\evil.apk'),
         throwsArgumentError,
       );
       expect(
-        () => installer.apkContentUri('/cache', '..'),
+        () => installer.apkContentUri('..'),
         throwsArgumentError,
         reason: '裸 .. 拒绝（防路径穿越段 URI）',
       );
       expect(
-        () => installer.apkContentUri('/cache', '.'),
+        () => installer.apkContentUri('.'),
         throwsArgumentError,
       );
       expect(
-        () => installer.apkContentUri('/cache', ''),
+        () => installer.apkContentUri(''),
         throwsArgumentError,
       );
     });

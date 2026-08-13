@@ -6,7 +6,7 @@
 /// 校验失败的重下由本服务编排。
 library;
 
-import 'dart:io' show File, FileSystemException;
+import 'dart:io' show File, FileSystemException, stderr;
 
 import '../../constants/update_config.dart';
 import '../../utils/result.dart';
@@ -49,7 +49,10 @@ class UpdateVerifier {
       try {
         File(result.filePath).deleteSync();
       } on FileSystemException {
-        // 删除失败不阻塞重下。
+        // 删除失败不阻塞重下；记录残留路径（防多次失败累积损坏文件且无从排查）。
+        stderr.writeln(
+          '[update] 校验失败且删除损坏文件失败（残留）：${result.filePath}',
+        );
       }
       if (attempt >= UpdateConfig.redownloadAfterVerificationFailure) {
         return const AppFailure('更新文件校验失败（SHA-256 不匹配），请稍后重试');

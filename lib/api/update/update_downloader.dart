@@ -1,7 +1,8 @@
 /// 更新下载器：http **流式**下载到临时目录（进度回调）+ 指数退避重试。
 ///
 /// 流程（计划"完整更新系统设计"·管线）：
-/// 1. `GET url` → 流式读响应体，边收边写临时文件（分块 [UpdateConfig.downloadChunkBytes]）；
+/// 1. `GET url` → 流式读响应体，边收边写临时文件（按网络到达的 chunk 写盘，
+///    与 [UpdateConfig.downloadStreamTimeout] 结合防挂起）；
 /// 2. 每块回调 [onProgress]（已写字节数 / 总字节数；总大小未知时为 null）；
 /// 3. 网络瞬时失败指数退避重试 [UpdateConfig.downloadRetryCount] 次；
 /// 4. **边收边算 SHA-256**（[sha256Stream] 语义——下载流同时累计哈希，
@@ -11,7 +12,8 @@
 library;
 
 import 'dart:async';
-import 'dart:io' show Directory, File, FileSystemException, SocketException;
+import 'dart:io'
+    show Directory, File, FileSystemException, HttpException, SocketException, TlsException;
 
 import 'package:http/http.dart' as http;
 
@@ -45,19 +47,32 @@ class UpdateDownloader {
     int? retryCount,
     Duration? retryBaseDelay,
   })  : _http = httpClient ?? http.Client(),
+        _ownsHttp = httpClient == null,
         _retryCount = retryCount ?? UpdateConfig.downloadRetryCount,
-        _retryBaseDelay = retryBaseDelay ?? UpdateConfig.retryBaseDelay {
-    _tempDirectory = tempDirectory;
-  }
+        _retryBaseDelay = retryBaseDelay ?? UpdateConfig.retryBaseDelay,
+        _tempDirectory = tempDirectory;
 
   final http.Client _http;
+  /// 是否自建 http client（close 时释放；注入对象由调用方负责生命周期）。
+  final bool _ownsHttp;
   /// 重试次数（默认取 [UpdateConfig.downloadRetryCount]；测试注入小值免真实等待）。
   final int _retryCount;
   /// 退避基时（默认取 [UpdateConfig.retryBaseDelay]；测试注入零延迟）。
   final Duration _retryBaseDelay;
-  late final Directory? _tempDirectory;
+  final Directory? _tempDirectory;
   /// 临时文件名自增后缀（防同一微秒并发下载撞名覆盖）。
   int _seq = 0;
+  /// 已关闭标记（close 后 download 明确拒绝——防已释放 client 抛异常逃逸）。
+  bool _closed = false;
+
+  /// 释放自建 http client（连接池/keep-alive 连接回收；注入对象由调用方负责）。
+  void close() {
+    if (_closed) return;
+    _closed = true;
+    if (_ownsHttp) {
+      _http.close();
+    }
+  }
 
   /// 下载 [url] 到临时目录；失败返回可读原因。
   ///
@@ -70,6 +85,9 @@ class UpdateDownloader {
     String url, {
     void Function(int receivedBytes, int? totalBytes)? onProgress,
   }) async {
+    if (_closed) {
+      return const AppFailure('下载器已关闭，请重新创建');
+    }
     var attempt = 0;
     while (true) {
       try {
@@ -87,6 +105,18 @@ class UpdateDownloader {
         if (!_shouldRetry(attempt)) {
           return const AppFailure('下载超时，请稍后重试');
         }
+      } on HttpException {
+        // **瞬态 IO 异常（r9）**：dart:io 流式响应在连接中途被服务端关闭/
+        // 协议错误时可能抛 HttpException/TlsException（http 包仅把 send 阶段
+        // 与部分流中错误包装为 ClientException，其余透传）——纳入退避重试
+        //（保证"总是返回 AppResult"契约 + 不逃逸到全局错误处理）。
+        if (!_shouldRetry(attempt)) {
+          return const AppFailure('下载失败（网络中断），请稍后重试');
+        }
+      } on TlsException {
+        if (!_shouldRetry(attempt)) {
+          return const AppFailure('下载失败（TLS 中断），请稍后重试');
+        }
       } on HttpStatusException catch (e) {
         // 服务端明确拒绝（4xx/5xx）：不重试，文案带状态码（区别于瞬态网络）。
         return AppFailure('下载失败（HTTP ${e.statusCode}）');
@@ -96,6 +126,11 @@ class UpdateDownloader {
       } on FormatException {
         // 非法 URL。
         return const AppFailure('下载地址非法');
+      } catch (e) {
+        // **兜底归一化（r9）**：流消费期间的未知异常不逃逸——保证方法恒返回
+        // AppResult（防生产环境冒泡到全局错误处理）；不重试（未知异常归因
+        // 可能非瞬态）。
+        return AppFailure('下载失败，请稍后重试（$e）');
       }
       attempt += 1;
       await Future<void>.delayed(_retryDelay(attempt));
@@ -119,6 +154,10 @@ class UpdateDownloader {
       '-${_seq++}', // 自增后缀防同一微秒并发撞名覆盖
     );
     final request = http.Request('GET', Uri.parse(url));
+    // **超时边界（r9 注明）**：`Future.timeout` 不取消底层 send——超时后原始
+    // 请求仍可能稍后返回 StreamedResponse，本方法已返回失败/进入重试、无法
+    // 消费该迟到响应；连接由 http 包 idle 超时兜底回收（已知边界，慢网络 +
+    // 重试场景可堆积少量连接，属可接受权衡）。
     final response = await _http.send(request).timeout(UpdateConfig.checkTimeout);
     // **4xx 不重试**（永久性错误）：抛专用异常，download() 直接失败带状态码。
     // 5xx 也先不重试（本模块传输层保守——调用方编排层可整体重试）。

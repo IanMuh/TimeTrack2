@@ -12,15 +12,27 @@ import 'package:timetrack2/viewmodels/update/update_manifest.dart';
 void main() {
   group('UpdateManifestService evaluate（纯逻辑）', () {
     late AppDatabase db;
+    final createdServices = <UpdateManifestService>[];
 
     setUp(() {
       db = AppDatabase(NativeDatabase.memory());
     });
 
-    tearDown(() => db.close());
+    tearDown(() {
+      // 资源卫生（r9）：service() 未注入 httpClient 会自建默认 client——统一
+      // close 释放（防 long-running 测试累积底层连接）。
+      for (final s in createdServices) {
+        s.close();
+      }
+      createdServices.clear();
+      db.close();
+    });
 
-    UpdateManifestService service(String currentVersion) =>
-        UpdateManifestService(database: db, currentVersion: currentVersion);
+    UpdateManifestService service(String currentVersion) {
+      final s = UpdateManifestService(database: db, currentVersion: currentVersion);
+      createdServices.add(s);
+      return s;
+    }
 
     UpdateManifest manifest(String version, {bool required = false}) =>
         UpdateManifest(
@@ -101,6 +113,29 @@ void main() {
           (await service('1.0.0').evaluate(manifest('1.1.0'))).requireValue();
       expect(result.available, isTrue,
           reason: '脏忽略版本视为未忽略，正常提示更新');
+    });
+
+    test('远端版本更高但无平台产物（windows/android 为 null，r9）', () async {
+      // UpdateManifest 模型注释"缺平台则对应平台不可更新"——_evaluate 当前
+      // 直接透传 manifest 不检查平台产物：available=true 且 windows=null。
+      // 该行为被显式锁定（防后续为 evaluate 增加平台过滤逻辑时无感知回归）。
+      final bare = UpdateManifest(version: '2.0.0'); // 无任何平台产物
+      final result =
+          (await service('1.0.0').evaluate(bare)).requireValue();
+      expect(result.available, isTrue, reason: '版本更高即视为有更新');
+      expect(result.windows, isNull, reason: '无平台产物时 windows 为 null');
+      expect(result.android, isNull);
+    });
+
+    test('evaluate 入口复查：close 后返回可读失败且不做 DB 读（r9）', () async {
+      final client = service('1.0.0');
+      client.close();
+      final result = await client.evaluate(manifest('1.1.0'));
+      expect(result.isSuccess, isFalse, reason: '已关闭返回失败');
+      expect(
+        result.when(onSuccess: (_) => '', onFailure: (m) => m),
+        contains('已关闭'),
+      );
     });
   });
 

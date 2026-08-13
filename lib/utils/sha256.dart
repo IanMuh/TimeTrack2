@@ -43,19 +43,21 @@ Future<String> sha256File(
 /// 计算**任意字节流**的 SHA-256（hex 小写）——供"下载流边收边算"场景
 ///（下载写临时文件的同时累计哈希，校验环节免二次读盘）。
 ///
-/// 消费完 [stream]（含关闭）后返回；[stream] 中途出错（Error/异常）时
-/// 错误向上传播（converter 在 finally 中关闭，哈希状态完整）。
+/// **委托 [Sha256Sink]（r9）**：与下载器共用同一累积逻辑（单一事实来源——
+/// 哈希算法细节集中一处防漂移）。消费完 [stream]（含关闭）后返回；
+/// [stream] 中途出错（Error/异常）时错误向上传播（sink 在 finally 关闭，
+/// 哈希状态完整）。
 Future<String> sha256Stream(Stream<List<int>> stream) async {
-  final collector = _DigestCollector();
-  final converter = crypto.sha256.startChunkedConversion(collector);
+  final sink = Sha256Sink();
   try {
     await for (final chunk in stream) {
-      converter.add(chunk);
+      sink.add(chunk);
     }
   } finally {
-    converter.close();
+    // digest 幂等（_closed 标志只 close 一次）；正常/异常路径均保证关闭。
+    sink.digest();
   }
-  return collector.digest!.toString();
+  return sink.digest();
 }
 
 /// 增量 SHA-256 累积器（**单一事实来源**）：`sha256Stream` 与下载器

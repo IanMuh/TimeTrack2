@@ -126,6 +126,81 @@ void main() {
         await dir.delete(recursive: true);
       }
     });
+
+    test('5xx 同样不重试且文案带状态码（r9 固化契约）', () async {
+      final dir = await Directory.systemTemp.createTemp('dl_5xx');
+      var calls = 0;
+      final downloader = UpdateDownloader(
+        tempDirectory: dir,
+        retryCount: 3,
+        retryBaseDelay: Duration.zero,
+        httpClient: MockClient((request) async {
+          calls += 1;
+          return http.Response('err', 500, request: request);
+        }),
+      );
+      try {
+        final result = await downloader.download('https://x.example/app.zip');
+        expect(result.isSuccess, isFalse);
+        expect(calls, 1, reason: '非 200 一律不重试');
+        expect(
+          result.when(onSuccess: (_) => '', onFailure: (m) => m),
+          contains('500'),
+        );
+      } finally {
+        await dir.delete(recursive: true);
+      }
+    });
+
+    test('流中途断连：重试恢复 + 半成品清理（r9）', () async {
+      final dir = await Directory.systemTemp.createTemp('dl_midstream');
+      final client = _AbortStreamHttpClient();
+      final downloader = UpdateDownloader(
+        tempDirectory: dir,
+        retryCount: 2,
+        retryBaseDelay: Duration.zero,
+        httpClient: client,
+      );
+      try {
+        final result =
+            (await downloader.download('https://x.example/app.zip')).requireValue();
+        expect(client.callCount, 2, reason: '1 次中途断连 + 1 次成功');
+        // 最终文件内容正确（第二次成功）。
+        expect(
+          File(result.filePath).readAsStringSync(),
+          _AbortStreamHttpClient.payload,
+        );
+        // 失败后半成品临时文件已清理（目录仅剩最终成功文件）。
+        expect(
+          dir.listSync().whereType<File>().length,
+          1,
+          reason: '断连失败后半成品已删（仅最终成功文件残留）',
+        );
+      } finally {
+        await dir.delete(recursive: true);
+      }
+    });
+
+    test('非法 URL（FormatException）→ 可读失败且不重试（r9）', () async {
+      final dir = await Directory.systemTemp.createTemp('dl_badurl');
+      final downloader = UpdateDownloader(
+        tempDirectory: dir,
+        retryCount: 3,
+        httpClient: MockClient((_) async => http.Response('x', 200)),
+      );
+      try {
+        // Uri.parse 对 'not a url' 宽松解析为相对 URI（不抛）——用真正畸形
+        // 的输入触发 FormatException。
+        final result = await downloader.download('https://[bad');
+        expect(result.isSuccess, isFalse, reason: '非法 URL 失败');
+        expect(
+          result.when(onSuccess: (_) => '', onFailure: (m) => m),
+          contains('地址非法'),
+        );
+      } finally {
+        await dir.delete(recursive: true);
+      }
+    });
   });
 
   group('UpdateVerifier', () {
@@ -245,6 +320,38 @@ class _ChunkedHttpClient extends http.BaseClient {
       controller.stream,
       200,
       contentLength: total,
+      headers: {'content-type': 'application/octet-stream'},
+      request: request,
+    );
+  }
+}
+
+/// 流中途断连 client（r9）：首次 send 发部分块后抛异常（模拟服务端连接
+/// 中途关闭）、第二次成功发完整 payload。
+class _AbortStreamHttpClient extends http.BaseClient {
+  static const payload = 'full-payload-content';
+  int _calls = 0;
+
+  /// 已发起的 send 次数（测试断言重试次数用）。
+  int get callCount => _calls;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    _calls += 1;
+    final controller = StreamController<List<int>>();
+    if (_calls == 1) {
+      // 发部分块后抛错（流中途断连）。
+      controller.add('partial-'.codeUnits);
+      controller.addError(const SocketException('connection reset'));
+      controller.close();
+    } else {
+      controller.add(payload.codeUnits);
+      controller.close();
+    }
+    return http.StreamedResponse(
+      controller.stream,
+      200,
+      contentLength: payload.length,
       headers: {'content-type': 'application/octet-stream'},
       request: request,
     );
