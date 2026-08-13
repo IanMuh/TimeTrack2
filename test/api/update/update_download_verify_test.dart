@@ -214,9 +214,13 @@ void main() {
 
     test('非 http(s) scheme（file://）→ 可读失败（r15 兜底）', () async {
       final dir = await Directory.systemTemp.createTemp('dl_scheme');
+      var calls = 0;
       final downloader = UpdateDownloader(
         tempDirectory: dir,
-        httpClient: MockClient((_) async => http.Response('x', 200)),
+        httpClient: MockClient((_) async {
+          calls += 1;
+          return http.Response('x', 200);
+        }),
       );
       try {
         // Uri.parse 对 file:// 宽松解析不抛——http.Request 构造/发送时抛
@@ -227,6 +231,38 @@ void main() {
           result.when(onSuccess: (_) => '', onFailure: (m) => m),
           contains('地址非法'),
         );
+        // **时序契约锁定（r16）**：scheme 校验必须在 send 之前拦截——若被
+        // 挪到 send 之后，MockClient 对 file:// 会正常返回 200 仅后续校验抛错，
+        // 此断言会暴露"实际已触达网络"的回归。
+        expect(calls, 0, reason: 'scheme 校验在发送前拦截，未发起网络请求');
+      } finally {
+        await dir.delete(recursive: true);
+      }
+    });
+
+    test('scheme-only 无 host（https:// / http:）→ 可读失败（r16 兜底）', () async {
+      // Uri.parse('https://')/'http:' 解析成功且 scheme 为 http(s)——旧校验
+      //（仅查 scheme）放行，真实 IOClient.openUrl 对空 host 抛 ArgumentError
+      //（Error）逃逸破坏"恒返回 AppResult"契约；host 校验须在 send 前拦截。
+      final dir = await Directory.systemTemp.createTemp('dl_nohost');
+      var calls = 0;
+      final downloader = UpdateDownloader(
+        tempDirectory: dir,
+        httpClient: MockClient((_) async {
+          calls += 1;
+          return http.Response('x', 200);
+        }),
+      );
+      try {
+        for (final url in ['https://', 'http:', 'https://?a=1']) {
+          final result = await downloader.download(url);
+          expect(result.isSuccess, isFalse, reason: '无 host 的 URL 失败：$url');
+          expect(
+            result.when(onSuccess: (_) => '', onFailure: (m) => m),
+            contains('地址非法'),
+          );
+        }
+        expect(calls, 0, reason: 'host 校验在发送前拦截，未发起网络请求');
       } finally {
         await dir.delete(recursive: true);
       }

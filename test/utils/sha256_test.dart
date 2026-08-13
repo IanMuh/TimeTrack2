@@ -204,7 +204,9 @@ void main() {
       );
       // 首块数据前即出错（连接立即失败）——异常路径在空哈希状态也能正确关闭。
       final earlyFail = StreamController<List<int>>();
-      earlyFail.addError(const SocketException('connection refused'));
+      earlyFail
+        ..addError(const SocketException('connection refused'))
+        ..close(); // 级联 close（r16）：错误 + 完成语义明确，控制器资源不泄漏。
       await expectLater(
         sha256Stream(earlyFail.stream),
         throwsA(isA<SocketException>()),

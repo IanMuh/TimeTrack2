@@ -219,7 +219,13 @@ class UpdateManifestService {
       // **DB 异常容错（r14）**：更新检查期间数据库可能被关闭/约束异常——
       // 读失败回退 null（视为"未忽略"继续判定，不崩溃），与"恒返回可读
       // AppResult"契约一致。详细原因写日志。
-      stderr.writeln('[update] 读取本地状态失败：$e');
+      // **stderr 写自身保护（r16）**：stderr 已关闭/管道断开时 writeln 再抛
+      // 会击穿"读失败回退 null"契约——包一层防从 _readString 逃逸。
+      try {
+        stderr.writeln('[update] 读取本地状态失败：$e');
+      } catch (_) {
+        // 日志写入失败不影响回退结论。
+      }
       return null;
     }
   }
@@ -234,7 +240,12 @@ class UpdateManifestService {
     } catch (e) {
       // **写失败降级（r14）**：缓存清单版本失败不阻断更新流程——仅本次
       // 不缓存（下次检查仍会重新判断），防 DB 异常使 checkForUpdate 崩溃。
-      stderr.writeln('[update] 写入本地状态失败：$e');
+      // **stderr 写自身保护（r16）**：同上——日志写入失败不影响降级结论。
+      try {
+        stderr.writeln('[update] 写入本地状态失败：$e');
+      } catch (_) {
+        // 日志写入失败不影响降级结论。
+      }
     }
   }
 }

@@ -93,16 +93,36 @@ class WindowsInstaller {
   /// 穿越写入程序目录之外）；**空包（无任何文件）直接失败**（防 applyStaging
   /// 把程序目录清空成空壳）；staging 已存在则先删除（幂等）。返回 staging 路径。
   /// 失败路径清理 staging（防半解压残留被当作可安装包）。
+  /// staging 目录名校验（纯函数，可单测）：返回非法原因，null 表示合法。
+  ///
+  /// **r16 扩展（在 r15 基础上）**：除空串/路径分隔符外，`.` 与 `..` 同样危险
+  /// ——`'.'` 解析为 programDir 本身、`'..'` 解析为父目录，下方 staging
+  /// deleteSync(recursive) 会递归删除程序目录甚至其父目录（灾难性）；另按
+  /// Win32 创建目录时的**尾部空格/点号裁剪规范化**（CreateDirectory 规则）预先
+  /// 折叠判断：`'.. '`→`'..'`、`'. '`→`'.'`、`' '`→`''` 都会把解析目标折叠回
+  /// programDir 本身或其父目录。
+  static String? stagingNameError(String name) {
+    if (name.isEmpty) return 'staging 目录名配置非法（空）';
+    final normalized = name.trimRight();
+    if (normalized.isEmpty) return 'staging 目录名配置非法（裁剪后为空）';
+    if (normalized == '.' || normalized == '..') {
+      return 'staging 目录名配置非法（裁剪后为 `.`/`..`）';
+    }
+    if (name.contains('/') || name.contains(r'\')) {
+      return 'staging 目录名配置非法（含路径分隔符）';
+    }
+    return null;
+  }
+
   Future<AppResult<String>> prepareStaging(String zipPath) async {
-    // **staging 目录名运行时校验（r15）**：windowsStagingDirName 若被误改为
-    // 空串/含路径分隔符，`$programDir/` 会指向 programDir 本身——下方
-    // deleteSync(recursive) 会直接递归删除整个程序目录（灾难性）。防御性
-    // 校验（常量配置错误早失败）。
+    // **staging 目录名运行时校验（r15/r16）**：windowsStagingDirName 若被误改
+    // 为空串/`.`/`..`/含路径分隔符，`$programDir/$stagingName` 会指向
+    // programDir 本身或其父目录——下方 deleteSync(recursive) 会直接递归删除
+    // 整个程序目录（灾难性）。防御性校验（常量配置错误早失败）。
     final stagingName = UpdateConfig.windowsStagingDirName;
-    if (stagingName.isEmpty ||
-        stagingName.contains('/') ||
-        stagingName.contains(r'\')) {
-      return const AppFailure('staging 目录名配置非法（空或含路径分隔符）');
+    final nameError = stagingNameError(stagingName);
+    if (nameError != null) {
+      return AppFailure(nameError);
     }
     final staging = Directory('$programDir/$stagingName');
     try {
@@ -163,7 +183,6 @@ class WindowsInstaller {
           final out = File('${staging.path}/$name');
           out.createSync(recursive: true);
           out.writeAsBytesSync(content, flush: true);
-          fileCount += 1;
         }
       }
       if (fileCount == 0) {

@@ -190,10 +190,17 @@ class UpdateDownloader {
       // 目录下恶意预创建同名符号链接的 TOCTOU 攻击）
     );
     final uri = Uri.parse(url);
-    // **scheme 显式校验（r14）**：Uri.parse 对非 http(s)（file:///ftp:///相对）
-    // 宽松解析不抛——http.Request 构造或真实 IOClient 发送时抛 ArgumentError
-    //（Error 非 Exception，会逃逸破坏"恒返回 AppResult"契约）。此处显式拦截。
-    if (uri.scheme != 'http' && uri.scheme != 'https') {
+    // **scheme/host 显式校验（r14/r16）**：Uri.parse 对非 http(s)（file:///ftp:///
+    // 相对）宽松解析不抛——http.Request 构造或真实 IOClient 发送时抛
+    // ArgumentError（Error 非 Exception，会逃逸破坏"恒返回 AppResult"契约）。
+    // 另须校验 host：`Uri.parse('https://')`/`http:`（scheme-only）仍解析成功、
+    // 但 dart:io HttpClient.openUrl 对空 host 抛 ArgumentError 同样逃逸——与
+    // UpdateConfig.resolveManifestUrl 的既有校验保持一致（该函数已注明
+    // `https://` 等无 host 需额外校验）。此处显式拦截。
+    if ((uri.scheme != 'http' && uri.scheme != 'https') ||
+        !uri.isAbsolute ||
+        !uri.hasAuthority ||
+        uri.host.isEmpty) {
       throw const FormatException('仅支持 http/https');
     }
     final request = http.Request('GET', uri);
@@ -227,12 +234,17 @@ class UpdateDownloader {
           sink.add(chunk);
           received += chunk.length;
           shaBuilder.add(chunk);
-          // **onProgress 异常隔离（r14）**：UI 层回调抛错不应归因下载失败/
-          // 触发重试——只记录不中断。
+          // **onProgress 异常隔离（r14/r16）**：UI 层回调抛错不应归因下载失败/
+          // 触发重试——只记录不中断；stderr 写自身保护（已关闭/管道断开时
+          // writeln 再抛——包一层防逃逸，保"恒返回 AppResult"）。
           try {
             onProgress?.call(received, response.contentLength);
-          } catch (_) {
-            // 回调异常不影响下载。
+          } catch (e) {
+            try {
+              stderr.writeln('[update] 进度回调异常（忽略）：$e');
+            } catch (_) {
+              // 日志写入失败不影响下载。
+            }
           }
         },
       );

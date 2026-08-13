@@ -282,6 +282,27 @@ void main() {
       );
     });
 
+    test('非关闭 StateError 重新抛出（不包装成"已关闭"，r14/r16）', () async {
+      // 核心语义：仅 `_closed` 或消息匹配（'Client is already closed'）才归因
+      // "已关闭"——其它 StateError（编程错误）必须 rethrow，不能吞成误导性
+      // 可读失败（掩盖真实缺陷）。
+      final client = UpdateManifestService(
+        database: db,
+        currentVersion: '1.0.0',
+        manifestUrl: Uri.parse('https://x.example/update.json'),
+        httpClient: MockClient(
+          (_) async => throw StateError('programming bug'),
+        ),
+      );
+      // **核心断言**：checkForUpdate **抛出**非关闭 StateError（而非返回
+      // AppFailure）——rethrow 语义由 expectLater 锁定。
+      await expectLater(
+        client.checkForUpdate(),
+        throwsA(isA<StateError>()),
+        reason: '非关闭 StateError 重新抛出',
+      );
+    });
+
     test('close 后 checkForUpdate 返回可读失败且不发网络请求（r3，网络层归位）', () async {
       var hit = false;
       final client = UpdateManifestService(

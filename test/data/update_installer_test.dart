@@ -16,6 +16,35 @@ List<int> buildZip(Map<String, String> files) {
 
 void main() {
   group('WindowsInstaller', () {
+    test('staging 目录名校验（r16 纯函数）：空/`.`/`..`/分隔符/尾部空格裁剪变体拒绝', () {
+      // WindowsInstaller.stagingNameError 纯函数——防 `$programDir/<名>` 解析
+      // 到 programDir 本身（`.`/裁剪后 `.`）或其父目录（`..`）时下方
+      // deleteSync(recursive) 灾难性递归删除。
+      for (final evil in [
+        '',
+        ' ',
+        '.',
+        '..',
+        '. ',
+        '.. ',
+        'staging/x',
+        r'staging\x',
+      ]) {
+        expect(
+          WindowsInstaller.stagingNameError(evil),
+          isNotNull,
+          reason: 'staging 目录名非法（灾难性路径）拒绝：$evil',
+        );
+      }
+      for (final ok in ['staging', '.update-staging', ' update-staging ']) {
+        expect(
+          WindowsInstaller.stagingNameError(ok),
+          isNull,
+          reason: '合法 staging 目录名放行：$ok',
+        );
+      }
+    });
+
     test('zip 解压 staging：文件落位（zip-slip 防护放行合法路径）', () async {
       final root = await Directory.systemTemp.createTemp('win_stage');
       final program = Directory('${root.path}/program')..createSync();
@@ -317,6 +346,51 @@ void main() {
       }
     });
 
+    test('zip bomb 防护：条目数上限边界（恰好等于上限放行、超限拒绝，r16）', () async {
+      // r16 修正：fileCount 曾双重自增导致实际生效上限约为配置值一半、恰好
+      // 含 maxEntryCount 个文件的合法包被误拒——现按实际文件数计数。
+      final root = await Directory.systemTemp.createTemp('win_count');
+      final program = Directory('${root.path}/program')..createSync();
+      final data = Directory('${root.path}/data')..createSync();
+      try {
+        // 恰好 2 个文件 == maxEntryCount(2) → 放行（双重自增时会被误拒为超限）。
+        final atLimit = Archive();
+        atLimit.addFile(ArchiveFile.string('a.txt', 'a'));
+        atLimit.addFile(ArchiveFile.string('b.txt', 'b'));
+        final okPath = '${root.path}/ok.zip';
+        File(okPath).writeAsBytesSync(ZipEncoder().encode(atLimit));
+        expect(
+          (await WindowsInstaller(
+            programDir: program.path,
+            dataDir: data.path,
+            maxEntryCount: 2,
+          ).prepareStaging(okPath))
+              .requireValue(),
+          contains('${program.path}/'),
+          reason: '恰好等于条目数上限的合法包放行',
+        );
+        // 3 个文件 > maxEntryCount(2) → 拒绝。
+        final overLimit = Archive();
+        for (var i = 0; i < 3; i++) {
+          overLimit.addFile(ArchiveFile.string('f$i.txt', '$i'));
+        }
+        final noPath = '${root.path}/no.zip';
+        File(noPath).writeAsBytesSync(ZipEncoder().encode(overLimit));
+        expect(
+          (await WindowsInstaller(
+            programDir: program.path,
+            dataDir: data.path,
+            maxEntryCount: 2,
+          ).prepareStaging(noPath))
+              .isSuccess,
+          isFalse,
+          reason: '超过条目数上限拒绝',
+        );
+      } finally {
+        await root.delete(recursive: true);
+      }
+    });
+
     test('applyStaging：备份 → 清空 → 移入 → 删备份（安装成功）', () async {
       final root = await Directory.systemTemp.createTemp('win_apply');
       final program = Directory('${root.path}/program')..createSync();
@@ -532,6 +606,24 @@ void main() {
           'content://other.provider/cache/app.apk',
         ),
         throwsArgumentError,
+      );
+      // **r16：percent-decode 后含 `/` 的段拒绝（r14 修复的死角）**——pathSegments
+      // 将 `%2F` 解码为 `/` 但不重新分段：`..%2Ffoo` 成为单段 `../foo`，裸 `..`
+      // 检查放行、FileProvider 却 `new File(cacheDir, '../foo')` 逃逸到 cache 根
+      // 目录之外。现按解码后段内含分隔符拦截。
+      expect(
+        () => installer.installIntentFor(
+          'content://com.github.ianmuh.timetrack2.fileprovider/cache/..%2Ffoo.apk',
+        ),
+        throwsArgumentError,
+        reason: '`..%2F` 编码穿越段拒绝',
+      );
+      expect(
+        () => installer.installIntentFor(
+          'content://com.github.ianmuh.timetrack2.fileprovider/cache/%2E%2E%2Ffoo.apk',
+        ),
+        throwsArgumentError,
+        reason: '`%2E%2E%2F` 编码穿越段拒绝',
       );
     });
 

@@ -66,12 +66,15 @@ class AndroidInstaller {
   /// `Intent(ACTION_VIEW).setDataAndType(contentUri, mime).addFlags(flags)`
   /// 并 startActivity。**dataUri 参与结果**（防调用方误传 URI）、**携带 MIME**
   ///（系统才能解析到安装器 Activity）。
-  /// **authority + 路径校验（r9/r14）**：仅接受本应用 FileProvider 的
+  /// **authority + 路径校验（r9/r14/r16）**：仅接受本应用 FileProvider 的
   /// `content://<authority>/cache/<单文件段>` URI——防误传 `file://` 或其它
   /// provider 的 URI，也防**同一 authority 下任意 path**（如未来 file_paths.xml
   /// 追加 files-path 映射、`%2E%2E` 编码穿越段）配合 GRANT 标志把 cache 根
-  /// 目录之外的文件暴露给系统安装器。`pathSegments` 已做 percent-decode，
-  /// `%2E%2E` 解码为 `..` 段可一并拦截。
+  /// 目录之外的文件暴露给系统安装器。`pathSegments` 已做 percent-decode：
+  /// `%2E%2E` 解码为 `..` 段、**`%2F` 解码为 `/` 但不触发重新分段**——
+  /// `cache/..%2Ffoo` 得到单段 `../foo`，裸 `..` 检查会放行而 FileProvider 的
+  /// `new File(cacheDir, '../foo')` 把文件定位到 cache 根目录之外（r16）——
+  /// 须按"解码后段内含 `/`"一并拒绝。
   ({String action, String dataUri, String mimeType, int flags})
   installIntentFor(String contentUri) {
     final uri = Uri.tryParse(contentUri);
@@ -83,7 +86,10 @@ class AndroidInstaller {
         segments[0] != 'cache' ||
         segments[1].isEmpty ||
         segments[1] == '.' ||
-        segments[1] == '..') {
+        segments[1] == '..' ||
+        // **r16**：percent-decode 后段内含 `/`（`%2F` 绕过，FileProvider
+        // new File(cacheDir, '../foo') 逃逸到 cache 根目录之外）。
+        segments[1].contains('/')) {
       throw ArgumentError.value(
         contentUri,
         'contentUri',
