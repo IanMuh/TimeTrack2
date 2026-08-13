@@ -109,16 +109,25 @@ class AndroidInstaller {
     );
   }
 
-  /// **单一安全入口（r19/r20）**：内部依次 [ensureApkValid] → 父目录校验 →
+  /// **单一安全入口（r19/r20/r21）**：内部依次 [ensureApkValid] → 父目录校验 →
   /// [apkContentUri] → [installIntentFor]，把"文件校验→cache 根内约束→URI
   /// 构造→Intent"固化为一条不可拆分路径，杜绝调用方绕过校验直接拿
   /// [installIntentFor] 构造 GRANT 意图暴露 cache 根之外的文件。任一环失败返回
   /// 可读原因（不产生部分结果）。
   ///
-  /// **[cacheRoot]（r20 新增）**：APK 必须位于应用 cache 根目录内——产出的
-  /// `content://…/cache/<名>` URI 指向 FileProvider 的 cache 根，若源文件在
-  /// 别处则"校验的文件 ≠ GRANT 暴露/安装的文件"（核心不变量被破坏）。父目录
-  /// 按规范化绝对路径比较（防相对路径/尾分隔符差异绕过）。
+  /// **[cacheRoot]（r20/r21 修正）**：APK 必须**直接**位于应用 cache 根目录内
+  ///（父目录与 cacheRoot **严格相等**，非前缀匹配）——产出的
+  /// `content://…/cache/<名>` URI 只取单段文件名、FileProvider 解析为
+  /// `$cacheRoot/<名>`；若允许子目录（`$cacheRoot/sub/app.apk`）会通过校验但
+  /// URI 指向 `$cacheRoot/app.apk`（根下同名文件被误装/找不到文件），破坏
+  /// "校验的文件 == GRANT 暴露/安装的文件"核心不变量。父目录按规范化绝对路径
+  /// 比较（防相对路径/尾分隔符差异绕过）。
+  ///
+  /// **词法级约束边界（r21 注明）**：cacheRoot 由调用方传入、校验为词法级
+  ///（absolute + 分隔符替换），**未解析符号链接**——调用方传真实 cache 根
+  ///（平台惯例：PathProvider 等）；cache 根内指向外部的链接子目录逃逸属
+  /// ensureApkValid 已知边界（只查末尾分量），最终兜底在阶段 4 [tryInstallApk]
+  /// 平台守卫级实现。
   AppResult<({String action, String dataUri, String mimeType, int flags})>
   installValidatedApk(String apkFilePath, {required String cacheRoot}) {
     final check = ensureApkValid(apkFilePath);
@@ -129,7 +138,7 @@ class AndroidInstaller {
       apkFilePath,
     ).parent.absolute.path.replaceAll(r'\', '/');
     final root = Directory(cacheRoot).absolute.path.replaceAll(r'\', '/');
-    if (fileParent != root && !fileParent.startsWith('$root/')) {
+    if (fileParent != root) {
       return const AppFailure('安装文件必须位于应用 cache 根目录内');
     }
     final contentUri = apkContentUri(apkFileName(apkFilePath));

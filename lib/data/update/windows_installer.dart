@@ -329,7 +329,10 @@ class WindowsInstaller {
                 .where(
                   (e) =>
                       e is Directory &&
-                      e.path.startsWith('$programDir/.backup-'),
+                      // **用 _basename 判前缀（r21 修正）**：e.path 在 Windows 用
+                      // 反斜杠、startsWith('$programDir/.backup-')（正斜杠）不匹配
+                      // ——stale 恒为空、清理失效。
+                      _basename(e.path).startsWith('.backup-'),
                 )
                 .where((e) => e.path != backupDir.path)
                 .toList()

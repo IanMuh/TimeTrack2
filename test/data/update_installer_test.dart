@@ -495,6 +495,47 @@ void main() {
       }
     });
 
+    test('applyStaging 陈旧备份清理（r21）：仅保留最新备份', () async {
+      // r21 回归锁定：备份排序原用 uri.pathSegments.last（Directory URI 尾斜杠
+      // 下恒空串、sort 全 0、skip(1) 可能删掉最新备份）——改 _basename 按名称
+      // 降序后须只保留时间戳最新的一个。
+      final root = await Directory.systemTemp.createTemp('win_stale');
+      final program = Directory('${root.path}/program')..createSync();
+      final data = Directory('${root.path}/data')..createSync();
+      File('${program.path}/app.exe').writeAsStringSync('old');
+      final staging = Directory('${program.path}/staging')..createSync();
+      File('${staging.path}/app.exe').writeAsStringSync('new');
+      // 预置两个陈旧备份（时间戳不同；.backup- 前缀被备份/清空排除）。
+      Directory('${program.path}/.backup-1000').createSync();
+      File('${program.path}/.backup-1000/stale.bin').writeAsStringSync('s');
+      Directory('${program.path}/.backup-2000').createSync();
+      File('${program.path}/.backup-2000/stale2.bin').writeAsStringSync('s');
+      try {
+        final installer = WindowsInstaller(
+          programDir: program.path,
+          dataDir: data.path,
+        );
+        final result = await installer.applyStaging(staging.path);
+        expect(result.isSuccess, isTrue);
+        // 仅最新（.backup-2000）保留，.backup-1000 被清理（r21 排序修正——
+        // 旧 bug 会按任意顺序 skip(1) 误删 2000）。
+        expect(
+          Directory('${program.path}/.backup-2000').existsSync(),
+          isTrue,
+          reason: '最新备份保留（供短窗口手动回滚）',
+        );
+        expect(
+          Directory('${program.path}/.backup-1000').existsSync(),
+          isFalse,
+          reason: '陈旧备份清理',
+        );
+        // 新安装成功不受影响。
+        expect(File('${program.path}/app.exe').readAsStringSync(), 'new');
+      } finally {
+        await root.delete(recursive: true);
+      }
+    });
+
     test('applyStaging：备份 → 清空 → 移入 → 删备份（安装成功）', () async {
       final root = await Directory.systemTemp.createTemp('win_apply');
       final program = Directory('${root.path}/program')..createSync();
@@ -785,6 +826,21 @@ void main() {
           );
         } finally {
           await outside.delete(recursive: true);
+        }
+
+        // **根内子目录文件拒绝（r21）**：URI 只取单段文件名、FileProvider 解析
+        // 为 `$cacheRoot/<名>`——子目录文件会通过前缀校验但 URI 指向根下同名
+        // 文件（误装/找不到），破坏核心不变量。父目录须与 cacheRoot 严格相等。
+        final sub = Directory('${dir.path}/sub')..createSync();
+        try {
+          File('${sub.path}/app.apk').writeAsBytesSync([1, 2, 3]);
+          final inSub = installer.installValidatedApk(
+            '${sub.path}/app.apk',
+            cacheRoot: dir.path,
+          );
+          expect(inSub.isSuccess, isFalse, reason: '根内子目录文件拒绝');
+        } finally {
+          await sub.delete(recursive: true);
         }
       } finally {
         await dir.delete(recursive: true);

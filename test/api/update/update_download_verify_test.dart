@@ -214,6 +214,13 @@ void main() {
         );
         final resultB = await downloaderB.download('https://x.example/app.zip');
         expect(resultB.isSuccess, isFalse, reason: '分块流超限失败');
+        // **场景 B 同为 DownloadSizeExceededException 路径（r21）**：流式检查
+        // 独立代码路径——文案同样须精确（防回归为 FormatException"地址非法"）。
+        expect(
+          resultB.when(onSuccess: (_) => '', onFailure: (m) => m),
+          contains('体积超上限'),
+          reason: '分块流超限文案精确（非"地址非法"）',
+        );
         expect(dir.listSync(), isEmpty, reason: '超限中断后半成品已清理（无残留）');
       } finally {
         await dir.delete(recursive: true);
@@ -542,20 +549,29 @@ class _OversizeChunkedHttpClient extends http.BaseClient {
   }
 }
 
-/// 恰好等于上限 client（r20）：contentLength 与单块均恰为 maxCompressedBytes——
-/// 上限语义"严格大于才拒绝"，等值必须成功。
+/// 恰好等于上限 client（r20/r21）：contentLength 与总字节均恰为
+/// maxCompressedBytes——上限语义"严格大于才拒绝"，等值必须成功。
+/// **惰性逐块生成（r21）**：单次 `List<int>.filled(200M)` 在 64 位 VM 按
+/// 8B/int 约 1.6GB、StreamController 订阅前 add 全量缓冲——测试 OOM 风险；
+/// 仿照 _OversizeChunkedHttpClient 按 1MB 惰性分块（contentLength 仍填总数）。
 class _AtLimitClient extends http.BaseClient {
   _AtLimitClient(this.bytes);
 
   final int bytes;
 
+  Stream<List<int>> _chunks() async* {
+    var remaining = bytes;
+    while (remaining > 0) {
+      final size = remaining < 1024 * 1024 ? remaining : 1024 * 1024;
+      yield List<int>.filled(size, 7);
+      remaining -= size;
+    }
+  }
+
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
-    final controller = StreamController<List<int>>();
-    controller.add(List<int>.filled(bytes, 7));
-    controller.close();
     return http.StreamedResponse(
-      controller.stream,
+      _chunks(),
       200,
       contentLength: bytes,
       headers: {'content-type': 'application/octet-stream'},
