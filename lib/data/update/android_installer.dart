@@ -11,7 +11,7 @@
 /// - 未授权来源安装引导（`ACTION_MANAGE_UNKNOWN_APP_SOURCES`）。
 library;
 
-import 'dart:io' show File, FileSystemException;
+import 'dart:io' show File, FileSystemEntityType, FileSystemException;
 
 import '../../utils/result.dart';
 
@@ -37,11 +37,18 @@ class AndroidInstaller {
   /// FileProvider 路径段固定为 `cache`（与阶段 4 file_paths.xml 的 cache-path
   /// 映射一致）。
   String apkContentUri(String cacheDirPath, String apkFileName) {
-    if (apkFileName.contains('/') || apkFileName.contains(r'\')) {
+    // **文件名显式拒绝（r2）**：Uri.encodeComponent 遵循 RFC 3986，`.` 属
+    // 未保留字符不编码——裸 `..`/`.` 会产生带穿越段/当前段的 URI（FileProvider
+    // 按路径段拼接会解析到 cache 根上级）。空串/`.`/`..`/路径分隔符一律拒绝。
+    if (apkFileName.isEmpty ||
+        apkFileName == '.' ||
+        apkFileName == '..' ||
+        apkFileName.contains('/') ||
+        apkFileName.contains(r'\')) {
       throw ArgumentError.value(
         apkFileName,
         'apkFileName',
-        '文件名不得含路径分隔符（应仅为文件名）',
+        '文件名不合法（不能为空、`.`、`..` 或含路径分隔符）',
       );
     }
     final encoded = Uri.encodeComponent(apkFileName);
@@ -64,15 +71,16 @@ class AndroidInstaller {
     );
   }
 
-  /// 校验 APK 文件存在且非空（安装前置守卫；失败返回可读原因）。
-  /// FileSystemException（并发删除/无权限/路径为目录）捕获转 AppFailure。
+  /// 校验 APK 文件存在、为常规文件且非空（安装前置守卫；失败返回可读原因）。
+  /// FileSystemException（并发删除/无权限）与目录/符号链接（POSIX 上
+  /// File.existsSync 对目录返回 true、lengthSync 返回 inode 大小）均转失败。
   AppResult<void> ensureApkValid(String filePath) {
     try {
-      final file = File(filePath);
-      if (!file.existsSync()) {
-        return const AppFailure('安装文件不存在');
+      final stat = File(filePath).statSync();
+      if (stat.type != FileSystemEntityType.file) {
+        return const AppFailure('安装文件路径不是常规文件');
       }
-      if (file.lengthSync() == 0) {
+      if (stat.size == 0) {
         return const AppFailure('安装文件为空');
       }
       return const AppSuccess(null);

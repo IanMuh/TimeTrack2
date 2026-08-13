@@ -75,6 +75,32 @@ void main() {
       // 忽略版本低于远端新版本 → 仍提示
       expect((await service('1.0.0').evaluate(manifest('1.2.0'))).requireValue().available, isTrue);
     });
+
+    test('远端版本数字段超 int 范围 → 可读失败（不崩溃，r2）', () async {
+      // UpdateManifest.fromMap 正则只校验格式不查 int 范围——超大数字段会
+      // 在 AppVersion.parse 抛 FormatException，须转 AppFailure。
+      final result = await service('1.0.0').evaluate(
+        manifest('9999999999999999999999.0.0'),
+      );
+      expect(result.isSuccess, isFalse, reason: '数字段超范围返回失败');
+      expect(
+        result.when(onSuccess: (_) => '', onFailure: (m) => m),
+        contains('版本号'),
+      );
+    });
+
+    test('忽略版本脏数据（非 SemVer）→ 不崩溃、继续走更新判定（r2）', () async {
+      await db.into(db.appMetadata).insertOnConflictUpdate(
+            AppMetadataCompanion.insert(
+              key: 'ignored_update_version',
+              value: 'not-semver', // 本地脏数据
+            ),
+          );
+      final result =
+          (await service('1.0.0').evaluate(manifest('1.1.0'))).requireValue();
+      expect(result.available, isTrue,
+          reason: '脏忽略版本视为未忽略，正常提示更新');
+    });
   });
 
   group('UpdateManifestService 网络层（MockClient）', () {

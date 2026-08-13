@@ -109,9 +109,36 @@ void main() {
           final result = await installer.prepareStaging(zipPath);
           expect(result.isSuccess, isFalse,
               reason: '非法路径条目拒绝：$evil');
+          // 失败后 staging 已清理、program 目录无残留（穿越落点在
+          // program/evil.txt 等——直接断言 program 目录干净最可靠）。
+          expect(program.listSync(), isEmpty,
+              reason: '$evil 失败后无残留文件写出');
         }
-        // 无任何穿越文件写出 staging 之外
-        expect(File('${root.path}/evil.txt').existsSync(), isFalse);
+      } finally {
+        await root.delete(recursive: true);
+      }
+    });
+
+    test('混合包：合法条目先解压 + 恶意条目 → 整体失败且已解压文件被清理（r2）', () async {
+      final root = await Directory.systemTemp.createTemp('win_mixed');
+      final program = Directory('${root.path}/program')..createSync();
+      final data = Directory('${root.path}/data')..createSync();
+      final zipPath = '${root.path}/mixed.zip';
+      File(zipPath).writeAsBytesSync(buildZip({
+        'ok.txt': 'ok',
+        r'..\evil.txt': 'evil', // 合法条目后的恶意条目
+      }));
+      try {
+        final installer = WindowsInstaller(
+          programDir: program.path,
+          dataDir: data.path,
+        );
+        final result = await installer.prepareStaging(zipPath);
+        expect(result.isSuccess, isFalse, reason: '混合包整体拒绝');
+        // 已解压的 ok.txt 不残留（失败清理）
+        expect(Directory('${program.path}/staging').existsSync(), isFalse,
+            reason: '失败后 staging 已清理（含已解压合法文件）');
+        expect(program.listSync(), isEmpty);
       } finally {
         await root.delete(recursive: true);
       }
@@ -227,14 +254,19 @@ void main() {
       expect(intent.flags, 0x00000001, reason: 'FLAG_GRANT_READ_URI_PERMISSION');
     });
 
-    test('content URI 文件名编码（r2）：特殊字符/路径穿越被编码或拒绝', () {
+    test('content URI 文件名编码（r2）：特殊字符编码 / `..` 拒绝', () {
       const installer = AndroidInstaller();
-      // 空格/`#`/`?` 编码（防 URI 解析错误）
+      // 空格/`#`/`?`/`%` 编码（防 URI 解析错误）
       expect(
         installer.apkContentUri('/cache', 'my app v1.2.apk'),
         'content://com.example.timetrack2.fileprovider/cache/my%20app%20v1.2.apk',
       );
-      // 路径分隔符拒绝（防把 cache 根目录之外暴露给外部安装器）
+      expect(
+        installer.apkContentUri('/cache', 'my#app?100%.apk'),
+        'content://com.example.timetrack2.fileprovider/cache/my%23app%3F100%25.apk',
+      );
+      // 路径分隔符 / 裸 `..`/`.`/空串拒绝（Uri.encodeComponent 不编码 `.`——
+      // 裸 `..` 会产生带穿越段的 URI，须显式拒绝）
       expect(
         () => installer.apkContentUri('/cache', '../evil.apk'),
         throwsArgumentError,
@@ -244,9 +276,22 @@ void main() {
         () => installer.apkContentUri('/cache', r'..\evil.apk'),
         throwsArgumentError,
       );
+      expect(
+        () => installer.apkContentUri('/cache', '..'),
+        throwsArgumentError,
+        reason: '裸 .. 拒绝（防路径穿越段 URI）',
+      );
+      expect(
+        () => installer.apkContentUri('/cache', '.'),
+        throwsArgumentError,
+      );
+      expect(
+        () => installer.apkContentUri('/cache', ''),
+        throwsArgumentError,
+      );
     });
 
-    test('ensureApkValid：存在非空通过 / 缺失失败 / 空文件失败', () async {
+    test('ensureApkValid：存在非空通过 / 缺失失败 / 空文件失败 / 目录失败（r2）', () async {
       final dir = await Directory.systemTemp.createTemp('android_apk');
       final installer = const AndroidInstaller();
       try {
@@ -255,6 +300,11 @@ void main() {
         File('${dir.path}/empty.apk').writeAsStringSync('');
         expect(installer.ensureApkValid('${dir.path}/empty.apk').isSuccess, isFalse,
             reason: '空文件失败');
+        // **目录路径（r2）**：POSIX 上 File.existsSync 对目录返回 true、lengthSync
+        // 返回 inode 大小——须按 stat.type 显式拒绝（防目录被当作有效 APK）。
+        Directory('${dir.path}/adir').createSync();
+        expect(installer.ensureApkValid('${dir.path}/adir').isSuccess, isFalse,
+            reason: '目录路径失败（非常规文件）');
         File('${dir.path}/real.apk').writeAsBytesSync([1, 2, 3]);
         expect(installer.ensureApkValid('${dir.path}/real.apk').isSuccess, isTrue,
             reason: '非空通过');

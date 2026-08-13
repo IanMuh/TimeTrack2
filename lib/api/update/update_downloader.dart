@@ -123,6 +123,9 @@ class UpdateDownloader {
     // **4xx 不重试**（永久性错误）：抛专用异常，download() 直接失败带状态码。
     // 5xx 也先不重试（本模块传输层保守——调用方编排层可整体重试）。
     if (response.statusCode != 200) {
+      // **消费/取消响应体（r2）**：不读取则 dart:io 连接不归还连接池——反复
+      // 4xx/5xx 会堆积占用连接（unawaited：drain 异步进行，不阻塞抛异常）。
+      unawaited(response.stream.drain<void>());
       throw HttpStatusException(response.statusCode);
     }
     final sink = file.openWrite();

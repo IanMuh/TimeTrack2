@@ -65,6 +65,7 @@ Future<String> sha256Stream(Stream<List<int>> stream) async {
 class Sha256Sink {
   final _collector = _DigestCollector();
   late final ByteConversionSink _converter;
+  bool _closed = false;
 
   Sha256Sink() {
     _converter = crypto.sha256.startChunkedConversion(_collector);
@@ -73,9 +74,14 @@ class Sha256Sink {
   /// 累计一块数据。
   void add(List<int> chunk) => _converter.add(chunk);
 
-  /// 结束累积并返回 hex 小写摘要（幂等：重复调用返回同一值）。
+  /// 结束累积并返回 hex 小写摘要。**幂等（r2）**：显式 `_closed` 标志保证
+  /// 只 close 一次——不依赖底层 sink 对重复 close 的处理（Sink.close 契约是
+  /// 恰好一次）。
   String digest() {
-    _converter.close();
+    if (!_closed) {
+      _converter.close();
+      _closed = true;
+    }
     return _collector.digest!.toString();
   }
 }

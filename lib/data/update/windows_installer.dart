@@ -99,22 +99,29 @@ class WindowsInstaller {
   ///
   /// 调用方（阶段 3/4 启动逻辑）应**先确认 exe 未被锁定**（本文件不持有 exe）；
   /// [applyStaging] 内部做原子性：备份目录先建，任何步骤失败恢复备份。
-  /// **清空前校验 staging 存在且非空**（防空包把程序目录清空成不可用状态）。
+  /// **清空前校验 staging 含至少一个普通文件**（递归）——防仅含空子目录的
+  /// staging 通过守卫后把程序目录清成空壳。
   Future<AppResult<void>> applyStaging(String stagingPath) async {
-    // 前置守卫：staging 必须存在且非空（prepareStaging 已拒空包，此处
-    // 双保险——调用方可能绕过 prepareStaging 直接传路径）。
     final staging = Directory(stagingPath);
-    if (!staging.existsSync() ||
-        staging.listSync().isEmpty) {
-      return const AppFailure('安装暂存目录缺失或为空，已中止（未改动程序目录）');
-    }
+    // backupDir 提到方法作用域（catch 回滚分支也需引用）。
     final backupDir = Directory('$programDir/.backup-${DateTime.now().millisecondsSinceEpoch}');
     try {
+      // 前置守卫：staging 必须存在且递归含至少一个普通文件（prepareStaging
+      // 已拒空包，此处双保险——调用方可能绕过 prepareStaging 直接传路径；
+      // IO 异常（staging 不可读）转 AppFailure 而非裸抛）。
+      if (!staging.existsSync() || !_containsRegularFile(staging)) {
+        return const AppFailure('安装暂存目录缺失或无文件，已中止（未改动程序目录）');
+      }
       // 1. 备份当前程序目录（不含 staging 与备份自身）。
       if (Directory(programDir).existsSync()) {
         _copyDirectory(Directory(programDir), backupDir, exclude: const {
           UpdateConfig.windowsStagingDirName,
         });
+      }
+      // **备份完成确认（r2）**：备份创建失败（文件被占用/只读）时程序目录
+      // 仍完好——**绝不执行清空**（否则无备份可恢复、程序目录被清成空壳）。
+      if (!backupDir.existsSync() || backupDir.listSync().isEmpty) {
+        return const AppFailure('创建备份失败，已中止（程序目录未改动）');
       }
       // 2. 清空程序目录（保留 staging/备份）。
       _clearProgramDir();
@@ -123,8 +130,8 @@ class WindowsInstaller {
         entry.renameSync('$programDir/${_basename(entry.path)}');
       }
       staging.deleteSync(recursive: true);
-      // 4. 删除备份（**best-effort，r1**）：备份中文件被占用/杀毒扫描时删除
-      // 失败——安装已成功，备份删除失败不改变结果（只留备份目录待手动清理），
+      // 4. 删除备份（**best-effort**）：备份中文件被占用/杀毒扫描时删除失败
+      // ——安装已成功，备份删除失败不改变结果（只留备份目录待手动清理），
       // 绝不能因此进入回滚把刚装好的新文件清掉。
       try {
         if (backupDir.existsSync()) {
@@ -135,12 +142,16 @@ class WindowsInstaller {
       }
       return const AppSuccess(null);
     } catch (e) {
-      // **失败回滚（r1 修正）**：清空与恢复必须**各自独立尝试**——清空失败
-      //（新文件被占用）不能阻止恢复备份。备份目录保留供手动恢复（不掩盖
-      // 原始错误，也不误导为"已回滚"）。
+      // **失败回滚（r2 修正）**：清空与恢复必须**各自独立 try**——清空失败
+      //（新文件被占用）不能阻止恢复备份。回滚自身失败时保留备份目录并明确
+      // 告知（不误导为"已回滚"）。
       var rollbackOk = false;
       try {
         _clearProgramDir();
+      } catch (_) {
+        // 清空失败：继续尝试恢复（备份可能仍有内容可救）。
+      }
+      try {
         if (backupDir.existsSync()) {
           for (final entry in backupDir.listSync()) {
             entry.renameSync('$programDir/${_basename(entry.path)}');
@@ -148,7 +159,7 @@ class WindowsInstaller {
           rollbackOk = true;
         }
       } catch (_) {
-        // 清空/恢复失败：备份目录仍在，供手动恢复。
+        // 恢复失败：备份目录仍在，供手动恢复。
       }
       if (rollbackOk) {
         return AppFailure('安装更新失败（已回滚）：$e');
@@ -157,6 +168,15 @@ class WindowsInstaller {
         '安装更新失败，且回滚未完成（备份保留在 $backupDir，请手动恢复）：$e',
       );
     }
+  }
+
+  /// 目录是否**递归含至少一个普通文件**（防仅含空子目录的 staging 通过守卫）。
+  static bool _containsRegularFile(Directory dir) {
+    for (final entry in dir.listSync()) {
+      if (entry is File) return true;
+      if (entry is Directory && _containsRegularFile(entry)) return true;
+    }
+    return false;
   }
 
   /// 路径穿越判定：绝对路径 / 盘符路径（Windows）/ 含 `..` 段或前导空段的

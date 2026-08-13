@@ -166,8 +166,12 @@ void main() {
         throwsA(isA<StateError>()),
         reason: '中途错误向上传播',
       );
-      // 错误后仍可用（converter 关闭不泄漏）：新流正常计算。
-      expect(await sha256Stream(Stream.value('abc'.codeUnits)), isNotEmpty);
+      // 错误后仍可用（converter 关闭不泄漏）：新流哈希与已知向量精确一致。
+      expect(
+        await sha256Stream(Stream.value('abc'.codeUnits)),
+        'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
+        reason: '错误后新流哈希仍与已知向量一致',
+      );
     });
   });
 }

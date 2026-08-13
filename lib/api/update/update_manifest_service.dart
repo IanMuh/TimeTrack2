@@ -70,15 +70,23 @@ class UpdateManifestService {
   final Uri _manifestUrl;
   final AppVersion _current;
 
+  /// 是否已 close（close 后 checkForUpdate 返回可读失败，防 StateError 逃逸）。
+  bool _closed = false;
+
   /// 释放自建 http client（注入对象由调用方负责生命周期）。
   void close() {
+    if (_closed) return;
+    _closed = true;
     if (_ownsHttp) {
       _http.close();
     }
   }
 
-  /// 检查更新；失败返回可读原因（网络/清单损坏）。
+  /// 检查更新；失败返回可读原因（网络/清单损坏/已关闭）。
   Future<AppResult<UpdateCheckResult>> checkForUpdate() async {
+    if (_closed) {
+      return const AppFailure('更新服务已关闭，请重新创建');
+    }
     final http.Response response;
     try {
       response = await _http
