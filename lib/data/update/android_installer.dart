@@ -66,16 +66,28 @@ class AndroidInstaller {
   /// `Intent(ACTION_VIEW).setDataAndType(contentUri, mime).addFlags(flags)`
   /// 并 startActivity。**dataUri 参与结果**（防调用方误传 URI）、**携带 MIME**
   ///（系统才能解析到安装器 Activity）。
-  /// **authority 校验（r9）**：仅接受本应用 FileProvider 的 content:// URI——
-  /// 防误传 `file://` 或其它 provider 的 URI 时，配合 GRANT 标志向系统安装器
-  /// 授予对非预期文件的读取权限。
+  /// **authority + 路径校验（r9/r14）**：仅接受本应用 FileProvider 的
+  /// `content://<authority>/cache/<单文件段>` URI——防误传 `file://` 或其它
+  /// provider 的 URI，也防**同一 authority 下任意 path**（如未来 file_paths.xml
+  /// 追加 files-path 映射、`%2E%2E` 编码穿越段）配合 GRANT 标志把 cache 根
+  /// 目录之外的文件暴露给系统安装器。`pathSegments` 已做 percent-decode，
+  /// `%2E%2E` 解码为 `..` 段可一并拦截。
   ({String action, String dataUri, String mimeType, int flags})
   installIntentFor(String contentUri) {
-    if (!contentUri.startsWith('content://$providerAuthority/')) {
+    final uri = Uri.tryParse(contentUri);
+    final segments = uri == null ? const <String>[] : uri.pathSegments;
+    if (uri == null ||
+        uri.scheme != 'content' ||
+        uri.authority != providerAuthority ||
+        segments.length != 2 ||
+        segments[0] != 'cache' ||
+        segments[1].isEmpty ||
+        segments[1] == '.' ||
+        segments[1] == '..') {
       throw ArgumentError.value(
         contentUri,
         'contentUri',
-        '必须是本应用 FileProvider 的 content:// URI',
+        '必须是本应用 FileProvider cache 根目录下的 content:// URI',
       );
     }
     return (

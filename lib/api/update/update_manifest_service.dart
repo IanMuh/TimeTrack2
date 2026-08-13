@@ -13,7 +13,7 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show SocketException;
+import 'dart:io' show SocketException, stderr;
 
 import 'package:http/http.dart' as http;
 
@@ -111,10 +111,15 @@ class UpdateManifestService {
     } on http.ClientException {
       if (_closed) return const AppFailure('更新服务已关闭，请重新创建');
       return const AppFailure('网络不可用，请稍后重试');
-    } on StateError {
-      // 自建 client 在请求期间被 close 强关时可能抛 StateError('Client is
-      // already closed')——归因"已关闭"而非裸逃逸崩溃。
-      return const AppFailure('更新服务已关闭，请重新创建');
+    } on StateError catch (e) {
+      // **仅当 _closed 或消息匹配时才归因"已关闭"（r14）**：自建 client 在
+      // 请求期间被 close 强关时可能抛 StateError('Client is already closed')；
+      // 其它 StateError（编程错误）不应被包装成误导性关闭文案——与下载器
+      // "Error 不吞"的取舍一致，非关闭 StateError 重新抛出交全局处理。
+      if (_closed || e.message.contains('already closed')) {
+        return const AppFailure('更新服务已关闭，请重新创建');
+      }
+      rethrow;
     }
     if (response.statusCode != 200) {
       return AppFailure('更新清单获取失败（${response.statusCode}）');
@@ -205,17 +210,31 @@ class UpdateManifestService {
   );
 
   Future<String?> _readString(String key) async {
-    final query = database.select(database.appMetadata)
-      ..where((t) => t.key.equals(key));
-    final row = await query.getSingleOrNull();
-    return row?.value;
+    try {
+      final query = database.select(database.appMetadata)
+        ..where((t) => t.key.equals(key));
+      final row = await query.getSingleOrNull();
+      return row?.value;
+    } catch (e) {
+      // **DB 异常容错（r14）**：更新检查期间数据库可能被关闭/约束异常——
+      // 读失败回退 null（视为"未忽略"继续判定，不崩溃），与"恒返回可读
+      // AppResult"契约一致。详细原因写日志。
+      stderr.writeln('[update] 读取本地状态失败：$e');
+      return null;
+    }
   }
 
   Future<void> _writeString(String key, String value) async {
-    await database
-        .into(database.appMetadata)
-        .insertOnConflictUpdate(
-          AppMetadataCompanion.insert(key: key, value: value),
-        );
+    try {
+      await database
+          .into(database.appMetadata)
+          .insertOnConflictUpdate(
+            AppMetadataCompanion.insert(key: key, value: value),
+          );
+    } catch (e) {
+      // **写失败降级（r14）**：缓存清单版本失败不阻断更新流程——仅本次
+      // 不缓存（下次检查仍会重新判断），防 DB 异常使 checkForUpdate 崩溃。
+      stderr.writeln('[update] 写入本地状态失败：$e');
+    }
   }
 }

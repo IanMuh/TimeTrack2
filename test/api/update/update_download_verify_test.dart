@@ -212,6 +212,26 @@ void main() {
       }
     });
 
+    test('非 http(s) scheme（file://）→ 可读失败（r15 兜底）', () async {
+      final dir = await Directory.systemTemp.createTemp('dl_scheme');
+      final downloader = UpdateDownloader(
+        tempDirectory: dir,
+        httpClient: MockClient((_) async => http.Response('x', 200)),
+      );
+      try {
+        // Uri.parse 对 file:// 宽松解析不抛——http.Request 构造/发送时抛
+        // ArgumentError（Error）会逃逸；显式 scheme 校验须拦截。
+        final result = await downloader.download('file:///tmp/app.zip');
+        expect(result.isSuccess, isFalse, reason: '非 http(s) scheme 失败');
+        expect(
+          result.when(onSuccess: (_) => '', onFailure: (m) => m),
+          contains('地址非法'),
+        );
+      } finally {
+        await dir.delete(recursive: true);
+      }
+    });
+
     test('重试间隙 close：返回"已关闭"且不再发起下次 send（r11）', () async {
       final dir = await Directory.systemTemp.createTemp('dl_close_retry');
       var calls = 0;
@@ -220,7 +240,8 @@ void main() {
       final downloader = UpdateDownloader(
         tempDirectory: dir,
         retryCount: 3,
-        // 退避延迟挂起（gate 控制）——让 close 有机会在重试间隙触发。
+        // 首次 HTTP send 挂起（gate 控制）：close 在请求 in-flight 时被调用，
+        // 释放后首次尝试失败并进入退避延迟，循环顶部重查 _closed 返回"已关闭"。
         retryBaseDelay: Duration(milliseconds: 100),
         httpClient: MockClient((request) async {
           calls += 1;
@@ -233,10 +254,10 @@ void main() {
       );
       try {
         final future = downloader.download('https://x.example/app.zip');
-        // **显式等待首次 send 已发起（r13）**：不用固定 Future.delayed——
-        // started Completer 使同步点确定且自文档化（防 http/MockClient 内部
-        // 调度变化时 close 实际发生在请求发出前、退化为前置路径）。
-        await started.future;
+        // **显式等待首次 send 已发起（r13）+ 超时保护（r15）**：started
+        // Completer 使同步点确定且自文档化；timeout 防回归导致首次 send 永不
+        // 发起时测试挂到全局超时。
+        await started.future.timeout(const Duration(seconds: 5));
         downloader.close(); // 重试间隙关闭
         gate.complete(); // 释放首次 send → 抛异常 → 进入重试循环
         final result = await future;

@@ -30,6 +30,8 @@ class WindowsInstaller {
     this._copyFileOverride,
     int? maxUncompressedEntryBytes,
     int? maxTotalUncompressedBytes,
+    int? maxCompressedBytes,
+    int? maxEntryCount,
   }) : zipCodec = zipCodec ?? ZipDecoder(),
        assert(
          maxUncompressedEntryBytes == null || maxUncompressedEntryBytes > 0,
@@ -37,10 +39,15 @@ class WindowsInstaller {
        assert(
          maxTotalUncompressedBytes == null || maxTotalUncompressedBytes > 0,
        ),
+       assert(maxCompressedBytes == null || maxCompressedBytes > 0),
+       assert(maxEntryCount == null || maxEntryCount > 0),
        maxUncompressedEntryBytes =
            maxUncompressedEntryBytes ?? UpdateConfig.maxUncompressedEntryBytes,
        maxTotalUncompressedBytes =
-           maxTotalUncompressedBytes ?? UpdateConfig.maxTotalUncompressedBytes;
+           maxTotalUncompressedBytes ?? UpdateConfig.maxTotalUncompressedBytes,
+       maxCompressedBytes =
+           maxCompressedBytes ?? UpdateConfig.maxCompressedBytes,
+       maxEntryCount = maxEntryCount ?? UpdateConfig.maxEntryCount;
 
   /// 程序目录（exe 所在，安装目标）。
   final String programDir;
@@ -62,6 +69,12 @@ class WindowsInstaller {
   /// zip bomb 累计解压总体积上限（可注入小值测试）。
   final int maxTotalUncompressedBytes;
 
+  /// zip bomb 压缩后文件大小上限（读入内存前拦截，可注入小值测试）。
+  final int maxCompressedBytes;
+
+  /// zip bomb 条目数上限（海量小条目攻击，可注入小值测试）。
+  final int maxEntryCount;
+
   /// 程序目录是否可写（安装前提）。
   bool checkWritable() {
     try {
@@ -81,14 +94,29 @@ class WindowsInstaller {
   /// 把程序目录清空成空壳）；staging 已存在则先删除（幂等）。返回 staging 路径。
   /// 失败路径清理 staging（防半解压残留被当作可安装包）。
   Future<AppResult<String>> prepareStaging(String zipPath) async {
-    final staging = Directory(
-      '$programDir/${UpdateConfig.windowsStagingDirName}',
-    );
+    // **staging 目录名运行时校验（r15）**：windowsStagingDirName 若被误改为
+    // 空串/含路径分隔符，`$programDir/` 会指向 programDir 本身——下方
+    // deleteSync(recursive) 会直接递归删除整个程序目录（灾难性）。防御性
+    // 校验（常量配置错误早失败）。
+    final stagingName = UpdateConfig.windowsStagingDirName;
+    if (stagingName.isEmpty ||
+        stagingName.contains('/') ||
+        stagingName.contains(r'\')) {
+      return const AppFailure('staging 目录名配置非法（空或含路径分隔符）');
+    }
+    final staging = Directory('$programDir/$stagingName');
     try {
       if (staging.existsSync()) {
         staging.deleteSync(recursive: true);
       }
       staging.createSync(recursive: true);
+      // **zip bomb 压缩后大小上限（r13）**：`readAsBytesSync` 会整包读入内存、
+      // `decodeBytes` 建全量条目对象——读入前按**压缩后文件大小**与**条目数**
+      // 拦截（恶意高压缩比包：压缩后小、解压后巨大——压缩后上限挡包体积，
+      // 条目数上限挡海量小条目攻击）。
+      if (File(zipPath).lengthSync() > maxCompressedBytes) {
+        throw StateError('更新包压缩后体积超上限');
+      }
       final bytes = File(zipPath).readAsBytesSync();
       // **zip bomb 防护（r9）**：恶意/异常更新包可用高压缩比条目（zip bomb）
       // 使进程 OOM 或磁盘写满——解压前校验包大小与单条目/累计解压体积上限。
@@ -97,6 +125,11 @@ class WindowsInstaller {
       var totalUncompressed = 0;
       for (final file in archive.files) {
         if (file.isFile) {
+          fileCount += 1;
+          // 条目数上限（r13）：海量小条目攻击（每条目小、条目极多耗内存/CPU）。
+          if (fileCount > maxEntryCount) {
+            throw StateError('更新包条目数超上限');
+          }
           final name = file.name;
           // zip-slip 防护：拒绝路径穿越（`..` 段/绝对路径/盘符路径/尾部空格
           // 规范化绕过/保留设备名）——否则恶意 zip 可把文件写入 staging 之外

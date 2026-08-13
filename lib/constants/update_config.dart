@@ -75,4 +75,10 @@ class UpdateConfig {
 
   /// **zip bomb 防护上限（r9）**：累计解压总体积上限（1 GB）。
   static const maxTotalUncompressedBytes = 1024 * 1024 * 1024;
+
+  /// **zip bomb 防护上限（r13）**：压缩后文件大小上限（200 MB）。
+  static const maxCompressedBytes = 200 * 1024 * 1024;
+
+  /// **zip bomb 防护上限（r13）**：zip 条目数上限（10 万，防海量小条目攻击）。
+  static const maxEntryCount = 100000;
 }

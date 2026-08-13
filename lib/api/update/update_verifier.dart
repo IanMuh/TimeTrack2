@@ -52,7 +52,13 @@ class UpdateVerifier {
         File(result.filePath).deleteSync();
       } on FileSystemException {
         // 删除失败不阻塞重下；记录残留路径（防多次失败累积损坏文件且无从排查）。
-        stderr.writeln('[update] 校验失败且删除损坏文件失败（残留）：${result.filePath}');
+        // **stderr 写自身保护（r14）**：stderr 已关闭/管道断开时 writeln 会再抛
+        // ——包一层防从 downloadAndVerify 逃逸（与下载器一致，保"恒返回 AppResult"）。
+        try {
+          stderr.writeln('[update] 校验失败且删除损坏文件失败（残留）：${result.filePath}');
+        } catch (_) {
+          // 日志写入失败不影响失败结论。
+        }
       }
       if (attempt >= UpdateConfig.redownloadAfterVerificationFailure) {
         return const AppFailure('更新文件校验失败（SHA-256 不匹配），请稍后重试');

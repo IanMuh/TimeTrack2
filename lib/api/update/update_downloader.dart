@@ -21,6 +21,7 @@ import 'dart:io'
         SocketException,
         TlsException,
         stderr;
+import 'dart:math';
 
 import 'package:http/http.dart' as http;
 
@@ -50,14 +51,13 @@ class DownloadResult {
 class UpdateDownloader {
   UpdateDownloader({
     http.Client? httpClient,
-    Directory? tempDirectory,
+    this._tempDirectory,
     int? retryCount,
     Duration? retryBaseDelay,
   }) : _http = httpClient ?? http.Client(),
        _ownsHttp = httpClient == null,
        _retryCount = retryCount ?? UpdateConfig.downloadRetryCount,
-       _retryBaseDelay = retryBaseDelay ?? UpdateConfig.retryBaseDelay,
-       _tempDirectory = tempDirectory;
+       _retryBaseDelay = retryBaseDelay ?? UpdateConfig.retryBaseDelay;
 
   final http.Client _http;
 
@@ -168,6 +168,16 @@ class UpdateDownloader {
   /// 指数退避：`base * 2^attempt`（attempt 从 1 计，首次重试等待 base）。
   Duration _retryDelay(int attempt) => _retryBaseDelay * (1 << (attempt - 1));
 
+  /// 随机 hex 后缀（r14 防路径可预测——共享系统临时目录 TOCTOU 符号链接）。
+  static final _random = Random.secure();
+  static String _randomHex(int bytes) {
+    final buffer = StringBuffer();
+    for (var i = 0; i < bytes; i++) {
+      buffer.write(_random.nextInt(256).toRadixString(16).padLeft(2, '0'));
+    }
+    return buffer.toString();
+  }
+
   Future<DownloadResult> _attemptDownload(
     String url, {
     void Function(int receivedBytes, int? totalBytes)? onProgress,
@@ -175,9 +185,18 @@ class UpdateDownloader {
     final file = File(
       '${_tempDirectory?.path ?? Directory.systemTemp.path}/timetrack-download-'
       '${DateTime.now().microsecondsSinceEpoch}'
-      '-${_seq++}', // 自增后缀防同一微秒并发撞名覆盖
+      '-${_seq++}' // 自增后缀防同一微秒并发撞名覆盖
+      '-${_randomHex(8)}', // **随机后缀（r14）**：防路径可预测（共享系统临时
+      // 目录下恶意预创建同名符号链接的 TOCTOU 攻击）
     );
-    final request = http.Request('GET', Uri.parse(url));
+    final uri = Uri.parse(url);
+    // **scheme 显式校验（r14）**：Uri.parse 对非 http(s)（file:///ftp:///相对）
+    // 宽松解析不抛——http.Request 构造或真实 IOClient 发送时抛 ArgumentError
+    //（Error 非 Exception，会逃逸破坏"恒返回 AppResult"契约）。此处显式拦截。
+    if (uri.scheme != 'http' && uri.scheme != 'https') {
+      throw const FormatException('仅支持 http/https');
+    }
+    final request = http.Request('GET', uri);
     // **超时边界（r9 注明）**：`Future.timeout` 不取消底层 send——超时后原始
     // 请求仍可能稍后返回 StreamedResponse，本方法已返回失败/进入重试、无法
     // 消费该迟到响应；连接由 http 包 idle 超时兜底回收（已知边界，慢网络 +
@@ -208,7 +227,13 @@ class UpdateDownloader {
           sink.add(chunk);
           received += chunk.length;
           shaBuilder.add(chunk);
-          onProgress?.call(received, response.contentLength);
+          // **onProgress 异常隔离（r14）**：UI 层回调抛错不应归因下载失败/
+          // 触发重试——只记录不中断。
+          try {
+            onProgress?.call(received, response.contentLength);
+          } catch (_) {
+            // 回调异常不影响下载。
+          }
         },
       );
       await sink.close();
