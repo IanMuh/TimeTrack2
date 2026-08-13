@@ -171,12 +171,20 @@ class UpdateManifestService {
     }
     final builder = BytesBuilder(copy: false);
     var received = 0;
-    final deadline = DateTime.now().add(UpdateConfig.checkTimeout);
+    // **总时限用单调时钟（r25）**：DateTime.now() 墙钟受系统时钟调整影响
+    //（NTP 校时/手动改时前跳误判超时、后跳放宽时限）——Stopwatch 与
+    // stream.timeout 的 Timer 语义一致，保证总时限稳定可信。
+    final sw = Stopwatch()..start();
     try {
       await for (final chunk in response.stream.timeout(
         UpdateConfig.checkTimeout,
       )) {
-        if (DateTime.now().isAfter(deadline)) {
+        // **`_closed` 优先（r25 调序）**：close() 后恰逢下一块使 received 超限
+        // 时须归因"已关闭"（与各 catch 分支"先判 _closed"的约定一致）。
+        if (_closed) {
+          return const AppFailure(_closedMessage);
+        }
+        if (sw.elapsed > UpdateConfig.checkTimeout) {
           throw TimeoutException('更新清单读取超时');
         }
         received += chunk.length;

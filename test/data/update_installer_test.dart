@@ -28,10 +28,13 @@ void main() {
         '/',
         r'\',
         r'C:\',
-        r'C:\\', // 连续分隔符（r24：`\1` 字面量 bug 会绕过根判定）
+        r'C:\\', // 连续分隔符（r24：\1/$1 字面量替换 bug 会绕过根判定）
         r'C:\ ', // 尾部空格折叠为 C:\
         r'C:\foo\..\..', // .. 段解析为盘根
         r'C:\..\..\',
+        r'C:\foo\..', // r25：`..` 恰为末段——先整体裁尾点会吞掉它（解析为盘根）
+        '/foo/..', // r25：同上（POSIX 形态，解析为 /）
+        r'C:\foo\.. \.. \Windows', // r25：段内尾部空格变体（解析为 C:\Windows）
       ]) {
         expect(
           () => WindowsInstaller(programDir: evil, dataDir: '/data'),

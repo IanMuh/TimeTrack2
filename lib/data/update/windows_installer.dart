@@ -59,12 +59,15 @@ class WindowsInstaller {
   ///（release 构建被剥离、防御失效——与 staging 目录名的运行时守卫同级）。
   ///
   /// 校验：非空 + 绝对路径 + 非根目录。**根判定按 Win32 规范化折叠**（与
-  /// stagingNameError 同策略）：裁剪尾部空格/点号、折叠连续分隔符、去尾分隔符
-  /// 后判定——`C:\\`（连续分隔符）、`C:\ `（尾部空格折叠为 `C:\`）均解析到
-  /// 盘根、须拒绝；**含 `..` 段（r24）**（`C:\foo\..\..` 解析为盘根、任意
+  /// stagingNameError 同策略）：折叠连续分隔符、去尾分隔符后判定——`C:\\`
+  ///（连续分隔符）、`C:\ `（尾部空格折叠为 `C:\`）均解析到盘根、须拒绝；
+  /// **含 `..` 段（r24/r25）**（`C:\foo\..\..`、`C:\foo\..` 解析为盘根、任意
   /// 上级目录——`_clearProgramDir` 递归清空该目录）同样拒绝（与 zip-slip/
-  /// stagingNameError 对 `.`/`..` 的灾难性判定一致）。返回原值（路径归一化由
-  /// File/Directory 运行时处理）。
+  /// stagingNameError 对 `.`/`..` 的灾难性判定一致）。**`..` 段判定先于尾部
+  /// 裁剪（r25）**：整体尾部 `[. ]+$` 裁剪会把末段 `..` 吃成空（`C:\foo\..`
+  /// → `C:\foo` 绕过）——段检查须在折叠/去尾后、对每段先裁剪尾部空格点号再
+  /// 比 `..`（`.. `/`.. .` 变体一并拦截，与 _isUnsafePath r9 同策略）。返回
+  /// 原值（路径归一化由 File/Directory 运行时处理）。
   static String _checkedProgramDir(String dir) {
     if (dir.isEmpty) {
       throw ArgumentError.value(dir, 'programDir', '不得为空');
@@ -76,7 +79,7 @@ class WindowsInstaller {
     if (!isAbsolute) {
       throw ArgumentError.value(dir, 'programDir', '必须为绝对路径');
     }
-    var norm = dir.replaceAll(RegExp(r'[ .]+$'), ''); // 尾部空格/点号（Win32 裁剪）
+    var norm = dir;
     // **replaceAllMapped 折叠连续分隔符（r24 实证）**：`String.replaceAll` 的
     // 替换串**不解释任何组引用**（`\1`、`$1` 均为字面量——`C:\\` 折叠后变
     // `C:\1`/`C:$1` 绕过根判定、递归清盘根的灾难路径）——须用 replaceAllMapped
@@ -86,19 +89,38 @@ class WindowsInstaller {
       (m) => m[1]!,
     ); // 折叠连续分隔符
     norm = norm.replaceAll(RegExp(r'[\\/]+$'), ''); // 去尾分隔符
-    // **`..` 段拒绝（r24）**：`C:\foo\..\..` 规范化后非根形态、但文件系统解析
-    // 为盘根——`_clearProgramDir` 递归清空盘根/上级目录（大范围数据丢失）。
-    // 只拒绝**完整段**为 `..`（`C:\..\app` 合法放行、`..` 嵌中间也放行——
-    // 与 zip-slip 的段级策略一致）。
+    // **`..` 段拒绝（r25 修正）**：先折叠/去尾（保留末段 `..` 不被整体尾部
+    // 裁剪吞掉）、段判定用"循环折叠遇 `.`/`..` 即停"（r18 同策略——纯点段
+    // `..` 若直接 replaceAll 裁尾部 `[. ]+` 会被裁成空串、误放行；`.. `/
+    // `.. .` 等交错变体折叠到 `..` 一并拦截——`C:\foo\.. \.. \Windows`
+    // 解析为 C:\Windows 的灾难路径）。
     final segments = norm.replaceAll(r'\', '/').split('/');
-    if (segments.any((s) => s == '..')) {
+    if (segments.any((s) {
+      var t = s;
+      while (t.isNotEmpty && (t.endsWith(' ') || t.endsWith('.'))) {
+        if (t == '.' || t == '..') break;
+        t = t.substring(0, t.length - 1);
+      }
+      return t == '..';
+    })) {
       throw ArgumentError.value(dir, 'programDir', '不得包含 `..` 段');
     }
+    // **根判定（此时末段 `..` 已被拒）**：尾部空格/点号裁剪后可能又露出尾
+    // 分隔符（`C:\ ` → 裁空格 → `C:\`）——循环折叠到稳定再判（与
+    // stagingNameError r18 同策略）。
+    var rootNorm = norm;
+    while (rootNorm.isNotEmpty &&
+        (rootNorm.endsWith(' ') ||
+            rootNorm.endsWith('.') ||
+            rootNorm.endsWith('/') ||
+            rootNorm.endsWith(r'\'))) {
+      rootNorm = rootNorm.substring(0, rootNorm.length - 1);
+    }
     final isRoot =
-        norm.isEmpty ||
-        norm == '/' ||
-        norm == r'\' ||
-        RegExp(r'^[A-Za-z]:$').hasMatch(norm);
+        rootNorm.isEmpty ||
+        rootNorm == '/' ||
+        rootNorm == r'\' ||
+        RegExp(r'^[A-Za-z]:$').hasMatch(rootNorm);
     if (isRoot) {
       throw ArgumentError.value(dir, 'programDir', '不得为文件系统根目录');
     }

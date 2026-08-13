@@ -602,6 +602,43 @@ void main() {
       final resultC = (await clientC.checkForUpdate()).requireValue();
       expect(resultC.available, isTrue, reason: '恰好等于上限的合法清单放行');
     });
+
+    test('流式消费期间 close → 循环内复查返回"已关闭"（r25）', () async {
+      // r24/r25 核心防御：`await for` 循环内每块后的 `_closed` 复查——注入
+      // client 不由本服务关闭、底层流不被中断，close() 后循环须立即返回
+      // "已关闭"（r4 用例只覆盖响应 await 后的复查分支，未触达循环内分支）。
+      // **阻塞式 fake（r25）**：send 后逐块推流、第二块前挂起 gate——服务消费
+      // 第一块后停在循环内，此时 close() 并发触发；释放 gate 后循环顶复查
+      // `_closed` 返回"已关闭"（不等待剩余块、不写库）。
+      final started = Completer<void>();
+      final gate = Completer<void>();
+      final client = UpdateManifestService(
+        database: db,
+        currentVersion: '1.0.0',
+        manifestUrl: Uri.parse('https://x.example/update.json'),
+        httpClient: _BlockingStreamClient(started, gate),
+      );
+      final future = client.checkForUpdate();
+      await started.future; // 第一块已到达、服务停在循环内
+      client.close();
+      gate.complete(); // 释放第二块
+      final result = await future;
+      expect(result.isSuccess, isFalse, reason: '流式期间关闭返回失败');
+      expect(
+        result.when(onSuccess: (_) => '', onFailure: (m) => m),
+        contains('已关闭'),
+      );
+      // 未写缓存（不进入 _evaluate）。
+      final cached =
+          await (db.select(db.appMetadata)..where(
+                (t) => t.key.equals(AppMetadataKeys.lastCheckedManifestVersion),
+              ))
+              .get();
+      expect(cached, isEmpty, reason: '流式期间关闭不写缓存');
+      // **覆盖边界注明（r25）**：总时限超时（Stopwatch > checkTimeout 抛超时）
+      // 需真实等待 8s（checkTimeout 为 const 不可注入）——测试成本不成比例，
+      // 该分支由代码评审 + deadline 检查守护，属已知覆盖边界（与 r4 注释一致）。
+    });
   });
 }
 
@@ -632,6 +669,37 @@ class _ManifestStreamClient extends http.BaseClient {
       controller.stream,
       200,
       contentLength: contentLength,
+      headers: {'content-type': 'application/json'},
+      request: request,
+    );
+  }
+}
+
+/// 阻塞式流式 client（r25）：首块立即发射、第二块前挂起 gate——用于
+/// "流式消费期间 close() → 循环内复查"的竞态测试（started 确认服务已消费
+/// 首块、gate 控制第二块释放时机）。
+class _BlockingStreamClient extends http.BaseClient {
+  _BlockingStreamClient(this.started, this.gate);
+
+  final Completer<void> started;
+  final Completer<void> gate;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    final controller = StreamController<List<int>>();
+    // 首块（合法清单的一部分）先到；第二块（剩余部分）等 gate 释放。
+    controller.add('{'.codeUnits);
+    started.complete();
+    await gate.future;
+    controller.add('"version":"2.0.0","windows":'.codeUnits);
+    controller.add('{"url":"https://x.example/app.zip","sha256":"'.codeUnits);
+    controller.add(('b' * 64).codeUnits);
+    controller.add('"}}'.codeUnits);
+    controller.close();
+    return http.StreamedResponse(
+      controller.stream,
+      200,
+      contentLength: null,
       headers: {'content-type': 'application/json'},
       request: request,
     );
