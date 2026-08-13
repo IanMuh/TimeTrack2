@@ -247,6 +247,26 @@ void main() {
         reason: 'timeout 非正拒绝（debug assert + release throw）',
       );
     });
+
+    test('model trim 归一化 + 纯空白拒绝（r6）', () {
+      final trimmed = LlmConfig(
+        baseUrl: 'https://api.example.com',
+        apiKey: null,
+        model: '  gpt-x  ',
+        capability: LlmCapability.deepseek,
+      );
+      expect(trimmed.model, 'gpt-x', reason: 'model 首尾空白 trim');
+      expect(
+        () => LlmConfig(
+          baseUrl: 'https://api.example.com',
+          apiKey: null,
+          model: '   ',
+          capability: LlmCapability.deepseek,
+        ),
+        throwsA(anyOf(isA<AssertionError>(), isA<ArgumentError>())),
+        reason: '纯空白模型名拒绝（trim 后空）',
+      );
+    });
   });
 
   group('buildChatRequestBody 纯函数', () {
