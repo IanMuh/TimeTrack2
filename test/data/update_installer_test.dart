@@ -21,22 +21,29 @@ void main() {
       final program = Directory('${root.path}/program')..createSync();
       final data = Directory('${root.path}/data')..createSync();
       final zipPath = '${root.path}/pkg.zip';
-      File(zipPath).writeAsBytesSync(buildZip({
-        'app.exe': 'binary',
-        'libs/foo.dll': 'lib-content',
-        'data/config.json': '{}',
-      }));
+      File(zipPath).writeAsBytesSync(
+        buildZip({
+          'app.exe': 'binary',
+          'libs/foo.dll': 'lib-content',
+          'data/config.json': '{}',
+        }),
+      );
       try {
         final installer = WindowsInstaller(
           programDir: program.path,
           dataDir: data.path,
         );
-        final staging = (await installer.prepareStaging(zipPath)).requireValue();
+        final staging = (await installer.prepareStaging(
+          zipPath,
+        )).requireValue();
         expect(File('$staging/app.exe').readAsStringSync(), 'binary');
         expect(File('$staging/libs/foo.dll').readAsStringSync(), 'lib-content');
         expect(File('$staging/data/config.json').readAsStringSync(), '{}');
-        expect(File('$staging/../app.exe').existsSync(), isFalse,
-            reason: '文件只落在 staging 内');
+        expect(
+          File('$staging/../app.exe').existsSync(),
+          isFalse,
+          reason: '文件只落在 staging 内',
+        );
       } finally {
         await root.delete(recursive: true);
       }
@@ -47,10 +54,12 @@ void main() {
       final program = Directory('${root.path}/program')..createSync();
       final data = Directory('${root.path}/data')..createSync();
       final zipPath = '${root.path}/evil.zip';
-      File(zipPath).writeAsBytesSync(buildZip({
-        '../evil.txt': 'evil', // 路径穿越
-        'ok.txt': 'ok',
-      }));
+      File(zipPath).writeAsBytesSync(
+        buildZip({
+          '../evil.txt': 'evil', // 路径穿越
+          'ok.txt': 'ok',
+        }),
+      );
       try {
         final installer = WindowsInstaller(
           programDir: program.path,
@@ -71,16 +80,21 @@ void main() {
       final program = Directory('${root.path}/program')..createSync();
       final data = Directory('${root.path}/data')..createSync();
       final zipPath = '${root.path}/abs.zip';
-      File(zipPath).writeAsBytesSync(buildZip({
-        '/tmp/evil.txt': 'evil', // 绝对路径
-      }));
+      File(zipPath).writeAsBytesSync(
+        buildZip({
+          '/tmp/evil.txt': 'evil', // 绝对路径
+        }),
+      );
       try {
         final installer = WindowsInstaller(
           programDir: program.path,
           dataDir: data.path,
         );
-        expect((await installer.prepareStaging(zipPath)).isSuccess, isFalse,
-            reason: '绝对路径条目拒绝');
+        expect(
+          (await installer.prepareStaging(zipPath)).isSuccess,
+          isFalse,
+          reason: '绝对路径条目拒绝',
+        );
       } finally {
         await root.delete(recursive: true);
       }
@@ -111,16 +125,16 @@ void main() {
           'NUL', // 保留设备名
           'CON.txt',
           'COM1',
+          'CON .txt', // 设备名+空格+扩展名绕过（Win32 裁剪主名尾部空格 → CON.txt）
+          'CON  .txt',
         ].indexed) {
           final zipPath = '${root.path}/evil$i.zip';
           File(zipPath).writeAsBytesSync(buildZip({evil: 'evil'}));
           final result = await installer.prepareStaging(zipPath);
-          expect(result.isSuccess, isFalse,
-              reason: '非法路径条目拒绝：$evil');
+          expect(result.isSuccess, isFalse, reason: '非法路径条目拒绝：$evil');
           // 失败后 staging 已清理、program 目录无残留（穿越落点在
           // program/evil.txt 等——直接断言 program 目录干净最可靠）。
-          expect(program.listSync(), isEmpty,
-              reason: '$evil 失败后无残留文件写出');
+          expect(program.listSync(), isEmpty, reason: '$evil 失败后无残留文件写出');
         }
       } finally {
         await root.delete(recursive: true);
@@ -132,10 +146,12 @@ void main() {
       final program = Directory('${root.path}/program')..createSync();
       final data = Directory('${root.path}/data')..createSync();
       final zipPath = '${root.path}/mixed.zip';
-      File(zipPath).writeAsBytesSync(buildZip({
-        'ok.txt': 'ok',
-        r'..\evil.txt': 'evil', // 合法条目后的恶意条目
-      }));
+      File(zipPath).writeAsBytesSync(
+        buildZip({
+          'ok.txt': 'ok',
+          r'..\evil.txt': 'evil', // 合法条目后的恶意条目
+        }),
+      );
       try {
         final installer = WindowsInstaller(
           programDir: program.path,
@@ -144,8 +160,11 @@ void main() {
         final result = await installer.prepareStaging(zipPath);
         expect(result.isSuccess, isFalse, reason: '混合包整体拒绝');
         // 已解压的 ok.txt 不残留（失败清理）
-        expect(Directory('${program.path}/staging').existsSync(), isFalse,
-            reason: '失败后 staging 已清理（含已解压合法文件）');
+        expect(
+          Directory('${program.path}/staging').existsSync(),
+          isFalse,
+          reason: '失败后 staging 已清理（含已解压合法文件）',
+        );
         expect(program.listSync(), isEmpty);
       } finally {
         await root.delete(recursive: true);
@@ -158,9 +177,7 @@ void main() {
       final data = Directory('${root.path}/data')..createSync();
       final zipPath = '${root.path}/empty.zip';
       // 空 zip（无任何文件条目）。
-      File(zipPath).writeAsBytesSync(
-        ZipEncoder().encode(Archive()),
-      );
+      File(zipPath).writeAsBytesSync(ZipEncoder().encode(Archive()));
       try {
         final installer = WindowsInstaller(
           programDir: program.path,
@@ -169,8 +186,44 @@ void main() {
         final result = await installer.prepareStaging(zipPath);
         expect(result.isSuccess, isFalse, reason: '空包拒绝');
         // staging 未残留（失败清理）
-        expect(Directory('${program.path}/staging').existsSync(), isFalse,
-            reason: '失败后 staging 已清理');
+        expect(
+          Directory('${program.path}/staging').existsSync(),
+          isFalse,
+          reason: '失败后 staging 已清理',
+        );
+      } finally {
+        await root.delete(recursive: true);
+      }
+    });
+
+    test('zip bomb 防护：超限条目（r10，上限可注入）', () async {
+      final root = await Directory.systemTemp.createTemp('win_bomb');
+      final program = Directory('${root.path}/program')..createSync();
+      final data = Directory('${root.path}/data')..createSync();
+      final zipPath = '${root.path}/bomb.zip';
+      // 构造解压后体积超上限的 zip 条目（写入实际 >上限 的字节——上限可注入
+      // 为小值以真实覆盖 zip bomb 分支）。
+      final bombContent = List<int>.filled(1024 * 1024, 7); // 1 MB
+      File(zipPath).writeAsBytesSync(
+        ZipEncoder().encode(
+          Archive()
+            ..addFile(ArchiveFile('bomb.bin', bombContent.length, bombContent)),
+        ),
+      );
+      try {
+        final installer = WindowsInstaller(
+          programDir: program.path,
+          dataDir: data.path,
+          maxUncompressedEntryBytes: 1024, // 注入小上限（1 KB < 1 MB）
+          maxTotalUncompressedBytes: 2048,
+        );
+        final result = await installer.prepareStaging(zipPath);
+        expect(result.isSuccess, isFalse, reason: '超限条目拒绝');
+        expect(
+          Directory('${program.path}/staging').existsSync(),
+          isFalse,
+          reason: '失败后 staging 已清理',
+        );
       } finally {
         await root.delete(recursive: true);
       }
@@ -193,15 +246,23 @@ void main() {
         );
         final result = await installer.applyStaging(staging.path);
         expect(result.isSuccess, isTrue);
-        expect(File('${program.path}/app.exe').readAsStringSync(), 'new',
-            reason: '新版 app.exe 就位');
+        expect(
+          File('${program.path}/app.exe').readAsStringSync(),
+          'new',
+          reason: '新版 app.exe 就位',
+        );
         // staging 已移除；旧内容被替换
         expect(Directory('${program.path}/staging').existsSync(), isFalse);
-        expect(File('${program.path}/user-data.txt').existsSync(), isFalse,
-            reason: '旧程序目录内容被替换（不含数据文件——数据在数据目录）');
+        expect(
+          File('${program.path}/user-data.txt').existsSync(),
+          isFalse,
+          reason: '旧程序目录内容被替换（不含数据文件——数据在数据目录）',
+        );
         // 备份目录已删
         expect(
-          program.listSync().where((e) => e.uri.pathSegments.last.startsWith('.backup-')),
+          program.listSync().where(
+            (e) => e.uri.pathSegments.last.startsWith('.backup-'),
+          ),
           isEmpty,
         );
       } finally {
@@ -209,33 +270,36 @@ void main() {
       }
     });
 
-    test('applyStaging 备份为空（backupOk=false，r5）：staging 被 exclude → 失败 + 备份清理', () async {
-      // 程序目录**仅含 staging 子目录**（备份时 exclude）→ 备份复制后为空 →
-      // backupOk=false 分支：返回失败且 `.backup-*` 无残留（r4 新增清理路径）。
-      final root = await Directory.systemTemp.createTemp('win_empty_backup');
-      final program = Directory('${root.path}/program')..createSync();
-      final data = Directory('${root.path}/data')..createSync();
-      final staging = Directory('${program.path}/staging')..createSync();
-      File('${staging.path}/app.exe').writeAsStringSync('new');
-      try {
-        final installer = WindowsInstaller(
-          programDir: program.path,
-          dataDir: data.path,
-        );
-        final result = await installer.applyStaging(staging.path);
-        expect(result.isSuccess, isFalse, reason: '空备份 → 失败');
-        expect(
-          program
-              .listSync()
-              .where((e) => e.path.contains('.backup-'))
-              .toList(),
-          isEmpty,
-          reason: 'backupOk=false 分支清理残留备份',
-        );
-      } finally {
-        await root.delete(recursive: true);
-      }
-    });
+    test(
+      'applyStaging 备份为空（backupOk=false，r5）：staging 被 exclude → 失败 + 备份清理',
+      () async {
+        // 程序目录**仅含 staging 子目录**（备份时 exclude）→ 备份复制后为空 →
+        // backupOk=false 分支：返回失败且 `.backup-*` 无残留（r4 新增清理路径）。
+        final root = await Directory.systemTemp.createTemp('win_empty_backup');
+        final program = Directory('${root.path}/program')..createSync();
+        final data = Directory('${root.path}/data')..createSync();
+        final staging = Directory('${program.path}/staging')..createSync();
+        File('${staging.path}/app.exe').writeAsStringSync('new');
+        try {
+          final installer = WindowsInstaller(
+            programDir: program.path,
+            dataDir: data.path,
+          );
+          final result = await installer.applyStaging(staging.path);
+          expect(result.isSuccess, isFalse, reason: '空备份 → 失败');
+          expect(
+            program
+                .listSync()
+                .where((e) => e.path.contains('.backup-'))
+                .toList(),
+            isEmpty,
+            reason: 'backupOk=false 分支清理残留备份',
+          );
+        } finally {
+          await root.delete(recursive: true);
+        }
+      },
+    );
 
     test('applyStaging 备份阶段失败（r4）：复制抛错 → 程序目录原样保留 + 备份清理', () async {
       // r3 核心保证：备份阶段 _copyDirectory 抛错（文件被占用/只读）时程序
@@ -257,14 +321,14 @@ void main() {
         final result = await installer.applyStaging(staging.path);
         expect(result.isSuccess, isFalse, reason: '备份阶段失败返回失败');
         // 程序目录原样保留（未被清空）
-        expect(File('${program.path}/app.exe').readAsStringSync(), 'old',
-            reason: '备份失败不进入清空路径，程序目录原样保留');
+        expect(
+          File('${program.path}/app.exe').readAsStringSync(),
+          'old',
+          reason: '备份失败不进入清空路径，程序目录原样保留',
+        );
         // 残留备份已清理（.backup-* 不残留）
         expect(
-          program
-              .listSync()
-              .where((e) => e.path.contains('.backup-'))
-              .toList(),
+          program.listSync().where((e) => e.path.contains('.backup-')).toList(),
           isEmpty,
           reason: '备份阶段失败后残留备份已清理',
         );
@@ -291,8 +355,11 @@ void main() {
         final result = await installer.applyStaging(staging.path);
         expect(result.isSuccess, isFalse, reason: '无文件的 staging 拒绝');
         // 程序目录原样保留（备份阶段失败不进入清空路径）。
-        expect(File('${program.path}/app.exe').readAsStringSync(), 'old',
-            reason: '程序目录未改动');
+        expect(
+          File('${program.path}/app.exe').readAsStringSync(),
+          'old',
+          reason: '程序目录未改动',
+        );
       } finally {
         await root.delete(recursive: true);
       }
@@ -309,21 +376,28 @@ void main() {
         );
         expect(installer.checkWritable(), isTrue, reason: '临时目录可写');
         // **只读分支（r9）**：Windows 目录只读位语义与 Unix 不同（chmod 0555
-        // 在 Windows 上几乎无效、以管理员运行也可写）——只读分支用 POSIX
-        // chmod 构造并跳过 Windows（防平台语义差异误报）。
+        // 在 Windows 上几乎无效、以管理员运行也可写）；POSIX root 拥有
+        // CAP_DAC_OVERRIDE 同样不受写权限位限制——两平台均跳过。用 chmod
+        // 构造只读目录并校验 exitCode（chmod 失败时掩盖为断言失败而非跳过）。
         if (!Platform.isWindows) {
-          Process.runSync('chmod', ['0555', ro.path]);
-          try {
-            expect(
-              WindowsInstaller(
-                programDir: ro.path,
-                dataDir: '${root.path}/data',
-              ).checkWritable(),
-              isFalse,
-              reason: '只读目录不可写（写探针抛 FileSystemException）',
-            );
-          } finally {
-            Process.runSync('chmod', ['0755', ro.path]);
+          final isRoot =
+              Process.runSync('id', ['-u']).stdout.toString().trim() == '0';
+          if (!isRoot) {
+            final chmod = Process.runSync('chmod', ['0555', ro.path]);
+            if (chmod.exitCode == 0) {
+              try {
+                expect(
+                  WindowsInstaller(
+                    programDir: ro.path,
+                    dataDir: '${root.path}/data',
+                  ).checkWritable(),
+                  isFalse,
+                  reason: '只读目录不可写（写探针抛 FileSystemException）',
+                );
+              } finally {
+                Process.runSync('chmod', ['0755', ro.path]);
+              }
+            }
           }
         }
       } finally {
@@ -336,13 +410,23 @@ void main() {
     test('content URI 构造 + Intent 标志', () {
       const installer = AndroidInstaller();
       final uri = installer.apkContentUri('app.apk');
-      expect(uri, 'content://com.github.ianmuh.timetrack2.fileprovider/cache/app.apk');
+      expect(
+        uri,
+        'content://com.github.ianmuh.timetrack2.fileprovider/cache/app.apk',
+      );
       final intent = installer.installIntentFor(uri);
       expect(intent.action, 'android.intent.action.VIEW');
       expect(intent.dataUri, uri, reason: 'data URI 参与结果（防误传）');
-      expect(intent.mimeType, 'application/vnd.android.package-archive',
-          reason: '携带 APK MIME（系统才能解析到安装器）');
-      expect(intent.flags, 0x00000001, reason: 'FLAG_GRANT_READ_URI_PERMISSION');
+      expect(
+        intent.mimeType,
+        'application/vnd.android.package-archive',
+        reason: '携带 APK MIME（系统才能解析到安装器）',
+      );
+      expect(
+        intent.flags,
+        0x00000001,
+        reason: 'FLAG_GRANT_READ_URI_PERMISSION',
+      );
     });
 
     test('installIntentFor authority 校验（r9）：非本应用 FileProvider URI 拒绝', () {
@@ -354,7 +438,9 @@ void main() {
         throwsArgumentError,
       );
       expect(
-        () => installer.installIntentFor('content://other.provider/cache/app.apk'),
+        () => installer.installIntentFor(
+          'content://other.provider/cache/app.apk',
+        ),
         throwsArgumentError,
       );
     });
@@ -386,33 +472,51 @@ void main() {
         throwsArgumentError,
         reason: '裸 .. 拒绝（防路径穿越段 URI）',
       );
-      expect(
-        () => installer.apkContentUri('.'),
-        throwsArgumentError,
-      );
-      expect(
-        () => installer.apkContentUri(''),
-        throwsArgumentError,
-      );
+      expect(() => installer.apkContentUri('.'), throwsArgumentError);
+      expect(() => installer.apkContentUri(''), throwsArgumentError);
     });
 
     test('ensureApkValid：存在非空通过 / 缺失失败 / 空文件失败 / 目录失败（r2）', () async {
       final dir = await Directory.systemTemp.createTemp('android_apk');
       final installer = const AndroidInstaller();
       try {
-        expect(installer.ensureApkValid('${dir.path}/missing.apk').isSuccess, isFalse,
-            reason: '文件不存在失败');
+        expect(
+          installer.ensureApkValid('${dir.path}/missing.apk').isSuccess,
+          isFalse,
+          reason: '文件不存在失败',
+        );
         File('${dir.path}/empty.apk').writeAsStringSync('');
-        expect(installer.ensureApkValid('${dir.path}/empty.apk').isSuccess, isFalse,
-            reason: '空文件失败');
+        expect(
+          installer.ensureApkValid('${dir.path}/empty.apk').isSuccess,
+          isFalse,
+          reason: '空文件失败',
+        );
         // **目录路径（r2）**：POSIX 上 File.existsSync 对目录返回 true、lengthSync
         // 返回 inode 大小——须按 stat.type 显式拒绝（防目录被当作有效 APK）。
         Directory('${dir.path}/adir').createSync();
-        expect(installer.ensureApkValid('${dir.path}/adir').isSuccess, isFalse,
-            reason: '目录路径失败（非常规文件）');
+        expect(
+          installer.ensureApkValid('${dir.path}/adir').isSuccess,
+          isFalse,
+          reason: '目录路径失败（非常规文件）',
+        );
         File('${dir.path}/real.apk').writeAsBytesSync([1, 2, 3]);
-        expect(installer.ensureApkValid('${dir.path}/real.apk').isSuccess, isTrue,
-            reason: '非空通过');
+        expect(
+          installer.ensureApkValid('${dir.path}/real.apk').isSuccess,
+          isTrue,
+          reason: '非空通过',
+        );
+        // **符号链接拒绝（r10）**：statSync 默认跟随链接、指向常规文件的链接
+        // type 仍为 file 会被放行——显式 followLinks:false 检测须拒绝（防外部
+        // 文件经链接绕过守卫进入安装流程）。POSIX only（Windows 创建链接权限
+        // 要求高、测试环境不稳定）。
+        if (!Platform.isWindows) {
+          Link('${dir.path}/link.apk').createSync('${dir.path}/real.apk');
+          expect(
+            installer.ensureApkValid('${dir.path}/link.apk').isSuccess,
+            isFalse,
+            reason: '符号链接拒绝（防绕过安装守卫）',
+          );
+        }
       } finally {
         await dir.delete(recursive: true);
       }

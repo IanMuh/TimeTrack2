@@ -22,10 +22,12 @@ void main() {
       // 才能真正分块消费（逐块进度递增/增量哈希拼接被真实验证）。
       final chunks = <List<int>>[];
       for (var i = 0; i < payload.length; i += 30000) {
-        chunks.add(payload.sublist(
-          i,
-          (i + 30000) < payload.length ? i + 30000 : payload.length,
-        ));
+        chunks.add(
+          payload.sublist(
+            i,
+            (i + 30000) < payload.length ? i + 30000 : payload.length,
+          ),
+        );
       }
       final chunkedClient = _ChunkedHttpClient(chunks);
       final downloader = UpdateDownloader(
@@ -36,18 +38,18 @@ void main() {
         final result = (await downloader.download(
           'https://x.example/app.zip',
           onProgress: (received, total) => progress.add(received),
-        ))
-            .requireValue();
+        )).requireValue();
         final file = File(result.filePath);
         expect(file.existsSync(), isTrue, reason: '临时文件已写入');
         expect(result.totalBytes, payload.length);
-        expect(result.sha256, expectedSha,
-            reason: '边收边算 SHA-256 与整包一致');
-        expect(progress.length, greaterThan(1),
-            reason: '逐块到达应触发多次进度回调（分块流式被真正消费）');
+        expect(result.sha256, expectedSha, reason: '边收边算 SHA-256 与整包一致');
+        expect(
+          progress.length,
+          greaterThan(1),
+          reason: '逐块到达应触发多次进度回调（分块流式被真正消费）',
+        );
         for (var i = 1; i < progress.length; i++) {
-          expect(progress[i] > progress[i - 1], isTrue,
-              reason: '进度单调递增（增量写盘）');
+          expect(progress[i] > progress[i - 1], isTrue, reason: '进度单调递增（增量写盘）');
         }
         expect(progress.last, payload.length, reason: '进度到 100%');
         // 实际文件内容一致
@@ -72,8 +74,9 @@ void main() {
         }),
       );
       try {
-        final result =
-            (await downloader.download('https://x.example/app.zip')).requireValue();
+        final result = (await downloader.download(
+          'https://x.example/app.zip',
+        )).requireValue();
         expect(calls, 3, reason: '2 次失败 + 1 次成功');
         expect(File(result.filePath).readAsStringSync(), 'ok');
       } finally {
@@ -94,8 +97,7 @@ void main() {
         final result = await downloader.download('https://x.example/app.zip');
         expect(result.isSuccess, isFalse, reason: '重试耗尽失败');
         final msg = result.when(onSuccess: (_) => '', onFailure: (m) => m);
-        expect(msg.contains('ClientException'), isFalse,
-            reason: '不泄露底层异常类型');
+        expect(msg.contains('ClientException'), isFalse, reason: '不泄露底层异常类型');
       } finally {
         await dir.delete(recursive: true);
       }
@@ -162,8 +164,9 @@ void main() {
         httpClient: client,
       );
       try {
-        final result =
-            (await downloader.download('https://x.example/app.zip')).requireValue();
+        final result = (await downloader.download(
+          'https://x.example/app.zip',
+        )).requireValue();
         expect(client.callCount, 2, reason: '1 次中途断连 + 1 次成功');
         // 最终文件内容正确（第二次成功）。
         expect(
@@ -181,12 +184,16 @@ void main() {
       }
     });
 
-    test('非法 URL（FormatException）→ 可读失败且不重试（r9）', () async {
+    test('非法 URL（FormatException）→ 可读失败且不触达网络（r9）', () async {
       final dir = await Directory.systemTemp.createTemp('dl_badurl');
+      var calls = 0;
       final downloader = UpdateDownloader(
         tempDirectory: dir,
         retryCount: 3,
-        httpClient: MockClient((_) async => http.Response('x', 200)),
+        httpClient: MockClient((_) async {
+          calls += 1;
+          return http.Response('x', 200);
+        }),
       );
       try {
         // Uri.parse 对 'not a url' 宽松解析为相对 URI（不抛）——用真正畸形
@@ -197,6 +204,9 @@ void main() {
           result.when(onSuccess: (_) => '', onFailure: (m) => m),
           contains('地址非法'),
         );
+        // Uri.parse 阶段即抛 FormatException——客户端从未被调用（锁定"不
+        // 触达网络"契约）。
+        expect(calls, 0, reason: '非法 URL 在解析阶段失败，未发起网络请求');
       } finally {
         await dir.delete(recursive: true);
       }
@@ -220,7 +230,9 @@ void main() {
             ),
           ),
         );
-        final result = (await verifier.downloadAndVerify(artifact)).requireValue();
+        final result = (await verifier.downloadAndVerify(
+          artifact,
+        )).requireValue();
         expect(File(result.filePath).readAsStringSync(), payload);
       } finally {
         await dir.delete(recursive: true);
@@ -260,8 +272,7 @@ void main() {
           reason: '初始下载 + 配置值次重下',
         );
         // 损坏文件已删除（不残留）
-        expect(dir.listSync().whereType<File>(), isEmpty,
-            reason: '校验失败文件已删');
+        expect(dir.listSync().whereType<File>(), isEmpty, reason: '校验失败文件已删');
       } finally {
         await dir.delete(recursive: true);
       }
@@ -289,9 +300,14 @@ void main() {
             }),
           ),
         );
-        final result = (await verifier.downloadAndVerify(artifact)).requireValue();
-        expect(File(result.filePath).readAsStringSync(), goodPayload,
-            reason: '重下成功的文件内容正确');
+        final result = (await verifier.downloadAndVerify(
+          artifact,
+        )).requireValue();
+        expect(
+          File(result.filePath).readAsStringSync(),
+          goodPayload,
+          reason: '重下成功的文件内容正确',
+        );
         expect(calls, 2, reason: '1 次损坏 + 1 次重下成功');
       } finally {
         await dir.delete(recursive: true);

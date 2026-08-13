@@ -28,7 +28,14 @@ class WindowsInstaller {
     // **私有字段初始化形参（Dart 3.12 特性）**：`this._x` 命名参数跨库调用名
     // 剥离下划线（调用方写 `copyFileOverride:`）——已用最小程序实证编译运行。
     this._copyFileOverride,
-  }) : zipCodec = zipCodec ?? ZipDecoder();
+    int? maxUncompressedEntryBytes,
+    int? maxTotalUncompressedBytes,
+  }) : zipCodec = zipCodec ?? ZipDecoder(),
+       maxUncompressedEntryBytes =
+           maxUncompressedEntryBytes ?? UpdateConfig.maxUncompressedEntryBytes,
+       maxTotalUncompressedBytes =
+           maxTotalUncompressedBytes ?? UpdateConfig.maxTotalUncompressedBytes;
+
   /// 程序目录（exe 所在，安装目标）。
   final String programDir;
 
@@ -42,6 +49,12 @@ class WindowsInstaller {
 
   /// 文件复制钩子（测试注入失败场景——备份阶段复制抛错时程序目录须原样保留）。
   final void Function(String from, String to)? _copyFileOverride;
+
+  /// zip bomb 单条目解压后体积上限（可注入小值测试）。
+  final int maxUncompressedEntryBytes;
+
+  /// zip bomb 累计解压总体积上限（可注入小值测试）。
+  final int maxTotalUncompressedBytes;
 
   /// 程序目录是否可写（安装前提）。
   bool checkWritable() {
@@ -62,7 +75,9 @@ class WindowsInstaller {
   /// 把程序目录清空成空壳）；staging 已存在则先删除（幂等）。返回 staging 路径。
   /// 失败路径清理 staging（防半解压残留被当作可安装包）。
   Future<AppResult<String>> prepareStaging(String zipPath) async {
-    final staging = Directory('$programDir/${UpdateConfig.windowsStagingDirName}');
+    final staging = Directory(
+      '$programDir/${UpdateConfig.windowsStagingDirName}',
+    );
     try {
       if (staging.existsSync()) {
         staging.deleteSync(recursive: true);
@@ -83,18 +98,22 @@ class WindowsInstaller {
           if (_isUnsafePath(name)) {
             throw StateError('更新包包含非法路径条目（路径穿越风险）：$name');
           }
-          // 单条目解压后大小上限（zip bomb 高压缩比条目）。
-          if (file.size > UpdateConfig.maxUncompressedEntryBytes) {
-            throw StateError('更新包条目解压后体积超上限：$name');
+          // **zip bomb 按实际解压长度校验（r10）**：`file.size` 是中央目录
+          // 声明的元数据、可被攻击者伪造（声明小、实际 deflate 流超大）——
+          // 须在 [file.content] 实际解压后按真实长度判定（archive 4.x 惰性
+          // 解压，content 长度即真实体积）。
+          final content = file.content as List<int>;
+          if (content.length > maxUncompressedEntryBytes) {
+            throw StateError('更新包条目实际解压后体积超上限：$name');
           }
-          totalUncompressed += file.size;
-          // 累计解压体积上限。
-          if (totalUncompressed > UpdateConfig.maxTotalUncompressedBytes) {
+          totalUncompressed += content.length;
+          // 累计解压体积上限（同样按实际长度）。
+          if (totalUncompressed > maxTotalUncompressedBytes) {
             throw StateError('更新包解压总体积超上限');
           }
           final out = File('${staging.path}/$name');
           out.createSync(recursive: true);
-          out.writeAsBytesSync(file.content as List<int>, flush: true);
+          out.writeAsBytesSync(content, flush: true);
           fileCount += 1;
         }
       }
@@ -126,7 +145,9 @@ class WindowsInstaller {
   ///   走回滚（清空与恢复各自独立 try）。
   Future<AppResult<void>> applyStaging(String stagingPath) async {
     final staging = Directory(stagingPath);
-    final backupDir = Directory('$programDir/.backup-${DateTime.now().millisecondsSinceEpoch}');
+    final backupDir = Directory(
+      '$programDir/.backup-${DateTime.now().millisecondsSinceEpoch}',
+    );
     // ---- 备份阶段（失败绝不进清空路径）----
     // 前置守卫：staging 存在且递归含至少一个普通文件（IO 异常显式捕获——
     // 防 listSync 异常进入下方安装/回滚逻辑、在无备份时清空程序目录）。
@@ -142,9 +163,11 @@ class WindowsInstaller {
     try {
       // 备份当前程序目录（不含 staging 与备份自身）。
       if (Directory(programDir).existsSync()) {
-        _copyDirectory(Directory(programDir), backupDir, exclude: const {
-          UpdateConfig.windowsStagingDirName,
-        });
+        _copyDirectory(
+          Directory(programDir),
+          backupDir,
+          exclude: const {UpdateConfig.windowsStagingDirName},
+        );
       }
     } catch (e) {
       // 备份阶段失败（文件被占用/只读/IO 异常）：程序目录仍完好，**绝不
@@ -231,9 +254,7 @@ class WindowsInstaller {
       if (rollbackOk) {
         return AppFailure('安装更新失败（已回滚）：$e');
       }
-      return AppFailure(
-        '安装更新失败，且回滚未完成（备份保留在 $backupDir，请手动恢复）：$e',
-      );
+      return AppFailure('安装更新失败，且回滚未完成（备份保留在 $backupDir，请手动恢复）：$e');
     }
   }
 
@@ -260,11 +281,17 @@ class WindowsInstaller {
       // 会漏掉 `.. /evil.txt` 这类绕过（写入时解析为 `$staging/../evil.txt`）。
       // 先修剪尾部空格/点号再判。
       final trimmed = s.replaceAll(RegExp(r'[. ]+$'), '');
-      if (trimmed.isEmpty) return segments.length > 1;
+      // **裁剪后为空恒不安全（r10）**：`' '`/`'...'` 等经 Win32 规范化后会
+      // 归一化为空名/`.`——写入抛非法文件名异常或落盘非预期名称，一律拒绝。
+      if (trimmed.isEmpty) return true;
       if (trimmed == '.' || trimmed == '..') return true;
-      // **保留设备名（r9）**：CON/NUL/PRN/AUX/COM1-9/LPT1-9（带扩展名同拒）
-      // ——防设备访问/挂起（恶意 zip 写入 `nul` 等）。
-      if (_windowsReservedDevice.hasMatch(trimmed)) return true;
+      // **保留设备名（r9，r10 修正）**：CON/NUL/PRN/AUX/COM1-9/LPT1-9——
+      // 防设备访问/挂起（恶意 zip 写入 `nul` 等）。**空格绕过**：`CON .txt`
+      // 因中间空格不匹配 `CON(\..*)?$`，但 Win32 裁剪文件主名（最后一个点
+      // 之前部分）尾部空格后解析为 `CON.txt`——按第一个点拆主名、主名裁剪
+      // 尾部空格/点号后再匹配。
+      final main = trimmed.split('.').first.replaceAll(RegExp(r'[. ]+$'), '');
+      if (_windowsReservedDevice.hasMatch(main)) return true;
       return false;
     });
   }
@@ -279,8 +306,7 @@ class WindowsInstaller {
   /// 其 last 段为空串（Windows 上 `File/Directory.path` 混用反斜杠/正斜杠时
   /// 会静默失效，导致 `_clearProgramDir` 误删 staging/备份）。按两种分隔符
   /// 切分取末段。
-  static String _basename(String path) =>
-      path.split(RegExp(r'[\\/]')).last;
+  static String _basename(String path) => path.split(RegExp(r'[\\/]')).last;
 
   void _clearProgramDir() {
     for (final entry in Directory(programDir).listSync()) {
@@ -291,7 +317,11 @@ class WindowsInstaller {
     }
   }
 
-  void _copyDirectory(Directory from, Directory to, {required Set<String> exclude}) {
+  void _copyDirectory(
+    Directory from,
+    Directory to, {
+    required Set<String> exclude,
+  }) {
     to.createSync(recursive: true);
     for (final entry in from.listSync()) {
       final name = _basename(entry.path);

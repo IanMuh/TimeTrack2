@@ -58,13 +58,16 @@ class UpdateManifestService {
     required String currentVersion,
     http.Client? httpClient,
     Uri? manifestUrl,
-  })  : _current = AppVersion.parse(currentVersion), // 前置条件：currentVersion 必须合法 SemVer（构造期同步抛 FormatException）
-        _http = httpClient ?? http.Client(),
-        _ownsHttp = httpClient == null,
-        _manifestUrl = manifestUrl ?? UpdateConfig.defaultManifestUrl;
+  }) : _current = AppVersion.parse(
+         currentVersion,
+       ), // 前置条件：currentVersion 必须合法 SemVer（构造期同步抛 FormatException）
+       _http = httpClient ?? http.Client(),
+       _ownsHttp = httpClient == null,
+       _manifestUrl = manifestUrl ?? UpdateConfig.defaultManifestUrl;
 
   final AppDatabase database;
   final http.Client _http;
+
   /// 是否自建 http client（close 时释放；注入对象由调用方负责生命周期）。
   final bool _ownsHttp;
   final Uri _manifestUrl;
@@ -118,8 +121,9 @@ class UpdateManifestService {
     }
     final UpdateManifest manifest;
     try {
-      manifest =
-          UpdateManifest.fromMap(jsonDecode(response.body) as Map<String, Object?>);
+      manifest = UpdateManifest.fromMap(
+        jsonDecode(response.body) as Map<String, Object?>,
+      );
     } on FormatException catch (e) {
       return AppFailure('更新清单解析失败：${e.message}');
     } on TypeError {
@@ -175,25 +179,30 @@ class UpdateManifestService {
     if (_closed) {
       return const AppFailure('更新服务已关闭，请重新创建');
     }
-    await _writeString(AppMetadataKeys.lastCheckedManifestVersion, manifest.version);
-    return AppSuccess(UpdateCheckResult(
-      available: true,
-      latestVersion: manifest.version,
-      required: manifest.required,
-      releaseNotes: manifest.releaseNotes,
-      windows: manifest.windows,
-      android: manifest.android,
-    ));
+    await _writeString(
+      AppMetadataKeys.lastCheckedManifestVersion,
+      manifest.version,
+    );
+    return AppSuccess(
+      UpdateCheckResult(
+        available: true,
+        latestVersion: manifest.version,
+        required: manifest.required,
+        releaseNotes: manifest.releaseNotes,
+        windows: manifest.windows,
+        android: manifest.android,
+      ),
+    );
   }
 
   UpdateCheckResult _none(UpdateManifest manifest) => UpdateCheckResult(
-        available: false,
-        latestVersion: '',
-        required: false,
-        releaseNotes: '',
-        windows: null,
-        android: null,
-      );
+    available: false,
+    latestVersion: '',
+    required: false,
+    releaseNotes: '',
+    windows: null,
+    android: null,
+  );
 
   Future<String?> _readString(String key) async {
     final query = database.select(database.appMetadata)
@@ -203,7 +212,9 @@ class UpdateManifestService {
   }
 
   Future<void> _writeString(String key, String value) async {
-    await database.into(database.appMetadata).insertOnConflictUpdate(
+    await database
+        .into(database.appMetadata)
+        .insertOnConflictUpdate(
           AppMetadataCompanion.insert(key: key, value: value),
         );
   }

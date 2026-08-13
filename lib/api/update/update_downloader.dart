@@ -13,7 +13,14 @@ library;
 
 import 'dart:async';
 import 'dart:io'
-    show Directory, File, FileSystemException, HttpException, SocketException, TlsException;
+    show
+        Directory,
+        File,
+        FileSystemException,
+        HttpException,
+        SocketException,
+        TlsException,
+        stderr;
 
 import 'package:http/http.dart' as http;
 
@@ -46,22 +53,27 @@ class UpdateDownloader {
     Directory? tempDirectory,
     int? retryCount,
     Duration? retryBaseDelay,
-  })  : _http = httpClient ?? http.Client(),
-        _ownsHttp = httpClient == null,
-        _retryCount = retryCount ?? UpdateConfig.downloadRetryCount,
-        _retryBaseDelay = retryBaseDelay ?? UpdateConfig.retryBaseDelay,
-        _tempDirectory = tempDirectory;
+  }) : _http = httpClient ?? http.Client(),
+       _ownsHttp = httpClient == null,
+       _retryCount = retryCount ?? UpdateConfig.downloadRetryCount,
+       _retryBaseDelay = retryBaseDelay ?? UpdateConfig.retryBaseDelay,
+       _tempDirectory = tempDirectory;
 
   final http.Client _http;
+
   /// 是否自建 http client（close 时释放；注入对象由调用方负责生命周期）。
   final bool _ownsHttp;
+
   /// 重试次数（默认取 [UpdateConfig.downloadRetryCount]；测试注入小值免真实等待）。
   final int _retryCount;
+
   /// 退避基时（默认取 [UpdateConfig.retryBaseDelay]；测试注入零延迟）。
   final Duration _retryBaseDelay;
   final Directory? _tempDirectory;
+
   /// 临时文件名自增后缀（防同一微秒并发下载撞名覆盖）。
   int _seq = 0;
+
   /// 已关闭标记（close 后 download 明确拒绝——防已释放 client 抛异常逃逸）。
   bool _closed = false;
 
@@ -90,6 +102,11 @@ class UpdateDownloader {
     }
     var attempt = 0;
     while (true) {
+      // **重试间隙 close() 已触发（r10）**：下次尝试前重新检查——防对已关闭
+      // client 发起 send（异常被兜底分支捕获返回误导性文案而非"已关闭"）。
+      if (_closed) {
+        return const AppFailure('下载器已关闭，请重新创建');
+      }
       try {
         return AppSuccess(await _attemptDownload(url, onProgress: onProgress));
       } on SocketException {
@@ -126,11 +143,12 @@ class UpdateDownloader {
       } on FormatException {
         // 非法 URL。
         return const AppFailure('下载地址非法');
-      } catch (e) {
-        // **兜底归一化（r9）**：流消费期间的未知异常不逃逸——保证方法恒返回
-        // AppResult（防生产环境冒泡到全局错误处理）；不重试（未知异常归因
-        // 可能非瞬态）。
-        return AppFailure('下载失败，请稍后重试（$e）');
+      } on Exception catch (e) {
+        // **仅兜底 Exception（r10）**：Error（编程错误）不吞、交给全局错误
+        // 处理暴露（掩盖真实 bug 会增排障难度）；文案脱敏（不拼 `$e`——可能
+        // 含内部 URL/路径细节）。
+        stderr.writeln('[update] 下载未知异常：$e');
+        return const AppFailure('下载失败，请稍后重试');
       }
       attempt += 1;
       await Future<void>.delayed(_retryDelay(attempt));
@@ -141,8 +159,7 @@ class UpdateDownloader {
   bool _shouldRetry(int attempt) => attempt < _retryCount;
 
   /// 指数退避：`base * 2^attempt`（attempt 从 1 计，首次重试等待 base）。
-  Duration _retryDelay(int attempt) =>
-      _retryBaseDelay * (1 << (attempt - 1));
+  Duration _retryDelay(int attempt) => _retryBaseDelay * (1 << (attempt - 1));
 
   Future<DownloadResult> _attemptDownload(
     String url, {
@@ -158,7 +175,9 @@ class UpdateDownloader {
     // 请求仍可能稍后返回 StreamedResponse，本方法已返回失败/进入重试、无法
     // 消费该迟到响应；连接由 http 包 idle 超时兜底回收（已知边界，慢网络 +
     // 重试场景可堆积少量连接，属可接受权衡）。
-    final response = await _http.send(request).timeout(UpdateConfig.checkTimeout);
+    final response = await _http
+        .send(request)
+        .timeout(UpdateConfig.checkTimeout);
     // **4xx 不重试**（永久性错误）：抛专用异常，download() 直接失败带状态码。
     // 5xx 也先不重试（本模块传输层保守——调用方编排层可整体重试）。
     if (response.statusCode != 200) {
@@ -178,13 +197,13 @@ class UpdateDownloader {
       // **流读取超时**：响应头已返回但流挂起/断流不报错会无限等待——
       // 给整个流消费过程设独立超时（.timeout 包住 await for 的 future）。
       await response.stream.timeout(UpdateConfig.downloadStreamTimeout).forEach(
-            (chunk) {
-              sink.add(chunk);
-              received += chunk.length;
-              shaBuilder.add(chunk);
-              onProgress?.call(received, response.contentLength);
-            },
-          );
+        (chunk) {
+          sink.add(chunk);
+          received += chunk.length;
+          shaBuilder.add(chunk);
+          onProgress?.call(received, response.contentLength);
+        },
+      );
       await sink.close();
       closed = true;
     } catch (_) {
@@ -218,4 +237,3 @@ class HttpStatusException implements Exception {
 
   final int statusCode;
 }
-

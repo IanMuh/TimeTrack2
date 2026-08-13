@@ -18,12 +18,15 @@ import '../../utils/result.dart';
 
 /// Android 安装器（纯函数构造；真实 startActivity 由阶段 4 UI/平台层调用）。
 class AndroidInstaller {
-  const AndroidInstaller({this.providerAuthority = '$packageName.fileprovider'});
+  const AndroidInstaller({
+    this.providerAuthority = '$packageName.fileprovider',
+  });
 
   /// 应用包名（FileProvider authority 后缀；与 android/app/build.gradle.kts 的
   /// applicationId 一致——阶段 4 Manifest 的 provider authority 基于它声明，
   /// 防测试锁死错误值导致真机安装 URI 授权失败）。
   static const packageName = 'com.github.ianmuh.timetrack2';
+
   /// FileProvider authority（与阶段 4 Manifest 的 provider 声明一致）。
   final String providerAuthority;
 
@@ -67,7 +70,7 @@ class AndroidInstaller {
   /// 防误传 `file://` 或其它 provider 的 URI 时，配合 GRANT 标志向系统安装器
   /// 授予对非预期文件的读取权限。
   ({String action, String dataUri, String mimeType, int flags})
-      installIntentFor(String contentUri) {
+  installIntentFor(String contentUri) {
     if (!contentUri.startsWith('content://$providerAuthority/')) {
       throw ArgumentError.value(
         contentUri,
