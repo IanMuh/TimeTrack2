@@ -21,6 +21,7 @@ import '../../utils/result.dart';
 import '../../viewmodels/activity.dart';
 import '../../viewmodels/activity_category.dart';
 import '../../viewmodels/stats/stats_models.dart';
+import '../../viewmodels/time_entry.dart';
 import 'activity_repository.dart';
 import 'category_repository.dart';
 import 'time_entry_repository.dart';
@@ -47,13 +48,17 @@ class StatsRepository {
   ///
   /// [effectiveNow]：运行中条目（endAt == null）的裁剪终点，默认取当前时刻
   /// （可注入固定时刻做确定性测试）。范围非法（end <= start）返回空列表。
-  Future<AppResult<List<StatsEntrySlice>>> slicesForRange({
+  /// 返回记录含 [hasRunningEntry]：范围内是否存在运行中条目——供调用方决定
+  /// 是否可安全复用缓存（运行中条目随 effectiveNow/时钟增长，缓存须按
+  /// 时间敏感处理）。
+  Future<AppResult<({List<StatsEntrySlice> slices, bool hasRunningEntry})>>
+      slicesForRange({
     required DateTime start,
     required DateTime end,
     DateTime? effectiveNow,
   }) async {
     if (!start.isBefore(end)) {
-      return const AppSuccess([]);
+      return const AppSuccess((slices: [], hasRunningEntry: false));
     }
     final now = effectiveNow ?? DateTime.now();
     final activityResult = await activities.activities();
@@ -96,8 +101,19 @@ class StatsRepository {
     }
 
     final slices = <StatsEntrySlice>[];
-    final rangeEntries = await entries.entriesForRange(start, end);
+    var hasRunningEntry = false;
+    final List<TimeEntry> rangeEntries;
+    try {
+      rangeEntries = await entries.entriesForRange(start, end);
+    } catch (e) {
+      // 与其余查询一致收敛为 AppResult（entriesForRange 无内部 try/catch，
+      // DB 异常会直接抛出——不得穿透本方法的 AppResult 契约）。
+      return AppFailure('加载统计条目失败：$e');
+    }
     for (final entry in rangeEntries) {
+      if (entry.endAt == null) {
+        hasRunningEntry = true;
+      }
       final clippedStart = entry.startAt.isAfter(start) ? entry.startAt : start;
       final effectiveEnd = entry.endAt ?? now;
       final clippedEnd = effectiveEnd.isBefore(end) ? effectiveEnd : end;
@@ -130,7 +146,7 @@ class StatsRepository {
         ),
       );
     }
-    return AppSuccess(slices);
+    return AppSuccess((slices: slices, hasRunningEntry: hasRunningEntry));
   }
 
   /// 当前未删分类的 id → 模型 映射（categoryTree 聚合解析祖先名用）。
@@ -250,7 +266,9 @@ class StatsRepository {
       final category = categoryById[chain[i]];
       final label = [
         for (var j = 0; j <= i; j++)
-          categoryById[chain[j]]?.name ?? chain[j],
+          // 缺失节点（切片生成后分类被删/部分 map）回退可读文案，
+          // 避免把原始分类 id 拼进用户可见统计名。
+          categoryById[chain[j]]?.name ?? unassignedCategoryLabel,
       ].join(' / ');
       keys.add(
         _GroupKey(

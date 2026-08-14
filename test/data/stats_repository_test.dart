@@ -69,12 +69,14 @@ Future<void> seedEntry(
   required DateTime startAt,
   required DateTime endAt,
 }) async {
-  await h.entries.createManualEntry(
+  // 与 seedActivity/seedCategory 一致：补记失败（非法时间段/DB 异常）立即暴露
+  //（requireValue 抛 StateError），防失败被静默吞掉难以定位。
+  (await h.entries.createManualEntry(
     activityId: activityId,
     startAt: startAt,
     endAt: endAt,
     note: '',
-  );
+  )).requireValue();
 }
 
 void main() {
@@ -95,7 +97,7 @@ void main() {
       final slices = (await h.stats.slicesForRange(
         start: _t(10),
         end: _t(11),
-      )).requireValue();
+      )).requireValue().slices;
       expect(slices, hasLength(2)); // 11:00 起的条目被排除
       final total = slices.fold(Duration.zero, (s, x) => s + x.duration);
       expect(total, const Duration(hours: 1));
@@ -108,7 +110,7 @@ void main() {
       final slices = (await h.stats.slicesForRange(
         start: _t(10),
         end: _t(11),
-      )).requireValue();
+      )).requireValue().slices;
       expect(slices, hasLength(1));
       expect(slices.single.duration, const Duration(hours: 1));
     });
@@ -116,6 +118,7 @@ void main() {
     test('运行中条目（endAt==null）用 effectiveNow 裁剪', () async {
       final a = await seedActivity(h, name: 'A');
       final running = (await h.entries.switchToActivity(a.id)).requireValue();
+      expect(running.endAt, isNull, reason: 'switchToActivity 应返回运行中条目');
       // switchToActivity 的 startAt = DateTime.now()（不可注入）：
       // 用相对真实 now 的窗口保证确定性——range 覆盖运行条目起点，
       // effectiveNow = now+30m 裁剪 → 切片 = 30m。
@@ -126,7 +129,7 @@ void main() {
         start: start,
         end: end,
         effectiveNow: running.startAt.add(const Duration(minutes: 30)),
-      )).requireValue();
+      )).requireValue().slices;
       expect(slices, hasLength(1));
       expect(slices.first.duration, const Duration(minutes: 30));
     });
@@ -137,11 +140,11 @@ void main() {
       final slices = (await h.stats.slicesForRange(
         start: _t(11),
         end: _t(10),
-      )).requireValue();
+      )).requireValue().slices;
       expect(slices, isEmpty);
     });
 
-    test('活动/分类已删后：条目回退快照、分类链接失效', () async {
+    test('活动已删后：条目回退活动快照（名/色）', () async {
       final a = await seedActivity(h, name: 'A', color: 0x112233);
       await seedEntry(h, activityId: a.id, startAt: _t(10), endAt: _t(11));
       await h.activities.deleteActivity(a); // 软删活动
@@ -149,9 +152,34 @@ void main() {
       final slices = (await h.stats.slicesForRange(
         start: _t(10),
         end: _t(12),
-      )).requireValue();
+      )).requireValue().slices;
       expect(slices.first.activityLabel, 'A'); // 快照名
       expect(slices.first.activityColor, 0x112233); // 快照色
+    });
+
+    test('分类已删后：主分类链接失效，primary 回退 null', () async {
+      final a = await seedActivity(h, name: 'A');
+      final category = await seedCategory(h, name: '工作');
+      await h.categories.setActivityCategories(
+        activityId: a.id,
+        primaryCategoryId: category.id,
+      );
+      await seedEntry(h, activityId: a.id, startAt: _t(10), endAt: _t(11));
+
+      final before = (await h.stats.slicesForRange(
+        start: _t(10),
+        end: _t(12),
+      )).requireValue().slices;
+      expect(before.first.primaryCategoryId, category.id);
+
+      await h.categories.deleteCategory(category); // 软删分类
+
+      final after = (await h.stats.slicesForRange(
+        start: _t(10),
+        end: _t(12),
+      )).requireValue().slices;
+      expect(after.first.primaryCategoryId, isNull); // 链接失效，无主分类
+      expect(after.first.categoryAncestorIds, isEmpty);
     });
 
     test('主分类 = isPrimary 链接优先于 sortOrder', () async {
@@ -168,7 +196,7 @@ void main() {
       final slices = (await h.stats.slicesForRange(
         start: _t(10),
         end: _t(12),
-      )).requireValue();
+      )).requireValue().slices;
       expect(slices.first.primaryCategoryId, primary.id);
       expect(slices.first.primaryCategoryLabel, '主');
       expect(slices.first.categoryAncestorIds, [primary.id]);
@@ -180,7 +208,7 @@ void main() {
       final slices = (await h.stats.slicesForRange(
         start: _t(10),
         end: _t(12),
-      )).requireValue();
+      )).requireValue().slices;
       expect(slices.first.primaryCategoryId, isNull);
       expect(slices.first.categoryAncestorIds, isEmpty);
     });

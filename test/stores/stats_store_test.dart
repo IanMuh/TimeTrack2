@@ -153,6 +153,38 @@ void main() {
       expect(h.stats.snapshot, same(categoryView)); // 最近一次
     });
 
+    test('含运行中条目的快照不命中缓存（时间敏感，每次重算）', () async {
+      final a = (await h.activities.createActivity(name: 'A', color: 0))
+          .requireValue();
+      final running = (await h.entries.switchToActivity(a.id)).requireValue();
+      // 范围覆盖运行条目起点（startAt = 真实 now，不可注入）。
+      final start = running.startAt.subtract(const Duration(hours: 1));
+      final end = running.startAt.add(const Duration(hours: 1));
+
+      final first = await h.stats.compute(
+        start: start,
+        end: end,
+        dimension: StatsDimension.activity,
+      );
+      expect(first!.containsRunningEntry, isTrue);
+
+      // 同 revision 同参：含运行中条目 → 不命中缓存，返回新实例（重算）。
+      final second = await h.stats.compute(
+        start: start,
+        end: end,
+        dimension: StatsDimension.activity,
+      );
+      expect(identical(first, second), isFalse);
+    });
+
+    test('dataRevision 变更 → 清缓存并通知（UI 感知失效）', () async {
+      var notified = 0;
+      h.stats.addListener(() => notified++);
+      h.revision.bump();
+      expect(notified, 1);
+      expect(h.stats.snapshot, isNull);
+    });
+
     test('dispose 后不再响应 dataRevision（不再清缓存）', () async {
       final a = (await h.activities.createActivity(name: 'A', color: 0))
           .requireValue();
