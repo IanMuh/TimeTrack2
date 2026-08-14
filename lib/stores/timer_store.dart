@@ -117,7 +117,12 @@ class TimerStore extends ChangeNotifier {
     // 且可能改变运行条目——如 switch undo 恢复旧运行）。refresh 为 async，
     // 可能在 dispose 后恢复执行，须防护。
     _applier.onApplied = () {
-      if (_disposed) return;
+      if (_disposed) {
+        // 恢复写库已成功（DB 实际变更）——dispose 后仍须递增 revision
+        //（派生缓存/同步逻辑依赖），仅跳过 notify/refresh。
+        dataRevision.bump();
+        return;
+      }
       _afterWrite();
       refresh();
     };
@@ -296,7 +301,8 @@ class TimerStore extends ChangeNotifier {
       return const AppSuccess(null); // 无合并对象/原条目缺失：无 undo 记录
     }
     _lastAction = merged.entry;
-    _runningEntry = null; // 合并不涉及运行条目（合并仅已结束条目）
+    // 合并不涉及运行条目（merge 仅已结束条目，仓储已拒绝运行中）——
+    // 运行态缓存保持不变（若有运行计时，不得因合并其他条目被清空）。
     final neighborValue = neighbor.requireValue();
     undo.record(
       label: '合并',

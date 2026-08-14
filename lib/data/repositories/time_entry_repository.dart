@@ -326,8 +326,9 @@ class TimeEntryRepository with RepositoryMappings {
 
   /// 与相邻条目合并（合并后软删相邻，取并集时间窗与合并 note）。
   ///
-  /// 返回：合并结果 [entry]（首段，id 同原条目）+ [savedRows]（实际入库
-  /// 全部行，含跨日切分的派生段——undo 恢复需清除这些段）；无合并对象
+  /// 返回：合并结果 [entry]（首段，id 同原条目）+ [savedRows]（**合并产物的
+  /// 入库行**，含跨日切分的派生段——undo 恢复需清除这些段；软删的邻居行
+  /// 不在其内，由调用方凭 before/neighbor 快照单独恢复）；无合并对象
   ///（无邻居/阈值超限/跨活动）→ null。
   Future<AppResult<({TimeEntry entry, List<TimeEntry> savedRows})?>>
       mergeEntryWithNeighbor({

@@ -177,6 +177,16 @@ void main() {
       expect(merged, isNotNull);
       expect(merged!.startAt, DateTime(2026, 8, 14, 10));
       expect(merged.endAt, DateTime(2026, 8, 14, 12));
+      // 中间态：邻居 first 软删 + 活动 A 仅剩一条非删行（合并行=second）。
+      expect((await h.entries.entryByIdIncludingDeleted(first.id))!.isDeleted,
+          isTrue);
+      final surviving = (await h.entries.allEntries())
+          .where((e) => !e.isDeleted && e.activityId == a.id)
+          .toList();
+      expect(surviving, hasLength(1));
+      expect(surviving.single.id, second.id);
+      expect(surviving.single.startAt, DateTime(2026, 8, 14, 10));
+      expect(surviving.single.endAt, DateTime(2026, 8, 14, 12));
       // undo：恢复 first 与 second。
       await h.undo.undo();
       expect(
@@ -195,6 +205,63 @@ void main() {
       // beforeRunning == null → _recordSwitchOrStop 直接返回（无 undo 记录）。
       expect(h.undo.undoDepth, before);
       expect(h.undo.canUndo, isFalse);
+    });
+
+    test('运行计时中合并已结束条目：运行态缓存保留', () async {
+      final a = (await h.activities.createActivity(name: 'A', color: 0))
+          .requireValue();
+      final b = (await h.activities.createActivity(name: 'B', color: 0))
+          .requireValue();
+      // 先开始 B 计时。
+      final running = (await h.timer.switchToActivity(b.id)).requireValue();
+      expect(h.timer.runningEntry?.id, running.id);
+      // 再补记一条 A 的已结束条目并合并（合并不涉及运行条目）。
+      final first = (await h.timer.addEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 14, 10),
+        endAt: DateTime(2026, 8, 14, 11),
+        note: '',
+      )).requireValue();
+      await h.timer.addEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 14, 11),
+        endAt: DateTime(2026, 8, 14, 12),
+        note: '',
+      );
+      await h.timer.mergeWithNeighbor(
+        entryId: first.id,
+        mergePrevious: false,
+      );
+      // 运行态缓存必须保留（未被合并清空）。
+      expect(h.timer.runningEntry?.id, running.id);
+      expect(h.timer.runningEntry?.isRunning, isTrue);
+    });
+
+    test('合并间隔超阈值：返回 null 且不产生 undo 记录', () async {
+      final a = (await h.activities.createActivity(name: 'A', color: 0))
+          .requireValue();
+      // 默认阈值 1 分钟：间隔 30 分钟 > 阈值 → 不可合并。
+      await h.timer.addEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 14, 10),
+        endAt: DateTime(2026, 8, 14, 11),
+        note: '',
+      );
+      final second = (await h.timer.addEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 14, 11, 30),
+        endAt: DateTime(2026, 8, 14, 12),
+        note: '',
+      )).requireValue();
+      final before = h.undo.undoDepth;
+      final merged = (await h.timer.mergeWithNeighbor(
+        entryId: second.id,
+        mergePrevious: true, // 与 first 间隔 30m > 阈值 1m
+      )).requireValue();
+      expect(merged, isNull); // 无合并对象（阈值超限归为业务 null）
+      expect(h.undo.undoDepth, before); // 无 undo 记录
+      expect((await h.entries.entryByIdIncludingDeleted(second.id))!.isDeleted,
+          isFalse); // 未被软删
     });
 
     test('undo 恢复写库后 dataRevision 递增（恢复作为新修改参与同步）', () async {
