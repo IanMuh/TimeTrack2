@@ -340,6 +340,52 @@ class CategoryRepository with RepositoryMappings {
     }
   }
 
+  /// undo/redo 批量恢复写库（**单事务**，3a 事务化 applier 契约）：
+  /// 整条 undo 记录涉及的全部分类与 links 在同一个 drift transaction 内
+  /// 恢复（softDelete=false：写回快照并推进 updatedAt）或软删
+  /// （softDelete=true：deletedAt = 推进后的 updatedAt）。
+  ///
+  /// 分类级联删除的恢复（CategoryDeletion.categories+links 一次性复活/重删）
+  /// 由此保证原子性，防 undo 半恢复（计划风险 10）。
+  Future<AppResult<void>> restoreCategoryStatesForUndo(
+    List<({ActivityCategory entry, bool softDelete})> categories,
+    List<({ActivityCategoryLink entry, bool softDelete})> links, {
+    DateTime? at,
+  }) async {
+    try {
+      final now = at ?? DateTime.now();
+      await database.transaction(() async {
+        for (final op in categories) {
+          final target = op.softDelete
+              ? op.entry.copyWith(deletedAt: now, updatedAt: now)
+              : op.entry.copyWith(
+                  deletedAt: null,
+                  clearDeletedAt: true,
+                  updatedAt: now,
+                );
+          await database.into(database.activityCategories).insertOnConflictUpdate(
+                categoryToCompanion(target),
+              );
+        }
+        for (final op in links) {
+          final target = op.softDelete
+              ? op.entry.copyWith(deletedAt: now, updatedAt: now)
+              : op.entry.copyWith(
+                  deletedAt: null,
+                  clearDeletedAt: true,
+                  updatedAt: now,
+                );
+          await database.into(database.activityCategoryLinks).insertOnConflictUpdate(
+                linkToCompanion(target),
+              );
+        }
+      });
+      return const AppSuccess(null);
+    } catch (e) {
+      return AppFailure('恢复分类状态失败：$e');
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // 同步（LWW 整行替换）
   // ---------------------------------------------------------------------------
@@ -442,6 +488,31 @@ class CategoryRepository with RepositoryMappings {
   Future<ActivityCategory?> _categoryById(String id) async {
     final row = await _categoryRowById(id);
     return row == null ? null : categoryFromRow(row);
+  }
+
+  /// 按 id 查询分类（**含软删行**）：undo 冲突校验/恢复快照采集用——
+  /// 操作后软删的旧行需读取其软删态作为预期状态。
+  Future<ActivityCategory?> categoryByIdIncludingDeleted(String id) async {
+    try {
+      final query = database.select(database.activityCategories)
+        ..where((t) => t.id.equals(id));
+      final row = await query.getSingleOrNull();
+      return row == null ? null : categoryFromRow(row);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 按 id 查询链接（**含软删行**）：undo 冲突校验/恢复快照采集用。
+  Future<ActivityCategoryLink?> linkByIdIncludingDeleted(String id) async {
+    try {
+      final query = database.select(database.activityCategoryLinks)
+        ..where((t) => t.id.equals(id));
+      final row = await query.getSingleOrNull();
+      return row == null ? null : linkFromRow(row);
+    } catch (_) {
+      return null;
+    }
   }
 
   /// 批量按分类 id 查 links（递归软删用，避免 N+1）。
