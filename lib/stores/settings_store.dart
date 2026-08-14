@@ -87,6 +87,7 @@ class SettingsStore extends ChangeNotifier {
     if (result case AppFailure<ProfileSettings> _) {
       return; // 加载失败保持旧值（默认值由仓储兜底）
     }
+    if (_disposed) return; // await 期间可能已 dispose
     _current = result.requireValue();
     notifyListeners();
   }
@@ -101,6 +102,7 @@ class SettingsStore extends ChangeNotifier {
     if (result case AppFailure<ProfileSettings> failure) {
       return failure;
     }
+    if (_disposed) return result; // await 期间可能已 dispose：不写缓存/不通知
     final saved = result.requireValue();
     _current = saved;
     if (before != null && before != saved) {

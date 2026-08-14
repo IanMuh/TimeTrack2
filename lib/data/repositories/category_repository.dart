@@ -1,3 +1,5 @@
+import 'dart:io' show stderr;
+
 import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
 
@@ -490,15 +492,20 @@ class CategoryRepository with RepositoryMappings {
     return row == null ? null : categoryFromRow(row);
   }
 
-  /// 按 id 查询分类（**含软删行**）：undo 冲突校验/恢复快照采集用——
-  /// 操作后软删的旧行需读取其软删态作为预期状态。
+  /// 按 id 查询分类（**含软删行**）：undo 冲突校验/恢复快照采集用。
+  ///
+  /// 复用 [_categoryById]（本就不过滤软删行）；查询异常记录 stderr 后返回
+  /// null（与 [CategoryChangeApplier.validate] 的"行不存在"语义一致——
+  /// 但真实错误被日志暴露，不静默掩盖）。
   Future<ActivityCategory?> categoryByIdIncludingDeleted(String id) async {
     try {
-      final query = database.select(database.activityCategories)
-        ..where((t) => t.id.equals(id));
-      final row = await query.getSingleOrNull();
-      return row == null ? null : categoryFromRow(row);
-    } catch (_) {
+      return await _categoryById(id);
+    } catch (e) {
+      try {
+        stderr.writeln('[category] 查询分类失败：$e');
+      } catch (_) {
+        // 日志写入失败不影响结论。
+      }
       return null;
     }
   }
@@ -506,11 +513,13 @@ class CategoryRepository with RepositoryMappings {
   /// 按 id 查询链接（**含软删行**）：undo 冲突校验/恢复快照采集用。
   Future<ActivityCategoryLink?> linkByIdIncludingDeleted(String id) async {
     try {
-      final query = database.select(database.activityCategoryLinks)
-        ..where((t) => t.id.equals(id));
-      final row = await query.getSingleOrNull();
-      return row == null ? null : linkFromRow(row);
-    } catch (_) {
+      return await _linkById(id);
+    } catch (e) {
+      try {
+        stderr.writeln('[category] 查询链接失败：$e');
+      } catch (_) {
+        // 日志写入失败不影响结论。
+      }
       return null;
     }
   }

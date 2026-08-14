@@ -127,6 +127,11 @@ class CategoryStore extends ChangeNotifier {
 
   bool _disposed = false;
 
+  /// reload 序号守卫：_afterWrite/onApplied 以 fire-and-forget 触发 reload，
+  /// 连续写/undo/redo 时并发 reload 可能乱序完成——仅应用最新一次启动的结果
+  ///（防旧数据覆盖新缓存）。
+  int _reloadSeq = 0;
+
   /// 全量未删分类（缓存；写后/数据变更后 [reload] 重建）。
   List<ActivityCategory> _all = const [];
   List<ActivityCategoryLink> _links = const [];
@@ -144,25 +149,26 @@ class CategoryStore extends ChangeNotifier {
   Map<String, List<String>> get ancestorChains => _ancestorChains;
   Map<String, List<String>> _ancestorChains = const {};
 
-  /// 全量未删分类（缓存视图）。
-  List<ActivityCategory> get all => _all;
+  /// 全量未删分类（缓存视图，不可变——防外部绕过写路径篡改缓存）。
+  List<ActivityCategory> get all => List.unmodifiable(_all);
 
-  /// 全量未删链接（缓存视图）。
-  List<ActivityCategoryLink> get links => _links;
+  /// 全量未删链接（缓存视图，不可变）。
+  List<ActivityCategoryLink> get links => List.unmodifiable(_links);
 
   /// 加载分类/链接并重建树索引（启动、数据变更后调用）。
   Future<void> reload() async {
     if (_disposed) return; // dispose 后静默跳过（防 async 恢复执行崩溃）
+    final seq = ++_reloadSeq;
     final categoriesResult = await categories.categories();
     if (categoriesResult case AppFailure<List<ActivityCategory>> _) {
       return; // 加载失败保持旧缓存（下一轮数据变更再试）
     }
-    if (_disposed) return; // await 期间可能已 dispose
+    if (_disposed || seq != _reloadSeq) return; // await 期间 dispose/更新的 reload
     final linksResult = await categories.links();
     if (linksResult case AppFailure<List<ActivityCategoryLink>> _) {
       return;
     }
-    if (_disposed) return;
+    if (_disposed || seq != _reloadSeq) return;
     _all = categoriesResult.requireValue();
     _links = linksResult.requireValue();
     _rebuildIndexes();
@@ -174,7 +180,7 @@ class CategoryStore extends ChangeNotifier {
   Map<String, ActivityCategory> _categoryById = const {};
 
   void _rebuildIndexes() {
-    _categoryById = {for (final c in _all) c.id: c};
+    _categoryById = Map.unmodifiable({for (final c in _all) c.id: c});
     // children 的 key 为 parentId（顶层分类 = null）。
     final children = <String?, List<ActivityCategory>>{};
     final ancestors = <String, List<String>>{};
@@ -200,8 +206,18 @@ class CategoryStore extends ChangeNotifier {
     for (final list in children.values) {
       list.sort((a, b) => a.name.compareTo(b.name));
     }
-    _childrenByParent = Map.unmodifiable(children);
-    _ancestorChains = Map.unmodifiable(ancestors);
+    // 两段式构造不可变索引（显式类型标注，规避 map literal + for 元素的
+    // 值类型推断在部分运行时的 cast 问题）。
+    final immutableChildren = <String?, List<ActivityCategory>>{};
+    for (final entry in children.entries) {
+      immutableChildren[entry.key] = List<ActivityCategory>.unmodifiable(entry.value);
+    }
+    _childrenByParent = Map.unmodifiable(immutableChildren);
+    final immutableAncestors = <String, List<String>>{};
+    for (final entry in ancestors.entries) {
+      immutableAncestors[entry.key] = List<String>.unmodifiable(entry.value);
+    }
+    _ancestorChains = Map.unmodifiable(immutableAncestors);
     _descendantsOf = _buildDescendants();
   }
 
@@ -224,7 +240,11 @@ class CategoryStore extends ChangeNotifier {
         if (parentSet.length != before) changed = true;
       }
     }
-    return Map.unmodifiable(result);
+    final immutableDescendants = <String, Set<String>>{};
+    for (final entry in result.entries) {
+      immutableDescendants[entry.key] = Set<String>.unmodifiable(entry.value);
+    }
+    return Map.unmodifiable(immutableDescendants);
   }
 
   // ---------------------------------------------------------------------------
@@ -372,18 +392,24 @@ class CategoryStore extends ChangeNotifier {
       label: '设置分类',
       changes: [
         UndoChange(
-          // undo：写回旧链接集（含被软删的旧链接复活）；redo：软删旧链接
-          //（新链接集保持）。
+          // undo：写回旧链接集（含被软删的旧链接复活）+ **本次新建链接软删**
+          //（saved 中不属于 oldLinks 的——首次分配等场景，undo 须移除）；
+          // redo：整个新链接集写回（含被重新激活的软删旧链接）+ 未保留
+          // 旧链接软删——保证单条 undo 记录完整性。
           before: CategoryStateChange(
             categories: const [],
             links: [
               for (final l in oldLinks)
                 (entry: l, softDelete: l.isDeleted),
+              for (final s in saved)
+                if (!oldLinks.any((l) => l.id == s.id))
+                  (entry: s, softDelete: true),
             ],
           ),
           after: CategoryStateChange(
             categories: const [],
             links: [
+              for (final s in saved) (entry: s, softDelete: false),
               for (final l in oldLinks)
                 if (!saved.any((s) => s.id == l.id))
                   (entry: l, softDelete: true),

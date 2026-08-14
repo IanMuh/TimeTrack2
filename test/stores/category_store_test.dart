@@ -3,23 +3,16 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:timetrack2/data/database/app_database.dart' hide ProfileSettings;
 import 'package:timetrack2/data/repositories/activity_repository.dart';
 import 'package:timetrack2/data/repositories/category_repository.dart';
-import 'package:timetrack2/data/repositories/settings_repository.dart';
-import 'package:timetrack2/data/repositories/time_entry_repository.dart';
 import 'package:timetrack2/stores/category_store.dart';
 import 'package:timetrack2/stores/data_revision.dart';
 import 'package:timetrack2/stores/undo_store.dart';
+import 'package:timetrack2/utils/result.dart';
 
 class TestHarness {
   TestHarness() {
     db = AppDatabase(NativeDatabase.memory());
     activities = ActivityRepository(database: db);
     categories = CategoryRepository(database: db);
-    settings = SettingsRepository(database: db);
-    entries = TimeEntryRepository(
-      database: db,
-      activityRepository: activities,
-      settingsRepository: settings,
-    );
     undo = UndoStore();
     revision = DataRevision();
     store = CategoryStore(
@@ -32,11 +25,12 @@ class TestHarness {
   late final AppDatabase db;
   late final ActivityRepository activities;
   late final CategoryRepository categories;
-  late final SettingsRepository settings;
-  late final TimeEntryRepository entries;
   late final UndoStore undo;
   late final DataRevision revision;
   late final CategoryStore store;
+
+  /// 等待 store 缓存就绪（写路径 reload 是 fire-and-forget）。
+  Future<void> settleCache() => store.reload();
 
   Future<void> close() async {
     store.dispose();
@@ -52,7 +46,7 @@ void main() {
 
     setUp(() async {
       h = TestHarness();
-      await h.store.reload();
+      await h.settleCache();
     });
     tearDown(() => h.close());
 
@@ -70,7 +64,7 @@ void main() {
         parentId: child.id,
       )).requireValue();
       // 写路径的 reload 是 fire-and-forget：断言前显式 await 缓存就绪。
-      await h.store.reload();
+      await h.settleCache();
 
       expect(h.store.childrenByParent[null]!.map((c) => c.id), [root.id]);
       expect(h.store.childrenByParent[root.id]!.map((c) => c.id), [child.id]);
@@ -95,7 +89,7 @@ void main() {
 
     setUp(() async {
       h = TestHarness();
-      await h.store.reload();
+      await h.settleCache();
     });
     tearDown(() => h.close());
 
@@ -148,7 +142,7 @@ void main() {
         primaryCategoryId: grand.id,
       );
       expect(h.undo.undoDepth, 0); // seed 不入 undo 栈
-      await h.store.reload(); // 同步 store 缓存
+      await h.settleCache(); // 同步 store 缓存
 
       final deletion = (await h.store.deleteCategory(root.id)).requireValue();
       expect(deletion.categories, hasLength(3)); // root+child+grand
@@ -190,7 +184,7 @@ void main() {
         parentId: root.id,
       )).requireValue();
       await h.store.deleteCategory(root.id);
-      await h.store.reload(); // 写路径 reload 是 fire-and-forget：显式等就绪
+      await h.settleCache(); // 写路径 reload 是 fire-and-forget：显式等就绪
       expect(h.store.all, isEmpty);
       expect(h.store.childrenByParent[null], isNull);
       expect(h.store.descendantsOf[child.id], isNull);
@@ -219,6 +213,147 @@ void main() {
           .toList();
       expect(links.map((l) => l.categoryId), containsAll([c1.id, c2.id]));
       expect(links.firstWhere((l) => l.categoryId == c1.id).isPrimary, isTrue);
+    });
+
+    test('setActivityCategories 首次分配 undo：新建链接被移除', () async {
+      final activity = (await h.activities.createActivity(name: 'A', color: 0))
+          .requireValue();
+      final c1 = (await h.store.createCategory(name: 'c1', color: 0))
+          .requireValue();
+      // 首次分配（oldLinks 为空）：undo 须移除新建链接（防残留）。
+      final saved = (await h.store.setActivityCategories(
+        activityId: activity.id,
+        primaryCategoryId: c1.id,
+      )).requireValue();
+      expect(saved, hasLength(1));
+
+      await h.undo.undo();
+      final afterUndo = (await h.categories.links(includeDeleted: true))
+          .requireValue()
+          .where((l) => l.activityId == activity.id)
+          .toList();
+      // 新建链接被软删（includeDeleted 列表含软删行——断言无激活链接）。
+      expect(afterUndo.where((l) => !l.isDeleted), isEmpty);
+      expect(afterUndo, hasLength(1)); // 软删行留存（LWW 传播语义）
+
+      await h.undo.redo();
+      final afterRedo = (await h.categories.links(includeDeleted: true))
+          .requireValue()
+          .where((l) => l.activityId == activity.id && !l.isDeleted)
+          .toList();
+      expect(afterRedo, hasLength(1)); // redo 恢复新链接集
+    });
+
+    test('setActivityCategories 重新激活旧链接 redo：保持激活态', () async {
+      final activity = (await h.activities.createActivity(name: 'A', color: 0))
+          .requireValue();
+      final c1 = (await h.store.createCategory(name: 'c1', color: 0))
+          .requireValue();
+      await h.store.setActivityCategories(
+        activityId: activity.id,
+        primaryCategoryId: c1.id,
+      );
+      // 第二次：移除 c1（旧链接被软删），再恢复（重新激活）。
+      await h.store.setActivityCategories(activityId: activity.id);
+      await h.store.setActivityCategories(
+        activityId: activity.id,
+        primaryCategoryId: c1.id,
+      );
+      await h.undo.undo(); // 回到"移除 c1"（c1 软删）
+      await h.undo.undo(); // 回到"首次分配"（c1 激活）
+      // redo 两次：第一次重新激活（redo 写回新链接集含激活态），
+      // 第二次保持激活。
+      await h.undo.redo();
+      await h.undo.redo();
+      final active = (await h.categories.links())
+          .requireValue()
+          .where((l) => l.activityId == activity.id)
+          .toList();
+      expect(active, hasLength(1)); // c1 保持激活（未被误软删）
+      expect(active.single.isDeleted, isFalse);
+    });
+
+    test('缓存集合不可变（外部篡改抛错）', () async {
+      await h.store.createCategory(name: 'X', color: 0);
+      await h.settleCache();
+      expect(
+        () => h.store.all.add(h.store.all.first),
+        throwsUnsupportedError,
+      );
+      expect(
+        () => h.store.categoryById['missing'] = h.store.categoryById.values.first,
+        throwsUnsupportedError,
+      );
+    });
+  });
+
+  group('CategoryRepository.restoreCategoryStatesForUndo（直接）', () {
+    late TestHarness h;
+
+    setUp(() async {
+      h = TestHarness();
+      await h.settleCache();
+    });
+    tearDown(() => h.close());
+
+    test('单事务恢复：分类+links 混排原子生效', () async {
+      final root = (await h.categories.createCategory(name: '工作', color: 0))
+          .requireValue();
+      final child = (await h.categories.createCategory(
+        name: '项目A',
+        color: 0,
+        parentId: root.id,
+      )).requireValue();
+      final activity = (await h.activities.createActivity(name: 'A', color: 0))
+          .requireValue();
+      final saved = (await h.categories.setActivityCategories(
+        activityId: activity.id,
+        primaryCategoryId: child.id,
+      )).requireValue();
+      // 软删 root（级联）后，直接调用恢复（绕过 store/undo 栈）。
+      await h.categories.deleteCategory(root);
+
+      final result = await h.categories.restoreCategoryStatesForUndo(
+        [
+          (entry: root, softDelete: false),
+          (entry: child, softDelete: false),
+        ],
+        [
+          for (final l in saved) (entry: l, softDelete: false),
+        ],
+      );
+      expect(result, isA<AppSuccess<void>>());
+      expect(
+          (await h.categories.categoryByIdIncludingDeleted(root.id))!.isDeleted,
+          isFalse);
+      expect(
+          (await h.categories.categoryByIdIncludingDeleted(child.id))!.isDeleted,
+          isFalse);
+      expect((await h.categories.links()).requireValue(), isNotEmpty);
+    });
+
+    test('空列表调用：无操作成功返回', () async {
+      final result = await h.categories.restoreCategoryStatesForUndo(
+        const [],
+        const [],
+      );
+      expect(result, isA<AppSuccess<void>>());
+    });
+
+    test('softDelete=true：重软删已复活行', () async {
+      final root = (await h.categories.createCategory(name: '工作', color: 0))
+          .requireValue();
+      await h.categories.restoreCategoryStatesForUndo(
+        [(entry: root, softDelete: false)],
+        const [],
+      );
+      await h.categories.restoreCategoryStatesForUndo(
+        [(entry: root, softDelete: true)],
+        const [],
+      );
+      expect(
+          (await h.categories.categoryByIdIncludingDeleted(root.id))!.isDeleted,
+          isTrue);
     });
   });
 }
