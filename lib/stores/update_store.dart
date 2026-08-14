@@ -14,6 +14,8 @@
 ///（Windows staging 两阶段；Android tryInstallApk 阶段 4 显式 UnsupportedError）。
 library;
 
+import 'dart:io' show stderr;
+
 import 'package:flutter/foundation.dart';
 
 import '../api/update/update_manifest_service.dart';
@@ -149,7 +151,7 @@ class UpdateStore extends ChangeNotifier {
     // 旧值），须统一覆盖 state，防"迁移后状态停留旧值"（copyWith 不自动
     // 设 state 的陷阱）。
     _status = (withStatus ?? _status).copyWith(state: next);
-    notifyListeners();
+    if (!_closed) notifyListeners(); // dispose 后不通知（进度回调异步驱动）
   }
 
   // ---------------------------------------------------------------------------
@@ -165,8 +167,10 @@ class UpdateStore extends ChangeNotifier {
       result = await manifestService.checkForUpdate();
     } on Exception catch (e) {
       // 契约外异常（AppResult 未覆盖路径）：收敛为失败，防状态停留 checking。
-      _fail('更新检查异常：$e');
-      return AppFailure('更新检查异常：$e');
+      // 文案脱敏（不拼 $e——可能含内部 URL/路径细节），详细原因写 stderr。
+      stderr.writeln('[update] 检查异常：$e');
+      _fail('更新检查失败，请稍后重试');
+      return AppFailure('更新检查失败，请稍后重试');
     }
     if (result case AppFailure<UpdateCheckResult> failure) {
       _fail(failure.message);
@@ -196,6 +200,13 @@ class UpdateStore extends ChangeNotifier {
   /// 下载并校验更新包（进度回调节流合并）。成功后状态到 verifying。
   Future<AppResult<UpdateVerifierResult>> download() async {
     if (_closed) return const AppFailure('更新服务已关闭');
+    // 重入保护（幂等事件返回失败而非崩溃——头注释契约）：下载中/校验中/
+    // 安装中再次调用返回失败。
+    if (_status.state == UpdateState.downloading ||
+        _status.state == UpdateState.verifying ||
+        _status.state == UpdateState.installing) {
+      return const AppFailure('下载/安装已在进行中');
+    }
     // 先校验迁移合法（idle 直接 download 抛 StateError——fail-fast），
     // 再查平台产物（available 且无产物才业务失败）。
     _transition(UpdateState.downloading);
@@ -207,23 +218,32 @@ class UpdateStore extends ChangeNotifier {
     // 进度节流：最后一次回调更新进度字段（不逐条迁移状态）。
     var lastProgressAt = DateTime.now();
     var lastReceived = 0;
-    final result = await verifier.downloadAndVerify(
-      artifact,
-      onProgress: (received, total) {
-        // 节流合并：≥ 100ms 或字节变化才更新（防高频回调重建）。
-        final now = DateTime.now();
-        if (now.difference(lastProgressAt) >= const Duration(milliseconds: 100) ||
-            received != lastReceived) {
-          lastProgressAt = now;
-          lastReceived = received;
-          _status = _status.copyWith(
-            receivedBytes: received,
-            totalBytes: total,
-          );
-          notifyListeners();
-        }
-      },
-    );
+    final AppResult<UpdateVerifierResult> result;
+    try {
+      result = await verifier.downloadAndVerify(
+        artifact,
+        onProgress: (received, total) {
+          // 节流合并：≥ 100ms 或字节变化才更新（防高频回调重建）。
+          final now = DateTime.now();
+          if (now.difference(lastProgressAt) >= const Duration(milliseconds: 100) ||
+              received != lastReceived) {
+            lastProgressAt = now;
+            lastReceived = received;
+            _status = _status.copyWith(
+              receivedBytes: received,
+              totalBytes: total,
+            );
+            if (!_closed) notifyListeners(); // dispose 后不通知
+          }
+        },
+      );
+    } on Exception catch (e) {
+      // 契约外异常（AppResult 未覆盖路径）：收敛为失败，防状态停留
+      // downloading（与 check() 一致）。
+      stderr.writeln('[update] 下载异常：$e');
+      _fail('下载失败，请稍后重试');
+      return const AppFailure('下载失败，请稍后重试');
+    }
     if (result case AppFailure<UpdateVerifierResult> failure) {
       _status = _status.copyWith(
         state: UpdateState.failed,
@@ -242,12 +262,29 @@ class UpdateStore extends ChangeNotifier {
     return result;
   }
 
-  /// 安装更新（Windows staging 两阶段；Android 阶段 4 UnsupportedError）。
+  /// 安装更新（按平台分发：Windows staging 两阶段；Android 阶段 4 未支持；
+  /// 其余平台业务失败）。
   Future<AppResult<void>> install() async {
     if (_closed) return const AppFailure('更新服务已关闭');
     final verified = _verifiedResult;
     if (verified == null) {
       return const AppFailure('尚未完成下载校验，无法安装');
+    }
+    if (_status.state == UpdateState.installing) {
+      return const AppFailure('安装已在进行中');
+    }
+    // 平台分发：仅 Windows 走 WindowsInstaller；Android 阶段 4 未支持；
+    // Linux/macOS 无安装器（业务失败）。
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.windows:
+        break;
+      case TargetPlatform.android:
+        return _fail('Android 自动安装待阶段 4 支持——请从下载页手动安装');
+      case TargetPlatform.linux:
+      case TargetPlatform.macOS:
+        return _fail('当前平台暂不支持自动安装——请从下载页手动获取更新');
+      default:
+        return _fail('当前平台暂不支持自动安装');
     }
     _transition(UpdateState.installing);
     try {
@@ -266,15 +303,16 @@ class UpdateStore extends ChangeNotifier {
       }
       _transition(UpdateState.restartRequired);
       return const AppSuccess(null);
-    } on UnsupportedError {
-      // Android tryInstallApk 阶段 4 未实现：透传提示。
-      return _fail('Android 自动安装待阶段 4 支持——请从下载页手动安装');
+    } on Exception catch (e) {
+      // 契约外异常收敛（防状态停留 installing）。
+      stderr.writeln('[update] 安装异常：$e');
+      return _fail('安装失败，请稍后重试');
     }
   }
 
   AppResult<void> _fail(String message) {
     _status = _status.copyWith(state: UpdateState.failed, errorMessage: message);
-    notifyListeners();
+    if (!_closed) notifyListeners(); // dispose 后不通知
     return AppFailure(message);
   }
 
@@ -290,38 +328,46 @@ class UpdateStore extends ChangeNotifier {
         return check.windows;
       case TargetPlatform.android:
         return check.android;
-      case TargetPlatform.linux:
-      case TargetPlatform.macOS:
-        // 阶段 3 仅 Windows 安装器；其余桌面平台 artifact 存在时下载可完成，
-        // install 由安装器/阶段 4 处理。
-        return check.windows;
       default:
+        // Linux/macOS 无安装器（阶段 3）：不下载（避免下载错误平台产物）。
         return null;
     }
   }
 
   /// 忽略此版本（"忽略此版本"持久化——存储键已建）。
   Future<AppResult<void>> ignoreCurrentVersion() async {
+    if (_closed) return const AppFailure('更新服务已关闭');
     final version = _status.latestVersion;
     if (version.isEmpty) return const AppFailure('当前无待忽略的更新版本');
-    await (database.into(database.appMetadata).insertOnConflictUpdate(
-      AppMetadataCompanion.insert(
-        key: AppMetadataKeys.ignoredUpdateVersion,
-        value: version,
-      ),
-    ));
-    return const AppSuccess(null);
+    try {
+      await (database.into(database.appMetadata).insertOnConflictUpdate(
+        AppMetadataCompanion.insert(
+          key: AppMetadataKeys.ignoredUpdateVersion,
+          value: version,
+        ),
+      ));
+      return const AppSuccess(null);
+    } on Exception catch (e) {
+      stderr.writeln('[update] 记录忽略版本失败：$e');
+      return const AppFailure('记录忽略版本失败');
+    }
   }
 
   /// 最近检查的清单版本（存储键已建；启动静默检查限频用）。
   Future<AppResult<void>> recordLastCheckedVersion(String version) async {
-    await (database.into(database.appMetadata).insertOnConflictUpdate(
-      AppMetadataCompanion.insert(
-        key: AppMetadataKeys.lastCheckedManifestVersion,
-        value: version,
-      ),
-    ));
-    return const AppSuccess(null);
+    if (_closed) return const AppFailure('更新服务已关闭');
+    try {
+      await (database.into(database.appMetadata).insertOnConflictUpdate(
+        AppMetadataCompanion.insert(
+          key: AppMetadataKeys.lastCheckedManifestVersion,
+          value: version,
+        ),
+      ));
+      return const AppSuccess(null);
+    } on Exception catch (e) {
+      stderr.writeln('[update] 记录检查版本失败：$e');
+      return const AppFailure('记录检查版本失败');
+    }
   }
 
   @override
