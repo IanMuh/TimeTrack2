@@ -175,7 +175,8 @@ void main() {
     test('tracking_rule_create 指令：新建映射规则', () async {
       final a = (await h.activities.createActivity(name: '编码', color: 0))
           .requireValue();
-      final result = await run('tracking_rule_create code.exe --activity=编码');
+      final result = await run(
+          'tracking_rule_create code.exe --activity=编码 --kind=process');
       expect(result, isA<CommandSuccess>());
       final rules = (await h.rules.allRules()).requireValue();
       expect(rules, hasLength(1));

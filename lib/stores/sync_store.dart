@@ -188,9 +188,14 @@ class SyncStore extends ChangeNotifier implements SyncNowProvider {
     } finally {
       _syncing = false;
       // pending 登录重放：同步期间新登录（互斥被拒）在当前同步结束后重试
-      // ——防"切换账号后新账号不自动同步"（旧同步结果已被会话校验丢弃）。
+      // ——防"切换账号后新账号不自动同步"。
+      // **条件修正（模块门禁 high）**：须与**本次同步归属的旧账号** user 比较
+      // ——`_onAuthChanged` 已先把 _userId 更新为新用户，`pending != _userId`
+      // 恒 false（重放永不触发）；`pending != user` 才能识别"同步期间切到
+      // 新账号"（正常登录 pending==user 不重放，切换场景 pending!=user 重放，
+      // 不会死循环）。
       final pending = _pendingSyncUserId;
-      if (pending != null && pending != _userId) {
+      if (pending != null && pending != user) {
         _pendingSyncUserId = null;
         if (_userId != null) syncNow();
       }

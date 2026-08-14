@@ -55,6 +55,14 @@ class TimelineStore extends ChangeNotifier {
   Future<void> loadRange(DateTime start, DateTime end) async {
     if (_disposed) return;
     final seq = ++_loadSeq;
+    // **范围切换失败一致性（模块门禁 high）**：_range 在查询前更新为
+    // 新范围——若查询失败，_rangeEntries 仍为旧窗口数据，loadedRange 与
+    // entriesForRange 指向不同时间窗（UI 用 loadedRange 标标题、渲染
+    // entriesForRange 会错位）。记录"本次是否切换了范围"：失败时若已切换
+    // 则清空 entriesForRange 保证两 getter 一致（同范围失败保留旧缓存——
+    // 旧窗口数据仍匹配 loadedRange，不清空）。
+    final previous = _range;
+    final rangeChanged = previous == null || previous != (start, end);
     _range = (start, end);
     try {
       final loaded = await entries.entriesForRange(start, end);
@@ -65,6 +73,9 @@ class TimelineStore extends ChangeNotifier {
       // 仅收敛 Exception（连接/IO 类）；Error 编程错误不吞，fail-fast 外抛
       //（暴露真实 bug）。
       if (_disposed || seq != _loadSeq) return;
+      if (rangeChanged) {
+        _rangeEntries = const []; // 范围已切换且失败：清空旧窗口防错位
+      }
       _loadFailed = true;
     }
     notifyListeners();

@@ -188,15 +188,48 @@ class CommandDispatcher {
         if (ruleActivityId == null) {
           return CommandFailure(_lastIdError ?? '活动名解析失败');
         }
+        final kind = _matchKind(invocation.options['kind']);
+        if (kind == TrackingRuleMatchKind.unknown) {
+          return const CommandFailure('非法匹配类型：--kind=process|title');
+        }
         final rule = TrackingRule(
           id: const Uuid().v4(),
           pattern: invocation.args.first,
-          matchKind: _matchKind(invocation.options['kind']),
+          matchKind: kind,
           activityId: ruleActivityId,
           updatedAt: DateTime.now(),
         );
         final result = await tracking.saveRule(rule);
         return _fromAppResult(result, successMessage: '已新建映射规则');
+      case 'tracking_rule_update':
+        final existing = await tracking.rules.ruleById(invocation.args.first);
+        if (existing == null) return const CommandFailure('映射规则不存在');
+        final kind = _matchKind(invocation.options['kind']);
+        if (kind == TrackingRuleMatchKind.unknown) {
+          return const CommandFailure('非法匹配类型：--kind=process|title');
+        }
+        String? activityId;
+        final activityName = invocation.options['activity'];
+        if (activityName != null) {
+          final resolved = await _resolveActivityId(activityName);
+          if (resolved == null) {
+            return CommandFailure(_lastIdError ?? '活动名解析失败');
+          }
+          activityId = resolved;
+        }
+        final updated = existing.copyWith(
+          pattern: invocation.options['pattern'] ?? existing.pattern,
+          matchKind: kind,
+          activityId: activityId ?? existing.activityId,
+          syncEnabled: invocation.options['sync'] == 'true'
+              ? true
+              : invocation.options['sync'] == 'false'
+                  ? false
+                  : existing.syncEnabled,
+          updatedAt: DateTime.now(),
+        );
+        final result = await tracking.saveRule(updated);
+        return _fromAppResult(result, successMessage: '已修改映射规则');
       case 'tracking_rule_delete':
         final rule = await tracking.rules.ruleById(invocation.args.first);
         if (rule == null) return const CommandFailure('映射规则不存在');
@@ -258,8 +291,9 @@ class CommandDispatcher {
 
   TrackingRuleMatchKind _matchKind(String? value) {
     return switch (value) {
+      'process' => TrackingRuleMatchKind.process,
       'title' => TrackingRuleMatchKind.title,
-      _ => TrackingRuleMatchKind.process,
+      _ => TrackingRuleMatchKind.unknown, // 非法值显式标记（调用方校验拒绝）
     };
   }
 

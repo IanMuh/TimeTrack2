@@ -48,6 +48,12 @@ class CategoryChangeApplier implements UndoApplier {
   /// 冲突预检（不写库）：按 [expected] 校验当前库状态——softDelete=false
   ///（预期当前未删）行必须存在且未删；softDelete=true（预期当前软删）行
   /// 必须存在且已删。任一不符 = 恢复前状态被并发改动，拒绝恢复。
+  ///
+  /// **字段级覆盖说明**：undo 是快照权威语义——恢复写库会用旧快照覆盖操作
+  /// 时之后的并发字段修改（推进 updatedAt 后作为最新在下次同步胜出），这是
+  /// undo 的预期行为（用户主动撤销），非缺陷；但"复活已软删行"是真正的
+  /// TOCTOU 窗口（validate 后行被软删），由 apply 事务内的二次校验关闭
+  ///（见 [restoreCategoryStatesForUndo]）。
   @override
   Future<AppResult<void>> validate(Object? expected) async {
     if (expected case CategoryStateChange change) {
