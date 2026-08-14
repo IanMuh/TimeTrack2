@@ -90,8 +90,10 @@ class _GatedEntries extends TimeEntryRepository {
 
   final gates = <Completer<void>>[];
 
-  /// 注入的预设结果（非空时返回它而非查库）——乱序测试用旧快照精确注入，
-  /// 不依赖 DB 读取时序（避免假阳性/偶发）。
+  /// 注入的预设结果——**仅门控调用（gates 非空）生效**：门控调用返回它而非
+  /// 查库（乱序测试用旧快照精确注入，不依赖 DB 读取时序）；gates 为空时
+  /// 直接查库（B 请求依赖此读到新数据）。消费后不自动清空：同一实例再挂
+  /// gate 会继续返回同一旧快照，扩展用例时需注意（或显式置回 null）。
   List<TimeEntry>? overrideResult;
 
   @override
