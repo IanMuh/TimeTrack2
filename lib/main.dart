@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';
 
@@ -15,10 +16,13 @@ Future<void> main() async {
     final appStore = await AppStore.create(database: AppDatabase.open());
     getIt.registerSingleton<AppStore>(appStore);
     runApp(const TimeTrack2App());
-  } catch (e) {
+  } catch (e, st) {
     // 启动失败兜底（模块门禁 medium）：数据库损坏/迁移异常不得静默空白
-    // 窗口——输出可诊断日志后仍渲染错误页（数据不可用时引导用户）。
-    debugPrint('应用启动失败：$e');
+    // 窗口——输出可诊断日志（含堆栈）后渲染错误页。
+    // debug 下对非预期 Error（编程缺陷）rethrow 暴露真实 bug；预期的
+    // 数据库异常（损坏/迁移）走错误页兜底。
+    debugPrint('应用启动失败：$e\n$st');
+    if (kDebugMode && e is Error) rethrow;
     runApp(const _StartupErrorApp());
   }
 }

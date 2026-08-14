@@ -89,6 +89,24 @@ void main() {
       expect(h.revision.value, start + 3);
     });
 
+    test('undo 基准从库重读：外部直写库（同步）后 save 不丢远端值', () async {
+      // 模拟云同步经 applyIfRemoteNewer 直写库（不刷新 _current）。
+      final base = h.store.current!;
+      final remote = base.copyWith(
+        reminderMinutes: 60,
+        updatedAt: DateTime.now().add(const Duration(minutes: 5)),
+      );
+      await h.settings.applyIfRemoteNewer(remote);
+      expect(h.store.current!.reminderMinutes, base.reminderMinutes); // _current 未刷新
+
+      // save 一次（库基准应读到 60 而非过期的 base）。
+      await h.store.save(base.copyWith(reminderMinutes: 45));
+      await h.undo.undo();
+      await h.store.reload();
+      // 撤销应恢复库中的远端值 60（而非过期的 base 值）。
+      expect(h.store.current!.reminderMinutes, 60);
+    });
+
     test('undo 空栈返回失败', () async {
       expect((await h.undo.undo()).isSuccess, isFalse);
       expect((await h.undo.redo()).isSuccess, isFalse);

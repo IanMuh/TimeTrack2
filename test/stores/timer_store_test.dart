@@ -162,6 +162,12 @@ void main() {
       final current = await h.entries.entryByIdIncludingDeleted(added.id);
       expect(current, isNotNull);
       expect(current!.isDeleted, isTrue);
+      // 已软删条目再次删除：拒绝 + 不产生 undo 记录（防误删后撤销复活）。
+      final beforeUndo = h.undo.undoDepth;
+      final retry = await h.timer.deleteEntry(added.id);
+      expect(retry, isA<AppFailure<void>>());
+      expect(h.undo.undoDepth, beforeUndo);
+      expect(h.undo.canRedo, isFalse);
       expect(h.timer.lastAction, isNull); // 删除后 lastAction 置空（契约）
     });
 
