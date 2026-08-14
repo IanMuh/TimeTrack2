@@ -171,11 +171,13 @@ void main() {
       h.backend.emitLogin('user-1');
       await pumpEventQueue();
       h.backend.emitLogout(); // 登出（_userId = null）
+      await pumpEventQueue(); // 先让登出事件被消费（_userId 置 null）
       gate.complete(); // 放行同步（user != _userId）
       await pumpEventQueue();
       expect(h.store.lastSyncAt, isNull); // 结果被丢弃
       expect(h.store.lastPushed, isNull);
       expect(h.store.userId, isNull);
+      expect(h.store.cleanupRunning, isFalse); // 不触发清理
     });
   });
 
@@ -209,6 +211,12 @@ void main() {
       final syncTriggered = await h.store.runCleanupIfDue(cursorOverride: DateTime.now());
       expect(syncTriggered, isA<AppSuccess<void>>());
       expect(h.store.cleanupRunning, isFalse);
+      // **副作用断言**：跳过 → last_cleanup_at 未被重写（若误执行清理会
+      // 写入新时间戳——旧行为回归可被此断言捕获）。
+      final afterSync = await (h.db.select(h.db.appMetadata)
+            ..where((t) => t.key.equals(AppMetadataKeys.lastCleanupAt)))
+          .getSingle();
+      expect(afterSync.value, now);
       // 手动触发（cursorOverride null）：不限频 → 执行清理（无游标 → skippedNoSync）。
       final manual = await h.store.runCleanupIfDue();
       expect(manual, isA<AppSuccess<void>>());

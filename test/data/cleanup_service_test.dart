@@ -243,6 +243,32 @@ void main() {
       expect(meta, isEmpty);
     });
 
+    test('cursorOverride 晚于当前时刻 → skippedDueToFutureCursor 跳过', () async {
+      // 契约违规水位：未来时刻 → 跳过物理删除（软删行保留），且独立
+      // 跳过原因（与 skippedDueToNoSync 区分）。
+      await seedSoftDeleted('activities', 'a1', const Duration(days: 400));
+      final future = DateTime.now().add(const Duration(hours: 1));
+      final report = (await service.run(cursorOverride: future)).requireValue();
+      expect(report.skippedDueToFutureCursor, isTrue);
+      expect(report.skippedDueToNoSync, isFalse);
+      expect(report.deletedTotal, 0);
+      final left = await (db.select(db.activities)).get();
+      expect(left.length, 1, reason: '未来水位跳过：软删行保留');
+    });
+
+    test('cursorOverride 正常水位：跳过库内游标读取，直接物理删除', () async {
+      // 无库内游标（从未同步）但 override 水位可信：物理删除执行——
+      // 证明 override 分支绕过了 sync 守卫（库内路径会 skippedDueToNoSync）。
+      await seedSoftDeleted('activities', 'a1', const Duration(days: 400));
+      final report =
+          (await service.run(cursorOverride: DateTime.now())).requireValue();
+      expect(report.skippedDueToNoSync, isFalse);
+      expect(report.skippedDueToFutureCursor, isFalse);
+      expect(report.deletedByTable['activities'], 1);
+      final left = await (db.select(db.activities)).get();
+      expect(left, isEmpty, reason: 'override 水位下超期墓碑被物理删除');
+    });
+
     test('有游标且墓碑早于游标 → 正常物理删除', () async {
       // 游标 = 现在（墓碑早于游标成立）。
       await putMeta(AppMetadataKeys.lastSyncAt, nowStr());

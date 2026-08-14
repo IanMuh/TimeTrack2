@@ -51,6 +51,7 @@ class CleanupReport {
     required this.deletedByTable,
     required this.vacuumed,
     this.skippedDueToNoSync = false,
+    this.skippedDueToFutureCursor = false,
   });
 
   /// 各表物理删除行数（键为表名常量，见 [CleanupService.tableNames]）。
@@ -61,6 +62,11 @@ class CleanupReport {
 
   /// 是否因"从未同步（无全局游标）"保守跳过物理删除。
   final bool skippedDueToNoSync;
+
+  /// 是否因 cursorOverride 晚于当前时刻（调用方契约违规，模块 3c 编排
+  /// 水位防御）跳过物理删除——与 [skippedDueToNoSync] 语义区分，防排查
+  /// 把未来时间戳误报为"从未同步"。
+  final bool skippedDueToFutureCursor;
 
   int get deletedTotal => deletedByTable.values.fold(0, (sum, n) => sum + n);
 }
@@ -216,7 +222,8 @@ class CleanupService with RepositoryMappings {
             const CleanupReport(
               deletedByTable: {},
               vacuumed: false,
-            ).copyWithSkippedNoSync(),
+              skippedDueToFutureCursor: true,
+            ),
           );
         }
         lastSyncAt = override;

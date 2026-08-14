@@ -88,8 +88,12 @@ class SyncStore extends ChangeNotifier {
       // 登录成功自动云同步（fire-and-forget；失败记录错误供 UI）。
       syncNow();
     } else {
+      // 认证流登出（会话过期/被踢）：与 signOut 同口径完全重置编排状态。
       _lastSyncAt = null;
       _lastTarget = null;
+      _lastError = null;
+      _lastPulled = null;
+      _lastPushed = null;
     }
     notifyListeners();
   }
@@ -149,12 +153,19 @@ class SyncStore extends ChangeNotifier {
       _lastPulled = report.pulledRows;
       _lastPushed = report.pushedRows;
       // 同步成功后编排清理（startedAt 水位 + 启动时捕获的 user——见类文档）。
-      // fire-and-forget：runCleanupIfDue 内部 await 后有 _disposed 守卫。
-      runCleanupIfDue(cursorOverride: startedAt, userId: user);
+      // fire-and-forget：显式吞纳错误防未处理异步异常（_cleanupDue/cleanup
+      // 的 DB 异常与 ArgumentError 均被收敛为失败，不逃逸）。
+      unawaited(
+        runCleanupIfDue(cursorOverride: startedAt, userId: user)
+            .catchError((Object e) => const AppFailure('清理编排异常')),
+      );
       return result;
     } on Exception catch (e) {
-      // 契约外异常（AppResult 未覆盖路径）：记录并收敛为失败——防从
-      // _onAuthChanged 的 fire-and-forget 调用链逃逸为未处理异步异常。
+      // 契约外异常（AppResult 未覆盖路径）：会话未变才记录，防旧会话报错
+      // 写回——与成功分支的会话校验口径一致。
+      if (user != _userId) {
+        return const AppFailure('会话已切换，本次同步结果已丢弃');
+      }
       _lastError = '同步异常：$e';
       return AppFailure('同步异常：$e');
     } finally {
