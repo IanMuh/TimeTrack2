@@ -94,13 +94,14 @@ void main() {
       await seedEntry(h, activityId: a.id, startAt: _t(10, 30), endAt: _t(11));
       await seedEntry(h, activityId: a.id, startAt: _t(11), endAt: _t(12)); // 范围外
 
-      final slices = (await h.stats.slicesForRange(
+      final result = (await h.stats.slicesForRange(
         start: _t(10),
         end: _t(11),
-      )).requireValue().slices;
-      expect(slices, hasLength(2)); // 11:00 起的条目被排除
-      final total = slices.fold(Duration.zero, (s, x) => s + x.duration);
+      )).requireValue();
+      expect(result.slices, hasLength(2)); // 11:00 起的条目被排除
+      final total = result.slices.fold(Duration.zero, (s, x) => s + x.duration);
       expect(total, const Duration(hours: 1));
+      expect(result.hasRunningEntry, isFalse); // 全结束条目 → false
     });
 
     test('裁剪：单条目跨范围边界 → [start, end) 内切片时长', () async {
@@ -125,13 +126,14 @@ void main() {
       final start = running.startAt.subtract(const Duration(hours: 1));
       final end = running.startAt.add(const Duration(hours: 1));
 
-      final slices = (await h.stats.slicesForRange(
+      final result = (await h.stats.slicesForRange(
         start: start,
         end: end,
         effectiveNow: running.startAt.add(const Duration(minutes: 30)),
-      )).requireValue().slices;
-      expect(slices, hasLength(1));
-      expect(slices.first.duration, const Duration(minutes: 30));
+      )).requireValue();
+      expect(result.slices, hasLength(1));
+      expect(result.slices.first.duration, const Duration(minutes: 30));
+      expect(result.hasRunningEntry, isTrue); // 运行中条目 → true
     });
 
     test('end <= start 返回空（不崩）', () async {
@@ -331,6 +333,22 @@ void main() {
       expect(rows, hasLength(1));
       expect(rows.single.id, 'category:c1');
       expect(rows.single.label, '项目A'); // 祖先链在断点处只含自身
+    });
+
+    test('categoryTree：链中缺失节点 label 回退"未分类"（不拼原始 id）', () {
+      // 切片携带 ancestors=['missingRoot','c1']（模拟切片生成后根分类被删），
+      // 聚合侧 map 仅含 c1——缺失节点 label 必须回退可读文案而非原始 id。
+      final categoryById = <String, ActivityCategory>{
+        'c1': _cat('c1', '项目A', parentId: 'missingRoot'),
+      };
+      final rows = h.stats.aggregate([
+        _slice('a1', 'A', 0, primary: ('c1', '项目A', 0),
+            ancestors: ['missingRoot', 'c1'], duration: const Duration(minutes: 5)),
+      ], StatsDimension.categoryTree, categoryById: categoryById);
+      expect(rows, hasLength(2)); // 两个祖先节点各一行
+      final c1 = rows.firstWhere((r) => r.id == 'category:c1');
+      expect(c1.label, '$unassignedCategoryLabel / 项目A');
+      expect(c1.depth, 1);
     });
   });
 }

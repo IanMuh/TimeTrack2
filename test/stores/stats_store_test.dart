@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timetrack2/data/database/app_database.dart' hide ProfileSettings;
@@ -8,6 +10,7 @@ import 'package:timetrack2/data/repositories/stats_repository.dart';
 import 'package:timetrack2/data/repositories/time_entry_repository.dart';
 import 'package:timetrack2/stores/data_revision.dart';
 import 'package:timetrack2/stores/stats_store.dart';
+import 'package:timetrack2/utils/result.dart';
 import 'package:timetrack2/viewmodels/stats/stats_models.dart';
 
 class TestHarness {
@@ -44,6 +47,41 @@ class TestHarness {
     stats.dispose();
     revision.dispose();
     await db.close();
+  }
+}
+
+/// 可挂起的统计仓储：slicesForRange 按调用顺序消费 [gates] 中未放行的
+/// Completer 挂起——用于确定性控制并发 compute 的完成顺序（TOCTOU/竞态测试）。
+class _GatedStatsRepository extends StatsRepository {
+  _GatedStatsRepository({
+    required super.activities,
+    required super.categories,
+    required super.entries,
+  });
+
+  /// 每次 slicesForRange 调用消耗一个；队列空 = 不挂起直接执行。
+  final gates = <Completer<void>>[];
+
+  @override
+  Future<AppResult<({List<StatsEntrySlice> slices, bool hasRunningEntry})>>
+      slicesForRange({
+    required DateTime start,
+    required DateTime end,
+    DateTime? effectiveNow,
+  }) {
+    if (gates.isEmpty) {
+      return super.slicesForRange(
+        start: start,
+        end: end,
+        effectiveNow: effectiveNow,
+      );
+    }
+    final gate = gates.removeAt(0);
+    return gate.future.then((_) => super.slicesForRange(
+          start: start,
+          end: end,
+          effectiveNow: effectiveNow,
+        ));
   }
 }
 
@@ -183,6 +221,86 @@ void main() {
       h.revision.bump();
       expect(notified, 1);
       expect(h.stats.snapshot, isNull);
+    });
+
+    test('TOCTOU：compute 挂起期间 revision 变更 → 结果丢弃（不写脏快照）', () async {
+      final a = (await h.activities.createActivity(name: 'A', color: 0))
+          .requireValue();
+      await h.entries.createManualEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 14, 10),
+        endAt: DateTime(2026, 8, 14, 11),
+        note: '',
+      );
+      final gated = _GatedStatsRepository(
+        activities: h.activities,
+        categories: h.categories,
+        entries: h.entries,
+      );
+      final revision = DataRevision();
+      final store = StatsStore(repository: gated, dataRevision: revision);
+      addTearDown(() {
+        store.dispose();
+        revision.dispose();
+      });
+
+      final gate = Completer<void>();
+      gated.gates.add(gate);
+      final computeFuture = store.compute(
+        start: DateTime(2026, 8, 14, 10),
+        end: DateTime(2026, 8, 14, 12),
+        dimension: StatsDimension.activity,
+      );
+      await pumpEventQueue(); // compute 已挂起在 gate 上
+
+      revision.bump(); // 挂起期间数据变更（invalidate 清缓存）
+      gate.complete(); // 放行计算
+      final result = await computeFuture;
+
+      expect(result, isNull); //      过期结果丢弃（无匹配快照）
+      expect(store.snapshot, isNull); // 未写入脏快照
+      expect(store.lastError, isNull); // 成功被丢弃不记错误
+    });
+
+    test('并发完成序：旧请求晚完成不得覆盖新请求快照', () async {
+      final gated = _GatedStatsRepository(
+        activities: h.activities,
+        categories: h.categories,
+        entries: h.entries,
+      );
+      final revision = DataRevision();
+      final store = StatsStore(repository: gated, dataRevision: revision);
+      addTearDown(() {
+        store.dispose();
+        revision.dispose();
+      });
+
+      final gateA = Completer<void>();
+      final gateB = Completer<void>();
+      gated.gates.add(gateA); // 请求 A（先发起）
+      gated.gates.add(gateB); // 请求 B（后发起）
+      final futureA = store.compute(
+        start: DateTime(2026, 8, 14, 10),
+        end: DateTime(2026, 8, 14, 11),
+        dimension: StatsDimension.activity,
+      );
+      await pumpEventQueue();
+      final futureB = store.compute(
+        start: DateTime(2026, 8, 14, 12),
+        end: DateTime(2026, 8, 14, 13),
+        dimension: StatsDimension.activity,
+      );
+      await pumpEventQueue();
+
+      gateB.complete(); // 新请求 B 先完成 → 写入快照
+      final resultB = await futureB;
+      expect(resultB, isNotNull);
+      expect(store.snapshot, same(resultB));
+
+      gateA.complete(); // 旧请求 A 晚完成 → 必须被丢弃
+      final resultA = await futureA;
+      expect(resultA, isNull); //           A 与当前快照参数不同 → null
+      expect(store.snapshot, same(resultB)); // 快照仍是 B，未被 A 覆盖
     });
 
     test('dispose 后不再响应 dataRevision（不再清缓存）', () async {

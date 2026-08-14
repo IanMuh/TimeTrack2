@@ -119,21 +119,29 @@ class StatsStore extends ChangeNotifier {
       end: end,
       effectiveNow: effectiveNow,
     );
-    if (sliceResult case AppFailure failure) {
-      _lastError = failure.message;
-      _snapshot = null;
-      _snapshotRevision = -1;
-      notifyListeners();
-      return null;
+    if (sliceResult
+        case AppFailure<({List<StatsEntrySlice> slices, bool hasRunningEntry})>
+            failure) {
+      return _staleOrFailure(
+        failure.message,
+        seq: seq,
+        revisionAtStart: revisionAtStart,
+        start: start,
+        end: end,
+        dimension: dimension,
+      );
     }
     final range = sliceResult.requireValue();
     final categoryMap = await repository.categoryMap();
     if (categoryMap case AppFailure<Map<String, ActivityCategory>> failure) {
-      _lastError = failure.message;
-      _snapshot = null;
-      _snapshotRevision = -1;
-      notifyListeners();
-      return null;
+      return _staleOrFailure(
+        failure.message,
+        seq: seq,
+        revisionAtStart: revisionAtStart,
+        start: start,
+        end: end,
+        dimension: dimension,
+      );
     }
     final rows = repository.aggregate(
       range.slices,
@@ -146,9 +154,10 @@ class StatsStore extends ChangeNotifier {
     }
 
     // 结果提交守卫：仅当数据未变（revision 同基线）且本请求仍是最新
-    //（seq 未被更新的请求超过）时写入——否则丢弃，由下次 compute 重算。
+    //（seq 未被更新的请求超过）时写入——否则丢弃（返回当前有效快照，
+    // 若参数匹配）或 null（无有效快照），由下次 compute 重算。
     if (_dataRevision.value != revisionAtStart || seq != _computeSeq) {
-      return null;
+      return _cachedMatching(start, end, dimension);
     }
     _lastError = null;
     _snapshot = StatsSnapshot(
@@ -164,12 +173,49 @@ class StatsStore extends ChangeNotifier {
     return _snapshot;
   }
 
-  /// 清空缓存并通知（外部显式失效；dataRevision 变更走 [_invalidate]）。
-  void invalidate() {
+  /// 失败/过期统一出口：
+  /// - 过期请求（revision 变了 / 已被更新请求超过）：**不触碰 store 状态**
+  ///   （防旧请求失败覆盖新请求已提交的快照/错误），返回当前有效快照
+  ///   （若参数匹配）或 null；
+  /// - 未过期：记录失败、清缓存并通知，返回 null。
+  StatsSnapshot? _staleOrFailure(
+    String message, {
+    required int seq,
+    required int revisionAtStart,
+    required DateTime start,
+    required DateTime end,
+    required StatsDimension dimension,
+  }) {
+    if (_dataRevision.value != revisionAtStart || seq != _computeSeq) {
+      return _cachedMatching(start, end, dimension);
+    }
+    _lastError = message;
     _snapshot = null;
     _snapshotRevision = -1;
-    _lastError = null;
     notifyListeners();
+    return null;
+  }
+
+  /// 当前有效快照中与 [start]/[end]/[dimension] 匹配者（过期/并发丢弃时
+  /// 供调用方复用）；无匹配返回 null。
+  StatsSnapshot? _cachedMatching(
+    DateTime start,
+    DateTime end,
+    StatsDimension dimension,
+  ) {
+    final current = _snapshot;
+    if (current != null &&
+        current.start == start &&
+        current.end == end &&
+        current.dimension == dimension) {
+      return current;
+    }
+    return null;
+  }
+
+  /// 清空缓存并通知（外部显式失效；dataRevision 变更走 [_invalidate]）。
+  void invalidate() {
+    _invalidate();
   }
 
   void _invalidate() {
