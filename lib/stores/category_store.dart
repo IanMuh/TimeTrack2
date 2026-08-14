@@ -120,8 +120,9 @@ class CategoryStore extends ChangeNotifier {
   }) : _applier = CategoryChangeApplier(categories) {
     _applier.onApplied = () {
       if (_disposed) return;
+      // bump 会同步触发 _reloadOnDataChange → reload（去重：不再显式调用，
+      // 防每轮写/undo 两轮 reload 共 4 条查询——模块门禁 medium）。
       dataRevision.bump();
-      reload();
     };
     // 订阅 dataRevision：其他 store（Timer/Settings）与未来同步导入/undo
     // 恢复 bump 时统一重建树缓存（不变式 9——防"分类改完统计/选择器不刷新"
@@ -143,7 +144,7 @@ class CategoryStore extends ChangeNotifier {
     reload();
   }
 
-  /// reload 序号守卫：_afterWrite/onApplied 以 fire-and-forget 触发 reload，
+  /// reload 序号守卫：dataRevision 监听/bump 以 fire-and-forget 触发 reload，
   /// 连续写/undo/redo 时并发 reload 可能乱序完成——仅应用最新一次启动的结果
   ///（防旧数据覆盖新缓存）。
   int _reloadSeq = 0;
@@ -454,8 +455,8 @@ class CategoryStore extends ChangeNotifier {
   }
 
   void _afterWrite() {
+    // bump 同步触发 _reloadOnDataChange → reload（去重：不再显式调用）。
     dataRevision.bump();
-    reload();
   }
 
   @override
