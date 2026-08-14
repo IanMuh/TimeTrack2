@@ -44,7 +44,11 @@ class TestHarness {
   late final DataRevision revision;
   late final TimerStore timer;
 
+  bool _closed = false;
+
   Future<void> close() async {
+    if (_closed) return; // 幂等：个别用例手动 dispose 后 tearDown 不重复
+    _closed = true;
     timer.dispose();
     clock.dispose();
     revision.dispose();
@@ -222,31 +226,39 @@ void main() {
         endAt: DateTime(2026, 8, 14, 11),
         note: '',
       )).requireValue();
-      await h.timer.addEntry(
+      final second = (await h.timer.addEntry(
         activityId: a.id,
         startAt: DateTime(2026, 8, 14, 11),
         endAt: DateTime(2026, 8, 14, 12),
         note: '',
-      );
-      await h.timer.mergeWithNeighbor(
+      )).requireValue();
+      // 捕获合并结果并断言非空——防邻居判定/阈值回归导致静默返回 null
+      // 使用例"空过"（运行条目同样不会被清空，无法证明合并路径执行）。
+      final merged = (await h.timer.mergeWithNeighbor(
         entryId: first.id,
-        mergePrevious: false,
-      );
+        mergePrevious: false, // 合并右侧 second：current=first 保留为 merged，邻居 second 软删
+      )).requireValue();
+      expect(merged, isNotNull); // 合并确实执行
+      final firstAfter = (await h.entries.entryByIdIncludingDeleted(first.id))!;
+      expect(firstAfter.isDeleted, isFalse); // first 保留（= merged）
+      expect(firstAfter.endAt, DateTime(2026, 8, 14, 12));
+      final secondAfter = (await h.entries.entryByIdIncludingDeleted(second.id))!;
+      expect(secondAfter.isDeleted, isTrue); // 邻居 second 已软删
       // 运行态缓存必须保留（未被合并清空）。
       expect(h.timer.runningEntry?.id, running.id);
       expect(h.timer.runningEntry?.isRunning, isTrue);
     });
 
-    test('合并间隔超阈值：返回 null 且不产生 undo 记录', () async {
+    test('合并间隔超阈值：返回 null 且不产生 undo 记录（两侧均不受影响）', () async {
       final a = (await h.activities.createActivity(name: 'A', color: 0))
           .requireValue();
       // 默认阈值 1 分钟：间隔 30 分钟 > 阈值 → 不可合并。
-      await h.timer.addEntry(
+      final first = (await h.timer.addEntry(
         activityId: a.id,
         startAt: DateTime(2026, 8, 14, 10),
         endAt: DateTime(2026, 8, 14, 11),
         note: '',
-      );
+      )).requireValue();
       final second = (await h.timer.addEntry(
         activityId: a.id,
         startAt: DateTime(2026, 8, 14, 11, 30),
@@ -262,6 +274,8 @@ void main() {
       expect(h.undo.undoDepth, before); // 无 undo 记录
       expect((await h.entries.entryByIdIncludingDeleted(second.id))!.isDeleted,
           isFalse); // 未被软删
+      expect((await h.entries.entryByIdIncludingDeleted(first.id))!.isDeleted,
+          isFalse); // 邻居也未受影响
     });
 
     test('undo 恢复写库后 dataRevision 递增（恢复作为新修改参与同步）', () async {
@@ -278,6 +292,34 @@ void main() {
       expect(h.revision.value, afterAdd + 1); // undo 恢复 bump
       await h.undo.redo(); // 恢复新条目（恢复写库）
       expect(h.revision.value, afterAdd + 2); // redo 恢复 bump
+    });
+
+    test('dispose 后 undo 恢复链完成：仍 bump dataRevision（不 notify 不崩）', () async {
+      final a = (await h.activities.createActivity(name: 'A', color: 0))
+          .requireValue();
+      // 独立 TimerStore 实例（避免手动 dispose 后 tearDown 二次 dispose）。
+      final store = TimerStore(
+        entries: h.entries,
+        undo: h.undo,
+        clock: h.clock,
+        dataRevision: h.revision,
+      );
+      await store.addEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 14, 10),
+        endAt: DateTime(2026, 8, 14, 11),
+        note: '',
+      );
+      final afterAdd = h.revision.value;
+
+      // 发起 undo（不 await）后立即 dispose store——恢复写库链可能在
+      // dispose 后才完成（onApplied 的 _disposed 分支：仅 bump、跳过
+      // notify/refresh）。
+      final undoFuture = h.undo.undo();
+      store.dispose();
+      final result = await undoFuture;
+      expect(result, isA<AppSuccess<void>>()); // 恢复完成
+      expect(h.revision.value, afterAdd + 1); // dispose 后仍 bump
     });
   });
 
