@@ -67,4 +67,9 @@ class AppConstants {
   /// wal_checkpoint(TRUNCATE)——小删除/零删除不触发全库重写（空间回收与
   /// I/O 成本权衡）。
   static const cleanupVacuumThresholdRows = 1000;
+
+  /// 清理自动触发限频间隔（小时）：`last_cleanup_at` 距今 ≥ 此值才允许
+  /// 自动清理（模块 3c SyncStore 编排用）。墓碑保留期默认 180 天，24h 的
+  /// 清扫粒度绰绰有余（成本 × 及时性平衡点）。手动清理不受限频约束。
+  static const cleanupIntervalHours = 24;
 }

@@ -161,7 +161,18 @@ class CleanupService with RepositoryMappings {
   /// 流程：读保留期 → 读同步游标（sync 守卫）→ 单事务物理删除（引用表软删行
   /// 清理 + 存活引用者跳过 + 分类悬空处理）→ 事务外阈值驱动 VACUUM →
   /// 写 last_cleanup_at。
-  Future<AppResult<CleanupReport>> run({String? userId}) async {
+  ///
+  /// [cursorOverride]（可选）：**同步编排水位**——由 SyncStore 传入"本次同步
+  /// 开始时刻"（startedAt）。非 null 时跳过库内游标读取/损坏判定（override
+  /// 为可信水位，直接作为同步截止参与 cutoff = min(保留截止, override)）：
+  /// 同步期间新建墓碑 deleted_at > startedAt 被保护不误删，已推送墓碑
+  /// deleted_at < startedAt 照常清理——解决"引擎游标被同表其他行推过未推送
+  /// 墓碑"的真实数据丢失窗口（模块 3c 点 3 修正方案）。null 时沿用库内游标
+  ///（手动清理/非同步触发路径）。
+  Future<AppResult<CleanupReport>> run({
+    String? userId,
+    DateTime? cursorOverride,
+  }) async {
     // 空白/超长 userId 属调用方编程错误（与 SyncStatusStore._normalizeUserId
     // 契约一致：超长防生成 SyncStatusStore 永远写不出的脏分区键导致恒判
     // "从未同步"）——try 外抛（async 函数内抛错进入返回 Future，由 expectLater
@@ -186,35 +197,41 @@ class CleanupService with RepositoryMappings {
       // 形态一致），未登录读全局键。仅当游标存在才允许物理删除——从未同步
       //（该键无值）保守跳过（墓碑未经任何同步通道传播，先物理清除会造成本地
       // 与远端语义缺口）。
-      final cursorKey = normalized == null
-          ? AppMetadataKeys.lastSyncAt
-          : '${AppMetadataKeys.lastSyncAt}:$normalized';
-      final syncRow = await (database.select(
-        database.appMetadata,
-      )..where((t) => t.key.equals(cursorKey))).getSingleOrNull();
-      final lastSyncAt = syncRow == null
-          ? null
-          : DateTime.tryParse(syncRow.value);
-      // **损坏游标判定（r10/r11 修正）**：tryParse 失败**或无时区偏移**（
-      // `isUtc == false`——无偏移字符串被 Dart 按本地时区解析"成功"，负时区
-      // 设备上解析时刻比本意 UTC 晚数小时、把 cutoff 推晚，可能把尚未传播
-      // 到远端的墓碑提前物理删除）均视为损坏：与"从未同步（键不存在）"混同
-      // 会静默跳过且无日志——写 stderr 警告（清理不因日志失败崩溃）。
-      // 与 SyncStatusStore.markSuccess/readUtc 的 `isUtc` 校验口径一致。
-      if (syncRow != null && (lastSyncAt == null || !lastSyncAt.isUtc)) {
-        try {
-          stderr.writeln('[cleanup] 同步游标损坏（$cursorKey）：${syncRow.value}——清理跳过');
-        } catch (_) {
-          // 日志写入失败不影响跳过结论。
+      DateTime? lastSyncAt;
+      if (cursorOverride != null) {
+        // 编排水位优先：跳过库内游标读取与损坏判定（override 为同步开始
+        // 时刻，本字段语义即"最近一次可信同步时刻"，无需读库）。
+        lastSyncAt = cursorOverride.toUtc();
+      } else {
+        final cursorKey = normalized == null
+            ? AppMetadataKeys.lastSyncAt
+            : '${AppMetadataKeys.lastSyncAt}:$normalized';
+        final syncRow = await (database.select(
+          database.appMetadata,
+        )..where((t) => t.key.equals(cursorKey))).getSingleOrNull();
+        final parsed = syncRow == null ? null : DateTime.tryParse(syncRow.value);
+        // **损坏游标判定（r10/r11 修正）**：tryParse 失败**或无时区偏移**（
+        // `isUtc == false`——无偏移字符串被 Dart 按本地时区解析"成功"，负时区
+        // 设备上解析时刻比本意 UTC 晚数小时、把 cutoff 推晚，可能把尚未传播
+        // 到远端的墓碑提前物理删除）均视为损坏：与"从未同步（键不存在）"混同
+        // 会静默跳过且无日志——写 stderr 警告（清理不因日志失败崩溃）。
+        // 与 SyncStatusStore.markSuccess/readUtc 的 `isUtc` 校验口径一致。
+        if (syncRow != null && (parsed == null || !parsed.isUtc)) {
+          try {
+            stderr.writeln('[cleanup] 同步游标损坏（$cursorKey）：${syncRow.value}——清理跳过');
+          } catch (_) {
+            // 日志写入失败不影响跳过结论。
+          }
         }
-      }
-      if (syncRow == null || lastSyncAt == null || !lastSyncAt.isUtc) {
-        return AppSuccess(
-          const CleanupReport(
-            deletedByTable: {},
-            vacuumed: false,
-          ).copyWithSkippedNoSync(),
-        );
+        if (syncRow == null || parsed == null || !parsed.isUtc) {
+          return AppSuccess(
+            const CleanupReport(
+              deletedByTable: {},
+              vacuumed: false,
+            ).copyWithSkippedNoSync(),
+          );
+        }
+        lastSyncAt = parsed;
       }
       // **cutoff = min(保留期截止, 最近同步时刻)**：deleted_at **严格小于**
       // cutoff（r1/r2 统一）——恰等于游标时刻的墓碑视为同步窗口边缘（是否
