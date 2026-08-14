@@ -147,11 +147,25 @@ class StatsStore extends ChangeNotifier {
         dimension: dimension,
       );
     }
-    final rows = repository.aggregate(
-      range.slices,
-      dimension,
-      categoryById: categoryMap.requireValue(),
-    );
+    final List<StatsGroupRow> rows;
+    try {
+      rows = repository.aggregate(
+        range.slices,
+        dimension,
+        categoryById: categoryMap.requireValue(),
+      );
+    } catch (e) {
+      // 聚合段异常（异常数据/模型契约变更）：与 slices/categoryMap 一致
+      // 收敛到统一失败出口（防未处理异步异常）。
+      return _staleOrFailure(
+        '统计聚合失败',
+        seq: seq,
+        revisionAtStart: revisionAtStart,
+        start: start,
+        end: end,
+        dimension: dimension,
+      );
+    }
     var total = Duration.zero;
     for (final slice in range.slices) {
       total += slice.duration;
@@ -229,7 +243,10 @@ class StatsStore extends ChangeNotifier {
   }
 
   void _invalidate() {
-    // dataRevision 变更：清空缓存与错误（供 UI 感知"已失效"后重算）。
+    if (_disposed) return; // 与 compute/_staleOrFailure 的 dispose 守卫一致
+    // 递增序号作废在途计算：显式失效/并发场景下在途 compute 的 seq 校验
+    // 失败 → 其结果被丢弃，防快照"复活"（基于失效前数据重填缓存）。
+    _computeSeq++;
     _snapshot = null;
     _snapshotRevision = -1;
     _lastError = null;
