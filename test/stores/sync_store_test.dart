@@ -251,7 +251,7 @@ void main() {
       expect(row!.key, AppMetadataKeys.lastCleanupAt);
     });
 
-    test('限频：同步触发未到期跳过，手动触发不限频', () async {
+    test('限频：同步触发未到期跳过，手动触发受限频跳过', () async {
       // 预置 last_cleanup_at = now（未到期）。
       final now = DateTime.now().toUtc().toIso8601String();
       await (h.db.into(h.db.appMetadata).insert(
@@ -270,9 +270,14 @@ void main() {
             ..where((t) => t.key.equals(AppMetadataKeys.lastCleanupAt)))
           .getSingle();
       expect(afterSync.value, now);
-      // 手动触发（cursorOverride null）：不限频 → 执行清理（无游标 → skippedNoSync）。
+      // 手动触发（cursorOverride null）：**同样受限频** → 未到期跳过
+      //（AppStore 启动路径防每次启动全量清理）。
       final manual = await h.store.runCleanupIfDue();
       expect(manual, isA<AppSuccess<void>>());
+      final afterManual = await (h.db.select(h.db.appMetadata)
+            ..where((t) => t.key.equals(AppMetadataKeys.lastCleanupAt)))
+          .getSingle();
+      expect(afterManual.value, now); // 手动触发未到期也跳过
     });
 
     test('cleanupIntervalHours 常量存在', () {
