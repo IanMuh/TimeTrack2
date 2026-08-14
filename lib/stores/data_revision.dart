@@ -16,4 +16,13 @@ class DataRevision extends ValueNotifier<int> {
 
   /// 递增修订号并通知监听者。幂等由调用方保证（无变更不 bump）。
   void bump() => value += 1;
+
+  /// 收敛 value 写入：禁止外部回退修订号（UI 缓存可能按"新号 > 旧号"顺序
+  /// 比较失效，回退会漏失效）。debug 下断言报错；release 下静默拒绝回退。
+  @override
+  set value(int newValue) {
+    assert(newValue >= value, '修订号必须单调递增，不允许回退');
+    if (newValue < value) return;
+    super.value = newValue;
+  }
 }

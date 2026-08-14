@@ -25,6 +25,11 @@ class ClockStore extends ChangeNotifier {
     DateTime Function()? now,
     bool autoStart = true,
   })  : _now = now ?? DateTime.now {
+    // Timer.periodic 要求正时长；zero/负值会直接抛 ArgumentError，启动即崩
+    // 且难排查——构造期显式校验，带清晰信息。
+    if (interval <= Duration.zero) {
+      throw ArgumentError.value(interval, 'interval', 'interval 必须为正时长');
+    }
     if (autoStart) start();
   }
 
@@ -35,19 +40,23 @@ class ClockStore extends ChangeNotifier {
 
   Timer? _timer;
 
+  /// 已 dispose：防 dispose 后误 start() 重建 Timer（永不取消的资源泄漏 +
+  /// 对已销毁 ChangeNotifier 触发 notifyListeners 的调试断言难定位）。
+  bool _disposed = false;
+
   /// 是否正在运行。
   bool get isRunning => _timer != null;
 
-  /// 启动时钟；幂等（已在运行则不重启）。
+  /// 启动时钟；幂等（已在运行则不重启）。dispose 后调用无效（静默忽略）。
   void start() {
-    if (_timer != null) return;
+    if (_disposed || _timer != null) return;
     _timer = Timer.periodic(interval, (_) {
       // 绝对时间重算：不依赖 tick 累计，防漂移（见文件头）。
       notifyListeners();
     });
   }
 
-  /// 停止时钟；幂等。
+  /// 停止时钟；幂等。dispose 后调用无效。
   void stop() {
     _timer?.cancel();
     _timer = null;
@@ -58,6 +67,7 @@ class ClockStore extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     stop();
     super.dispose();
   }

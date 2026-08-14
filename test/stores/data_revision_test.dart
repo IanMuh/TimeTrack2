@@ -27,5 +27,21 @@ void main() {
       expect(notified, 2);
       revision.dispose();
     });
+
+    test('修订号禁止回退（debug 断言暴露编程错误；前进有效）', () {
+      final revision = DataRevision();
+      var notified = 0;
+      revision.addListener(() => notified++);
+      revision.bump(); // 0 → 1
+      // debug 下回退触发 AssertionError（防 UI 缓存按顺序比较漏失效）。
+      expect(() => revision.value = 0, throwsAssertionError);
+      expect(revision.value, 1);
+      expect(notified, 1); // 断言失败即中止，无通知
+      // 前进仍有效。
+      revision.value = 5;
+      expect(revision.value, 5);
+      expect(notified, 2);
+      revision.dispose();
+    });
   });
 }

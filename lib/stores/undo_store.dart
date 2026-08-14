@@ -81,7 +81,11 @@ class UndoRecord {
 /// - [undo]/[redo] 失败时**栈不动**（记录不迁移、不弹出）。
 class UndoStore extends ChangeNotifier {
   UndoStore({int maxDepth = defaultMaxDepth}) : _maxDepth = maxDepth {
-    assert(maxDepth > 0, 'maxDepth 必须为正');
+    // 运行时校验（非 assert）：release 下 assert 被裁剪，若 maxDepth <= 0 会
+    // 导致 record() 立即移除新记录、undo 栈永远为空、功能静默失效。
+    if (maxDepth <= 0) {
+      throw ArgumentError.value(maxDepth, 'maxDepth', 'maxDepth 必须为正');
+    }
   }
 
   /// 默认栈深度上限。
@@ -91,7 +95,8 @@ class UndoStore extends ChangeNotifier {
   final List<UndoRecord> _undoStack = [];
   final List<UndoRecord> _redoStack = [];
 
-  /// undo/redo 恢复写库执行期：期间触发的 record 一律忽略（防误清 redo）。
+  /// 恢复执行期（validate + apply 全程）：期间触发的 record 一律忽略
+  /// （防误清 redo）；并发 restore 直接拒绝（防同一记录重复 apply）。
   bool _executing = false;
 
   /// 是否可撤销 / 可重做。
@@ -112,10 +117,13 @@ class UndoStore extends ChangeNotifier {
   /// - 深度超限丢最旧；
   /// - [changes] 为空 = 编程错误（[ArgumentError]）。
   void record({required String label, required List<UndoChange> changes}) {
+    // 恢复执行期防护放最前：执行期内任何 record 一律忽略（防误清 redo）。
+    // 若先判 changes.isEmpty 再判 _executing，恢复期触发空 changes 的 record
+    // 会抛 ArgumentError 打断恢复流程，与本条防护语义冲突。
+    if (_executing) return;
     if (changes.isEmpty) {
       throw ArgumentError.value(changes, 'changes', 'undo 记录至少需要一条 change');
     }
-    if (_executing) return; // 恢复执行期：忽略（防误清 redo）。
     _undoStack.add(UndoRecord(label: label, changes: changes));
     if (_undoStack.length > _maxDepth) {
       _undoStack.removeAt(0);
@@ -131,51 +139,75 @@ class UndoStore extends ChangeNotifier {
   Future<AppResult<void>> redo() => _restore(restoringBefore: false);
 
   Future<AppResult<void>> _restore({required bool restoringBefore}) async {
+    // 恢复互斥：validate 是异步阶段，期间用户可能触发新的 record/并发 restore
+    // —— 置位必须在捕获 record 之后、首个 await 之前完成，保证恢复期间一切
+    // record 与并发 restore 都被隔离（防"validate 期间新 record 入栈 →
+    // source.removeLast() 弹出的是新记录而非本记录"的错位）。
+    if (_executing) {
+      return AppFailure(restoringBefore ? '撤销进行中，请稍后再试' : '重做进行中，请稍后再试');
+    }
     final source = restoringBefore ? _undoStack : _redoStack;
     final target = restoringBefore ? _redoStack : _undoStack;
     if (source.isEmpty) {
       return AppFailure(restoringBefore ? '没有可撤销的操作' : '没有可重做的操作');
     }
     final record = source.last;
-    final result = await _applyRecord(record, restoringBefore: restoringBefore);
-    if (result case AppFailure<void> _) {
-      return result; // 失败：栈不动（记录不迁移、不弹出）。
+    _executing = true;
+    try {
+      final result = await _applyRecord(record, restoringBefore: restoringBefore);
+      if (result case AppFailure<void> _) {
+        return result; // 失败：栈不动（记录不迁移、不弹出）。
+      }
+      source.removeLast();
+      target.add(record);
+      if (target.length > _maxDepth) {
+        target.removeAt(0);
+      }
+      notifyListeners();
+      return result;
+    } finally {
+      _executing = false;
     }
-    source.removeLast();
-    target.add(record);
-    if (target.length > _maxDepth) {
-      target.removeAt(0);
-    }
-    notifyListeners();
-    return result;
   }
 
   /// 两阶段恢复：先全部校验（不写库）→ 全部通过才逐个应用。
   ///
   /// [restoringBefore] = true（undo）：校验"当前 == after"、应用 before；
   /// false（redo）：校验"当前 == before"、应用 after。
+  ///
+  /// 调用方（[_restore]）已置 [_executing] 并负责复位；本方法只做两阶段，
+  /// 不再自行管理 [_executing]。
   Future<AppResult<void>> _applyRecord(
     UndoRecord record, {
     required bool restoringBefore,
   }) async {
+    final verb = restoringBefore ? '撤销' : '重做';
     for (final change in record.changes) {
       final expected = restoringBefore ? change.after : change.before;
-      final result = await change.applier.validate(expected);
+      // 契约：applier 恒返回 AppResult；防御性捕获抛出的异常（连接错误等），
+      // 转 AppFailure 收敛，保持 undo()/redo() 恒以 AppResult 结束
+      //（不被异步异常逃逸打断调用方统一失败处理路径）。
+      final AppResult<void> result;
+      try {
+        result = await change.applier.validate(expected);
+      } catch (e) {
+        return AppFailure('$verb被拒绝：校验异常 ${e.runtimeType}');
+      }
       if (result case AppFailure<void> failure) {
-        return AppFailure('${restoringBefore ? '撤销' : '重做'}被拒绝：${failure.message}');
+        return AppFailure('$verb被拒绝：${failure.message}');
       }
     }
-    _executing = true;
-    try {
-      for (final change in record.changes) {
-        final target = restoringBefore ? change.before : change.after;
-        final result = await change.applier.apply(target);
-        if (result case AppFailure<void> failure) {
-          return AppFailure('${restoringBefore ? '撤销' : '重做'}失败：${failure.message}');
-        }
+    for (final change in record.changes) {
+      final target = restoringBefore ? change.before : change.after;
+      final AppResult<void> result;
+      try {
+        result = await change.applier.apply(target);
+      } catch (e) {
+        return AppFailure('$verb失败：应用异常 ${e.runtimeType}');
       }
-    } finally {
-      _executing = false;
+      if (result case AppFailure<void> failure) {
+        return AppFailure('$verb失败：${failure.message}');
+      }
     }
     return const AppSuccess(null);
   }
