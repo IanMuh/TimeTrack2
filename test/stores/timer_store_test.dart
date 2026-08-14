@@ -1,0 +1,306 @@
+import 'package:drift/native.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:timetrack2/data/database/app_database.dart' hide ProfileSettings;
+import 'package:timetrack2/data/repositories/activity_repository.dart';
+import 'package:timetrack2/data/repositories/category_repository.dart';
+import 'package:timetrack2/data/repositories/settings_repository.dart';
+import 'package:timetrack2/data/repositories/time_entry_repository.dart';
+import 'package:timetrack2/stores/clock_store.dart';
+import 'package:timetrack2/stores/data_revision.dart';
+import 'package:timetrack2/stores/timer_store.dart';
+import 'package:timetrack2/stores/undo_store.dart';
+import 'package:timetrack2/utils/result.dart';
+
+/// 内存库 + store 全链路测试环境。
+class TestHarness {
+  TestHarness() {
+    db = AppDatabase(NativeDatabase.memory());
+    activities = ActivityRepository(database: db);
+    categories = CategoryRepository(database: db);
+    settings = SettingsRepository(database: db);
+    entries = TimeEntryRepository(
+      database: db,
+      activityRepository: activities,
+      settingsRepository: settings,
+    );
+    undo = UndoStore();
+    clock = ClockStore(autoStart: false);
+    revision = DataRevision();
+    timer = TimerStore(
+      entries: entries,
+      undo: undo,
+      clock: clock,
+      dataRevision: revision,
+    );
+  }
+
+  late final AppDatabase db;
+  late final ActivityRepository activities;
+  late final CategoryRepository categories;
+  late final SettingsRepository settings;
+  late final TimeEntryRepository entries;
+  late final UndoStore undo;
+  late final ClockStore clock;
+  late final DataRevision revision;
+  late final TimerStore timer;
+
+  Future<void> close() async {
+    timer.dispose();
+    clock.dispose();
+    revision.dispose();
+    undo.dispose();
+    await db.close();
+  }
+}
+
+void main() {
+  group('TimerStore 写路径', () {
+    late TestHarness h;
+
+    setUp(() => h = TestHarness());
+    tearDown(() => h.close());
+
+    test('switch：创建运行条目并透传 isAuto', () async {
+      final a = (await h.activities.createActivity(name: 'A', color: 0))
+          .requireValue();
+      final switched = (await h.timer.switchToActivity(a.id, isAuto: true))
+          .requireValue();
+      expect(switched.isAuto, isTrue);
+      expect(switched.isRunning, isTrue);
+      await h.timer.refresh();
+      expect(h.timer.runningEntry?.activityId, a.id);
+      expect(h.timer.lastAction?.id, switched.id);
+      expect(h.revision.value, 1); // dataRevision bump
+    });
+
+    test('stop：结束运行条目并切到未分配', () async {
+      final a = (await h.activities.createActivity(name: 'A', color: 0))
+          .requireValue();
+      await h.timer.switchToActivity(a.id);
+      final stopped = (await h.timer.stopRunning()).requireValue();
+      expect(stopped.isRunning, isTrue);
+      expect(stopped.activityId, isNot(a.id)); // 未分配活动
+      expect(h.revision.value, 2);
+    });
+
+    test('add：补记条目 isAuto 透传 + dataRevision', () async {
+      final a = (await h.activities.createActivity(name: 'A', color: 0))
+          .requireValue();
+      final added = (await h.timer.addEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 14, 10),
+        endAt: DateTime(2026, 8, 14, 11),
+        note: '会议',
+        isAuto: true,
+      )).requireValue();
+      expect(added.isAuto, isTrue);
+      expect(added.endAt, DateTime(2026, 8, 14, 11));
+      expect(h.revision.value, 1);
+    });
+
+    test('split：切割为两段', () async {
+      final a = (await h.activities.createActivity(name: 'A', color: 0))
+          .requireValue();
+      final added = (await h.timer.addEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 14, 10),
+        endAt: DateTime(2026, 8, 14, 11),
+        note: '',
+      )).requireValue();
+      final parts = (await h.timer.splitEntry(
+        entryId: added.id,
+        splitAt: DateTime(2026, 8, 14, 10, 30),
+      )).requireValue();
+      expect(parts, hasLength(2));
+      expect(parts[0].endAt, DateTime(2026, 8, 14, 10, 30));
+      expect(parts[1].startAt, DateTime(2026, 8, 14, 10, 30));
+    });
+
+    test('merge：合并相邻同活动条目', () async {
+      final a = (await h.activities.createActivity(name: 'A', color: 0))
+          .requireValue();
+      final first = (await h.timer.addEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 14, 10),
+        endAt: DateTime(2026, 8, 14, 11),
+        note: '',
+      )).requireValue();
+      await h.timer.addEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 14, 11),
+        endAt: DateTime(2026, 8, 14, 12),
+        note: '',
+      );
+      final merged = (await h.timer.mergeWithNeighbor(
+        entryId: first.id,
+        mergePrevious: false, // 合并右侧
+      )).requireValue();
+      expect(merged, isNotNull);
+      expect(merged!.startAt, DateTime(2026, 8, 14, 10));
+      expect(merged.endAt, DateTime(2026, 8, 14, 12));
+    });
+
+    test('delete：软删条目', () async {
+      final a = (await h.activities.createActivity(name: 'A', color: 0))
+          .requireValue();
+      final added = (await h.timer.addEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 14, 10),
+        endAt: DateTime(2026, 8, 14, 11),
+        note: '',
+      )).requireValue();
+      await h.timer.deleteEntry(added.id);
+      final current = await h.entries.entryByIdIncludingDeleted(added.id);
+      expect(current, isNotNull);
+      expect(current!.isDeleted, isTrue);
+    });
+  });
+
+  group('TimerStore undo/redo 往返', () {
+    late TestHarness h;
+
+    setUp(() => h = TestHarness());
+    tearDown(() => h.close());
+
+    test('add undo：软删新条目；redo：恢复', () async {
+      final a = (await h.activities.createActivity(name: 'A', color: 0))
+          .requireValue();
+      final added = (await h.timer.addEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 14, 10),
+        endAt: DateTime(2026, 8, 14, 11),
+        note: '',
+      )).requireValue();
+
+      await h.undo.undo();
+      expect((await h.entries.entryByIdIncludingDeleted(added.id))!.isDeleted,
+          isTrue);
+
+      await h.undo.redo();
+      final restored = await h.entries.entryByIdIncludingDeleted(added.id);
+      expect(restored, isNotNull);
+      expect(restored!.isDeleted, isFalse);
+      expect(restored.endAt, DateTime(2026, 8, 14, 11));
+    });
+
+    test('delete undo：恢复；redo：软删', () async {
+      final a = (await h.activities.createActivity(name: 'A', color: 0))
+          .requireValue();
+      final added = (await h.timer.addEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 14, 10),
+        endAt: DateTime(2026, 8, 14, 11),
+        note: '',
+      )).requireValue();
+      await h.timer.deleteEntry(added.id);
+
+      await h.undo.undo();
+      expect((await h.entries.entryByIdIncludingDeleted(added.id))!.isDeleted,
+          isFalse);
+
+      await h.undo.redo();
+      expect((await h.entries.entryByIdIncludingDeleted(added.id))!.isDeleted,
+          isTrue);
+    });
+
+    test('switch undo：旧运行恢复未结束态；redo 保持现状', () async {
+      final a = (await h.activities.createActivity(name: 'A', color: 0))
+          .requireValue();
+      final b = (await h.activities.createActivity(name: 'B', color: 0))
+          .requireValue();
+      await h.timer.switchToActivity(a.id);
+      final aEntry = await h.entries.runningEntry();
+      await h.timer.switchToActivity(b.id);
+      expect((await h.entries.runningEntry())!.activityId, b.id);
+
+      await h.undo.undo(); // 恢复 A 未结束态
+      final restored = await h.entries.runningEntry();
+      expect(restored!.activityId, a.id);
+      expect(restored.isRunning, isTrue);
+
+      await h.undo.redo(); // redo 无动作：保持 A 运行
+      expect((await h.entries.runningEntry())!.activityId, a.id);
+      expect(aEntry, isNotNull);
+    });
+
+    test('split undo：恢复原条目完整时段；redo 保持切分后状态', () async {
+      final a = (await h.activities.createActivity(name: 'A', color: 0))
+          .requireValue();
+      final added = (await h.timer.addEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 14, 10),
+        endAt: DateTime(2026, 8, 14, 11),
+        note: '',
+      )).requireValue();
+      await h.timer.splitEntry(
+        entryId: added.id,
+        splitAt: DateTime(2026, 8, 14, 10, 30),
+      );
+
+      await h.undo.undo(); // 恢复原条目完整时段（覆盖两段）
+      final restored = await h.entries.entryByIdIncludingDeleted(added.id);
+      expect(restored!.isDeleted, isFalse);
+      expect(restored.startAt, DateTime(2026, 8, 14, 10));
+      expect(restored.endAt, DateTime(2026, 8, 14, 11));
+
+      await h.undo.redo(); // redo 无动作：保持恢复后的完整时段
+      final afterRedo = await h.entries.entryByIdIncludingDeleted(added.id);
+      expect(afterRedo!.isDeleted, isFalse);
+      expect(afterRedo.endAt, DateTime(2026, 8, 14, 11));
+    });
+
+    test('merge undo：恢复原条目与邻居；redo 保持合并后状态', () async {
+      final a = (await h.activities.createActivity(name: 'A', color: 0))
+          .requireValue();
+      final first = (await h.timer.addEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 14, 10),
+        endAt: DateTime(2026, 8, 14, 11),
+        note: '',
+      )).requireValue();
+      final second = (await h.timer.addEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 14, 11),
+        endAt: DateTime(2026, 8, 14, 12),
+        note: '',
+      )).requireValue();
+      await h.timer.mergeWithNeighbor(
+        entryId: first.id,
+        mergePrevious: false,
+      );
+
+      await h.undo.undo(); // 恢复 first 与 second
+      final firstBack = await h.entries.entryByIdIncludingDeleted(first.id);
+      final secondBack = await h.entries.entryByIdIncludingDeleted(second.id);
+      expect(firstBack!.isDeleted, isFalse);
+      expect(firstBack.endAt, DateTime(2026, 8, 14, 11));
+      expect(secondBack!.isDeleted, isFalse);
+
+      await h.undo.redo(); // redo 无动作：保持恢复后的两条独立条目
+      expect((await h.entries.entryByIdIncludingDeleted(first.id))!.isDeleted,
+          isFalse);
+      expect((await h.entries.entryByIdIncludingDeleted(second.id))!.isDeleted,
+          isFalse);
+    });
+
+    test('undo 冲突校验：目标行已删时 redo 拒绝', () async {
+      final a = (await h.activities.createActivity(name: 'A', color: 0))
+          .requireValue();
+      final added = (await h.timer.addEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 14, 10),
+        endAt: DateTime(2026, 8, 14, 11),
+        note: '',
+      )).requireValue();
+      await h.undo.undo(); // 软删新条目
+      // 模拟并发：redo 前目标行被物理移除（redo 恢复分支校验"行存在"）。
+      await (h.db.delete(h.db.timeEntries)
+            ..where((t) => t.id.equals(added.id)))
+          .go();
+      final redoResult = await h.undo.redo();
+      // 目标行缺失 → validate 拒绝，redo 返回失败（栈不动、可重试）。
+      expect(redoResult, isA<AppFailure<void>>());
+      expect(h.undo.canRedo, isTrue);
+    });
+  });
+}

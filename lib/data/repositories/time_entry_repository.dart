@@ -78,6 +78,19 @@ class TimeEntryRepository with RepositoryMappings {
     return row == null ? null : timeEntryFromRow(row);
   }
 
+  /// 按 id 查询（**含软删行**）：undo 恢复快照采集用——操作后软删的旧行
+  /// 需读取其软删态作为 after 快照。
+  Future<TimeEntry?> entryByIdIncludingDeleted(String entryId) async {
+    try {
+      final query = database.select(database.timeEntries)
+        ..where((t) => t.id.equals(entryId));
+      final row = await query.getSingleOrNull();
+      return row == null ? null : timeEntryFromRow(row);
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// 全量条目（含已删除，bundle 导出用；updated_at 升序）。
   Future<List<TimeEntry>> allEntries() async {
     final query = database.select(database.timeEntries)
@@ -104,6 +117,7 @@ class TimeEntryRepository with RepositoryMappings {
   Future<AppResult<TimeEntry>> switchToActivity(
     String activityId, {
     DateTime? at,
+    bool isAuto = false,
   }) async {
     try {
       final now = at ?? _now();
@@ -147,6 +161,7 @@ class TimeEntryRepository with RepositoryMappings {
             startAt: now,
             deviceId: deviceId,
             updatedAt: now,
+            isAuto: isAuto,
           ),
           executor: database,
         );
@@ -228,6 +243,7 @@ class TimeEntryRepository with RepositoryMappings {
     required DateTime startAt,
     required DateTime endAt,
     required String note,
+    bool isAuto = false,
   }) async {
     try {
       if (!startAt.isBefore(endAt)) {
@@ -245,6 +261,7 @@ class TimeEntryRepository with RepositoryMappings {
           note: note,
           deviceId: deviceId,
           updatedAt: now,
+          isAuto: isAuto,
         ),
         cutOverlaps: true,
       );
@@ -313,50 +330,27 @@ class TimeEntryRepository with RepositoryMappings {
     required bool mergePrevious,
   }) async {
     try {
-      final current = await entryById(entryId);
-      if (current == null || current.isDeleted || current.isRunning) {
-        return const AppFailure('条目不存在、已删除或运行中，无法合并');
+      final neighborResult = await _findMergeNeighbor(
+        entryId: entryId,
+        mergePrevious: mergePrevious,
+      );
+      if (neighborResult case AppFailure<TimeEntry?> failure) {
+        return AppFailure(failure.message);
       }
-      final thresholdMinutes = await _settingsRepo.mergeNeighborThresholdMinutes();
-      final dayEntries = await entriesForDay(current.startAt);
-      final ordered = dayEntries
-          .where((e) => !e.isDeleted && !e.isRunning)
-          .toList()
-        ..sort((a, b) => a.startAt.compareTo(b.startAt));
-      final index = ordered.indexWhere((e) => e.id == current.id);
-      if (index == -1) return const AppFailure('条目不在当日列表中');
-
-      final neighborIndex = mergePrevious ? index - 1 : index + 1;
-      if (neighborIndex < 0 || neighborIndex >= ordered.length) {
-        return AppSuccess(null);
+      final neighbor = neighborResult.requireValue();
+      if (neighbor == null) {
+        return const AppSuccess(null); // 无合并对象
       }
-      final neighbor = ordered[neighborIndex];
-      // 仅允许合并同一活动的相邻条目——跨活动合并会把邻居时段错误归入当前活动。
-      if (neighbor.activityId != current.activityId) {
-        return const AppSuccess(null);
-      }
-      final neighborEnd = neighbor.endAt;
-      if (neighborEnd == null || !neighborEnd.isAfter(neighbor.startAt)) {
-        return AppSuccess(null);
-      }
-
-      // 阈值校验：间隔超过阈值不合并（老项目 mergeConfirmationRequired 语义——
-      // 此处先按可配置阈值直接拒绝，UI 确认交互留阶段 4）。
-      final gap = neighbor.startAt.isBefore(current.startAt)
-          ? current.startAt.difference(neighborEnd)
-          : neighbor.startAt.difference(current.endAt!);
-      if (gap.inMinutes > thresholdMinutes) {
-        return AppFailure(
-          '与相邻条目间隔 ${gap.inMinutes} 分钟，超过合并阈值 $thresholdMinutes 分钟',
-        );
-      }
+      final current = (await entryById(entryId))!;
 
       final now = _now();
       final merged = current.copyWith(
         startAt: current.startAt.isBefore(neighbor.startAt)
             ? current.startAt
             : neighbor.startAt,
-        endAt: current.endAt!.isAfter(neighborEnd) ? current.endAt : neighborEnd,
+        endAt: current.endAt!.isAfter(neighbor.endAt!)
+            ? current.endAt
+            : neighbor.endAt,
         note: _mergedNotes(current.note, neighbor.note),
         updatedAt: now,
       );
@@ -380,6 +374,68 @@ class TimeEntryRepository with RepositoryMappings {
     }
   }
 
+  /// 查询 merge 的实际合并对象（与 [mergeEntryWithNeighbor] 内部判定一致）：
+  /// TimerStore 采集 undo 恢复快照用。判定失败/无对象返回 null（AppSuccess）。
+  Future<AppResult<TimeEntry?>> neighborForMerge({
+    required String entryId,
+    required bool mergePrevious,
+  }) async {
+    try {
+      return await _findMergeNeighbor(
+        entryId: entryId,
+        mergePrevious: mergePrevious,
+      );
+    } catch (e) {
+      return AppFailure('查询合并邻居失败：$e');
+    }
+  }
+
+  /// merge 邻居判定（与 merge 主体共用，消除逻辑漂移）：
+  /// 同日相邻 + 同活动 + 非零长 + 间隔 <= 阈值 → 返回邻居；否则 null。
+  Future<AppResult<TimeEntry?>> _findMergeNeighbor({
+    required String entryId,
+    required bool mergePrevious,
+  }) async {
+    final current = await entryById(entryId);
+    if (current == null || current.isDeleted || current.isRunning) {
+      return const AppFailure('条目不存在、已删除或运行中，无法合并');
+    }
+    final thresholdMinutes = await _settingsRepo.mergeNeighborThresholdMinutes();
+    final dayEntries = await entriesForDay(current.startAt);
+    final ordered = dayEntries
+        .where((e) => !e.isDeleted && !e.isRunning)
+        .toList()
+      ..sort((a, b) => a.startAt.compareTo(b.startAt));
+    final index = ordered.indexWhere((e) => e.id == current.id);
+    if (index == -1) return const AppFailure('条目不在当日列表中');
+
+    final neighborIndex = mergePrevious ? index - 1 : index + 1;
+    if (neighborIndex < 0 || neighborIndex >= ordered.length) {
+      return const AppSuccess(null);
+    }
+    final neighbor = ordered[neighborIndex];
+    // 仅允许合并同一活动的相邻条目——跨活动合并会把邻居时段错误归入当前活动。
+    if (neighbor.activityId != current.activityId) {
+      return const AppSuccess(null);
+    }
+    final neighborEnd = neighbor.endAt;
+    if (neighborEnd == null || !neighborEnd.isAfter(neighbor.startAt)) {
+      return const AppSuccess(null);
+    }
+
+    // 阈值校验：间隔超过阈值不合并（老项目 mergeConfirmationRequired 语义——
+    // 此处先按可配置阈值直接拒绝，UI 确认交互留阶段 4）。
+    final gap = neighbor.startAt.isBefore(current.startAt)
+        ? current.startAt.difference(neighborEnd)
+        : neighbor.startAt.difference(current.endAt!);
+    if (gap.inMinutes > thresholdMinutes) {
+      return AppFailure(
+        '与相邻条目间隔 ${gap.inMinutes} 分钟，超过合并阈值 $thresholdMinutes 分钟',
+      );
+    }
+    return AppSuccess(neighbor);
+  }
+
   /// 软删时间条目。
   Future<AppResult<void>> deleteEntry(TimeEntry entry) async {
     try {
@@ -395,6 +451,60 @@ class TimeEntryRepository with RepositoryMappings {
       return const AppSuccess(null);
     } catch (e) {
       return AppFailure('删除时间段失败：$e');
+    }
+  }
+
+  /// undo/redo 恢复写库（**快照权威，非 LWW**——恢复的是操作时快照状态，
+  /// 不做远端更新比较；配合 [UndoStore] 的内容状态校验，本地 undo 语义）。
+  ///
+  /// - [entry]：恢复目标状态（undo 时 = 操作前快照；redo 时 = 操作后快照）。
+  ///   saved 前 updatedAt 推进到 [at]（默认 now）——恢复作为一次新修改参与
+  ///   同步传播（LWW/删除传播），保留原 id（跨日条目沿用既有段切分归一化）；
+  /// - [softDelete]：true 时改为软删该条目（deletedAt = 推进后的 updatedAt）。
+  /// 单事务原子；失败返回可读原因（调用方 [UndoStore] 栈不动、可重试）。
+  Future<AppResult<void>> restoreEntryForUndo(
+    TimeEntry entry, {
+    required bool softDelete,
+    DateTime? at,
+  }) async {
+    try {
+      final now = at ?? _now();
+      await database.transaction(() async {
+        final target = softDelete
+            ? entry.copyWith(deletedAt: now, updatedAt: now)
+            : entry.copyWith(updatedAt: now);
+        await _saveEntryRows(database, target);
+      });
+      return const AppSuccess(null);
+    } catch (e) {
+      return AppFailure('恢复条目失败：$e');
+    }
+  }
+
+  /// undo/redo 批量恢复写库（**单事务**）：整条 undo 记录涉及的所有条目
+  /// 在同一个 drift transaction 内恢复/软删——满足 3a 事务化 applier 契约
+  /// （同记录组合操作原子性，防 undo 半恢复）。
+  ///
+  /// [ops] 每项：`entry` 为恢复目标状态（softDelete=false 时写入该状态并推进
+  /// updatedAt；true 时软删该行——entry 提供 id 与快照）；更新推进时刻统一取
+  /// 单个 [at]（默认 now）。
+  Future<AppResult<void>> restoreEntriesForUndo(
+    List<({TimeEntry entry, bool softDelete})> ops, {
+    DateTime? at,
+  }) async {
+    try {
+      final now = at ?? _now();
+      await database.transaction(() async {
+        for (final op in ops) {
+          final target = op.softDelete
+              ? op.entry.copyWith(deletedAt: now, updatedAt: now)
+              : op.entry.copyWith(updatedAt: now);
+          await _saveEntryRows(database, target);
+        }
+      });
+      return const AppSuccess(null);
+    } catch (e) {
+      return AppFailure('恢复条目失败：$e');
     }
   }
 
