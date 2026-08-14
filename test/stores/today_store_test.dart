@@ -90,11 +90,24 @@ class _GatedEntries extends TimeEntryRepository {
 
   final gates = <Completer<void>>[];
 
+  /// 注入的预设结果（非空时返回它而非查库）——乱序测试用旧快照精确注入，
+  /// 不依赖 DB 读取时序（避免假阳性/偶发）。
+  List<TimeEntry>? overrideResult;
+
   @override
   Future<List<TimeEntry>> entriesForRange(DateTime start, DateTime end) {
-    if (gates.isEmpty) return super.entriesForRange(start, end);
-    final gate = gates.removeAt(0);
-    return gate.future.then((_) => super.entriesForRange(start, end));
+    if (gates.isNotEmpty) {
+      final gate = gates.removeAt(0);
+      final override = overrideResult;
+      final Future<List<TimeEntry>> result;
+      if (override != null) {
+        result = Future.value(override);
+      } else {
+        result = super.entriesForRange(start, end);
+      }
+      return gate.future.then((_) => result);
+    }
+    return super.entriesForRange(start, end);
   }
 }
 
@@ -152,12 +165,12 @@ void main() {
     test('并发乱序：旧 loadToday 晚完成不覆盖新缓存', () async {
       final a = (await h.activities.createActivity(name: 'A', color: 0))
           .requireValue();
-      await h.entries.createManualEntry(
+      final oldEntry = (await h.entries.createManualEntry(
         activityId: a.id,
         startAt: DateTime(2026, 8, 14, 9),
         endAt: DateTime(2026, 8, 14, 10),
         note: '',
-      );
+      )).requireValue();
       final gated = _GatedEntries(
         database: h.db,
         activityRepository: h.activities,
@@ -177,9 +190,12 @@ void main() {
         revision.dispose();
       });
 
+      // A 注入旧快照（仅 1 条）——确定性捕获"加载时刻的旧数据"，不依赖
+      // DB 读取时序。
       final gate = Completer<void>();
       gated.gates.add(gate);
-      final futureA = store.loadToday(); // A 挂起
+      gated.overrideResult = [oldEntry];
+      final futureA = store.loadToday(); // A 挂起（将携带旧快照）
       await pumpEventQueue();
       await h.entries.createManualEntry(
         activityId: a.id,
@@ -189,9 +205,12 @@ void main() {
       );
       await store.loadToday(); // B 完成（含 2 条）
       expect(store.today, hasLength(2));
-      gate.complete(); // A 晚完成（仅含 1 条旧数据）
+      gate.complete(); // A 晚完成（旧快照仅 1 条）
       await futureA;
-      expect(store.today, hasLength(2)); // 新缓存保持，未被 A 覆盖
+      // 新缓存保持（2 条），未被 A 的旧快照覆盖——若 _requestSeq 守卫被删
+      // 除，A 会写回 1 条使断言失败（测试能捕获回归）。
+      expect(store.today, hasLength(2));
+      expect(store.today.any((e) => e.id == oldEntry.id), isTrue);
     });
 
     test('totalDuration：运行中条目截至 effectiveNow', () async {
