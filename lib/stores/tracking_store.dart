@@ -95,8 +95,7 @@ class TrackingStore extends ChangeNotifier {
     if (_polling) return; // 重入保护（手动调用与 tick 并发时只执行一轮）
     _polling = true;
     try {
-      final process = detector.processName;
-      if (process == null || process.isEmpty) return; // 无前台进程：不动作
+      final process = detector.processName; // 可空（title 规则不依赖进程）
       final title = detector.windowTitle;
       final rulesResult = await rules.activeRules();
       if (_disposed) return; // await 期间可能已 dispose（与其他 await 复查一致）
@@ -128,13 +127,15 @@ class TrackingStore extends ChangeNotifier {
   ///   命中**——标题规则按窗口标题归活动，区分同应用内不同文档/页面）；
   /// - 同进程命中多条取**最先**（规则列表顺序 = activeRules updatedAt 序）。
   static TrackingRule? _match(
-    String process,
+    String? process,
     String? title,
     List<TrackingRule> candidates,
   ) {
     for (final rule in candidates) {
       if (rule.matchKind == TrackingRuleMatchKind.unknown) continue;
       if (rule.matchKind == TrackingRuleMatchKind.process) {
+        // 进程缺失时 process 类规则跳过（防 `*` 全通配误命中空进程）。
+        if (process == null || process.isEmpty) continue;
         if (_processMatches(process, rule.pattern)) return rule;
         continue;
       }
@@ -142,6 +143,7 @@ class TrackingStore extends ChangeNotifier {
       final windowTitle = title;
       if (windowTitle == null || windowTitle.isEmpty) continue;
       try {
+        if (rule.pattern.isEmpty) continue; // 空正则会匹配一切标题：跳过
         if (RegExp(rule.pattern).hasMatch(windowTitle)) {
           return rule;
         }
@@ -177,7 +179,8 @@ class TrackingStore extends ChangeNotifier {
   Future<AppResult<TrackingRule>> saveRule(TrackingRule rule) async {
     final result = await rules.saveRule(rule);
     if (result.isSuccess) {
-      dataRevision.bump();
+      dataRevision.bump(); // 数据已变更：即使 dispose 后仍须递增（同步依赖）
+      if (_disposed) return result; // await 期间可能已 dispose：跳过通知
       notifyListeners();
     }
     return result;
@@ -188,6 +191,7 @@ class TrackingStore extends ChangeNotifier {
     final result = await rules.deleteRule(rule);
     if (result.isSuccess) {
       dataRevision.bump();
+      if (_disposed) return result; // await 期间可能已 dispose：跳过通知
       notifyListeners();
     }
     return result;

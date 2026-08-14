@@ -417,6 +417,7 @@ class TimerStore extends ChangeNotifier {
 
   void _afterWrite() {
     dataRevision.bump();
+    if (_disposed) return; // await 写路径后可能已 dispose：跳过通知
     notifyListeners();
   }
 
