@@ -35,7 +35,15 @@ class SyncStore extends ChangeNotifier {
     required this.syncStatus,
     required this.cleanup,
   }) {
-    _authSubscription = backend.authStateStream.listen(_onAuthChanged);
+    // 认证流异常兜底：后端流错误不逃逸为未处理异步异常。
+    _authSubscription = backend.authStateStream.listen(
+      _onAuthChanged,
+      onError: (Object e) {
+        if (_disposed) return;
+        _lastError = '认证流错误：$e';
+        notifyListeners();
+      },
+    );
   }
 
   final SyncBackend backend;
@@ -101,6 +109,9 @@ class SyncStore extends ChangeNotifier {
       _userId = null;
       _lastSyncAt = null;
       _lastTarget = null;
+      _lastError = null; // 登出完全重置编排状态（防上一会话残留展示）
+      _lastPulled = null;
+      _lastPushed = null;
       notifyListeners();
     }
     return result;
@@ -123,6 +134,11 @@ class SyncStore extends ChangeNotifier {
     final startedAt = DateTime.now();
     try {
       final result = await backend.syncNow();
+      // await 期间可能已登出/切换账号：会话未变才采纳结果，防旧会话报告
+      // 写回 + 清理按错误用户作用域执行（跨账号/幽灵会话脏状态）。
+      if (user != _userId) {
+        return const AppFailure('会话已切换，本次同步结果已丢弃');
+      }
       if (result case AppFailure<SyncReport> failure) {
         _lastError = failure.message;
         return failure;
@@ -132,10 +148,15 @@ class SyncStore extends ChangeNotifier {
       _lastTarget = report.target;
       _lastPulled = report.pulledRows;
       _lastPushed = report.pushedRows;
-      // 同步成功后编排清理（startedAt 水位，非库内游标——见类文档）。
+      // 同步成功后编排清理（startedAt 水位 + 启动时捕获的 user——见类文档）。
       // fire-and-forget：runCleanupIfDue 内部 await 后有 _disposed 守卫。
-      runCleanupIfDue(cursorOverride: startedAt);
+      runCleanupIfDue(cursorOverride: startedAt, userId: user);
       return result;
+    } on Exception catch (e) {
+      // 契约外异常（AppResult 未覆盖路径）：记录并收敛为失败——防从
+      // _onAuthChanged 的 fire-and-forget 调用链逃逸为未处理异步异常。
+      _lastError = '同步异常：$e';
+      return AppFailure('同步异常：$e');
     } finally {
       _syncing = false;
       if (!_disposed) notifyListeners(); // await 期间可能已 dispose
@@ -144,21 +165,39 @@ class SyncStore extends ChangeNotifier {
 
   /// 按 `last_cleanup_at` 限频触发清理（默认 24h）。
   ///
-  /// [cursorOverride] 可选（同步编排传 startedAt 水位）；手动清理（阶段 4
-  /// 设置页按钮）可传 null 走库内游标且不受限频（separate 入口）。
-  Future<AppResult<void>> runCleanupIfDue({DateTime? cursorOverride}) async {
+  /// 语义（与文档一致）：
+  /// - [cursorOverride] != null（**同步触发**）：受限频——`last_cleanup_at`
+  ///   距今 < 24h 时跳过（防每次同步都全表扫描）；到期才清理；
+  /// - [cursorOverride] == null（**手动触发**，阶段 4 设置页按钮）：不限频，
+  ///   走库内游标。
+  /// [userId] 可选透传：同步编排传启动时捕获的用户（防 await 期间会话切换
+  /// 导致清理作用域错误）；null 时用当前 [_userId]。
+  Future<AppResult<void>> runCleanupIfDue({
+    DateTime? cursorOverride,
+    String? userId,
+  }) async {
     if (_cleanupRunning) {
       return const AppFailure('清理进行中，请稍后再试');
     }
-    final due = await _cleanupDue();
-    if (!due && cursorOverride == null) {
-      return const AppSuccess(null); // 未到期：跳过（同步水位触发不跳过——
-      // 同步成功本身即"数据有变动"的信号，理应清理）
+    // 手动清理（无水位）不限频：直接执行，跳过 _cleanupDue 的无效查询。
+    if (cursorOverride == null) {
+      return _runCleanup(userId: userId ?? _userId, cursorOverride: null);
     }
+    final due = await _cleanupDue();
+    if (!due) {
+      return const AppSuccess(null); // 同步触发受限频：未到期跳过
+    }
+    return _runCleanup(userId: userId ?? _userId, cursorOverride: cursorOverride);
+  }
+
+  Future<AppResult<void>> _runCleanup({
+    required String? userId,
+    required DateTime? cursorOverride,
+  }) async {
     _cleanupRunning = true;
     try {
       final result = await cleanup.run(
-        userId: _userId,
+        userId: userId,
         cursorOverride: cursorOverride,
       );
       if (result case AppFailure<CleanupReport> failure) {

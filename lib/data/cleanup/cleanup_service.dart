@@ -201,7 +201,25 @@ class CleanupService with RepositoryMappings {
       if (cursorOverride != null) {
         // 编排水位优先：跳过库内游标读取与损坏判定（override 为同步开始
         // 时刻，本字段语义即"最近一次可信同步时刻"，无需读库）。
-        lastSyncAt = cursorOverride.toUtc();
+        // **契约防御（r-cursorOverride）**：override 必须在保留期内合理
+        // 窗口（不得晚于 now，也不得早于保留期上界）——防调用方误传异常
+        // 时间戳导致 cutoff 错位/物理删除范围失控。仅 SyncStore 同步编排
+        // 传入（startedAt 水位）。
+        final override = cursorOverride.toUtc();
+        if (override.isAfter(now)) {
+          try {
+            stderr.writeln('[cleanup] cursorOverride 晚于当前时刻（$override）——清理跳过');
+          } catch (_) {
+            // 日志写入失败不影响跳过结论。
+          }
+          return AppSuccess(
+            const CleanupReport(
+              deletedByTable: {},
+              vacuumed: false,
+            ).copyWithSkippedNoSync(),
+          );
+        }
+        lastSyncAt = override;
       } else {
         final cursorKey = normalized == null
             ? AppMetadataKeys.lastSyncAt

@@ -3,8 +3,9 @@ import 'dart:async';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timetrack2/api/supabase/sync_backend.dart';
-import 'package:timetrack2/constants/app_constants.dart';
 import 'package:timetrack2/api/supabase/sync_status_store.dart';
+import 'package:timetrack2/constants/app_constants.dart';
+import 'package:timetrack2/constants/storage_keys.dart' show AppMetadataKeys;
 import 'package:timetrack2/data/cleanup/cleanup_service.dart';
 import 'package:timetrack2/data/database/app_database.dart' hide ProfileSettings;
 import 'package:timetrack2/stores/sync_store.dart';
@@ -18,6 +19,7 @@ class _MockBackend implements SyncBackend {
   bool syncFails = false; // 测试内字段赋值控制（同步失败用例）
   String? currentUser;
   int syncCalls = 0;
+  Completer<void>? _syncGate; // 非空时 syncNow 挂起（并发/会话切换测试）
 
   final _authController = StreamController<String?>.broadcast();
 
@@ -44,6 +46,12 @@ class _MockBackend implements SyncBackend {
   @override
   Future<AppResult<SyncReport>> syncNow() async {
     syncCalls++;
+    // 门控：非空时挂起直到放行（并发互斥/会话切换测试用）。
+    final gate = _syncGate;
+    if (gate != null) {
+      _syncGate = null;
+      await gate.future;
+    }
     if (syncFails) return const AppFailure('网络错误');
     return const AppSuccess(SyncReport(
       target: SyncTarget.supabase,
@@ -141,14 +149,33 @@ void main() {
       expect(h.backend.syncCalls, 0); // 未触达后端
     });
 
-    test('同步进行中互斥', () async {
+    test('同步进行中互斥（Completer 门控真实并发）', () async {
+      final gate = Completer<void>();
+      h.backend._syncGate = gate;
+      h.backend.emitLogin('user-1'); // 触发首次同步（挂起在 gate）
+      await pumpEventQueue();
+      expect(h.store.syncing, isTrue); // 同步进行中
+
+      final concurrent = await h.store.syncNow(); // 并发调用
+      expect(concurrent, isA<AppFailure<SyncReport>>()); // 互斥拒绝
+
+      gate.complete(); // 放行首次同步
+      await pumpEventQueue();
+      expect(h.store.syncing, isFalse); // 完成后复位
+      expect(h.backend.syncCalls, 1); // 仅首次执行（并发被拒）
+    });
+
+    test('同步挂起期间登出：结果丢弃，不写报告/不触发清理', () async {
+      final gate = Completer<void>();
+      h.backend._syncGate = gate;
       h.backend.emitLogin('user-1');
       await pumpEventQueue();
-      final result = await h.store.syncNow();
-      expect(result.isSuccess, isTrue); // 第一轮完成
-      // 并发（mock syncNow 同步返回，实际时序内不会真并发——此处验证
-      // _syncing 标志在同步期间拦截）。
-      expect(h.store.syncing, isFalse);
+      h.backend.emitLogout(); // 登出（_userId = null）
+      gate.complete(); // 放行同步（user != _userId）
+      await pumpEventQueue();
+      expect(h.store.lastSyncAt, isNull); // 结果被丢弃
+      expect(h.store.lastPushed, isNull);
+      expect(h.store.userId, isNull);
     });
   });
 
@@ -158,29 +185,51 @@ void main() {
     setUp(() => h = _TestHarness());
     tearDown(() => h.close());
 
-    test('同步成功后编排清理（startedAt 水位）', () async {
+    test('同步成功后编排清理（startedAt 水位；轮询等待完成）', () async {
       h.backend.emitLogin('user-1');
       await pumpEventQueue();
-      // 同步成功后 runCleanupIfDue(cursorOverride: startedAt) 被触发——
-      // 未同步过（无游标）时 override 水位仍可清理（mock 引擎未写游标，
-      // 但 override 语义=可信水位，清理正常跑）。
-      expect(h.store.cleanupRunning, isFalse);
-      // last_cleanup_at 被写入（清理完成）。
-      final row = await (h.db.select(h.db.appMetadata)
-            ..where((t) => t.key.equals('last_cleanup_at')))
-          .getSingleOrNull();
+      // 轮询等待 last_cleanup_at 写入（fire-and-forget 清理含多次 DB 往返，
+      // pumpEventQueue 不保证完成）。
+      final row = await _waitForCleanup(h.db);
       expect(row, isNotNull);
+      // 用常量口径（与 _cleanupDue 一致）。
+      expect(row!.key, AppMetadataKeys.lastCleanupAt);
     });
 
-    test('限频：未到期不跑清理（无水位 override）', () async {
-      // 先跑一次（写 last_cleanup_at）。
-      await h.store.runCleanupIfDue();
-      final result = await h.store.runCleanupIfDue(); // 立即再次：未到期
-      expect(result, isA<AppSuccess<void>>()); // 跳过（未触发清理）
+    test('限频：同步触发未到期跳过，手动触发不限频', () async {
+      // 预置 last_cleanup_at = now（未到期）。
+      final now = DateTime.now().toUtc().toIso8601String();
+      await (h.db.into(h.db.appMetadata).insert(
+        AppMetadataCompanion.insert(
+          key: AppMetadataKeys.lastCleanupAt,
+          value: now,
+        ),
+      ));
+      // 同步触发（cursorOverride 非空）：受限频 → 未到期跳过（不执行清理）。
+      final syncTriggered = await h.store.runCleanupIfDue(cursorOverride: DateTime.now());
+      expect(syncTriggered, isA<AppSuccess<void>>());
+      expect(h.store.cleanupRunning, isFalse);
+      // 手动触发（cursorOverride null）：不限频 → 执行清理（无游标 → skippedNoSync）。
+      final manual = await h.store.runCleanupIfDue();
+      expect(manual, isA<AppSuccess<void>>());
     });
 
     test('cleanupIntervalHours 常量存在', () {
       expect(AppConstants.cleanupIntervalHours, greaterThan(0));
     });
   });
+}
+
+/// 轮询等待 last_cleanup_at 写入（fire-and-forget 清理含多次 DB 往返，
+/// 需确定性等待；超时 3s 判失败）。
+Future<AppMetadataRow?> _waitForCleanup(AppDatabase db) async {
+  final deadline = DateTime.now().add(const Duration(seconds: 3));
+  while (DateTime.now().isBefore(deadline)) {
+    final row = await (db.select(db.appMetadata)
+          ..where((t) => t.key.equals(AppMetadataKeys.lastCleanupAt)))
+        .getSingleOrNull();
+    if (row != null) return row;
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+  }
+  return null;
 }
