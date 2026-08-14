@@ -142,4 +142,31 @@ final List<CommandDefinition> commandDefinitions = [
     maxPositionalArgs: 1,
     description: '删除分类（递归软删子孙及 links）：category_delete <id>',
   ),
+
+  // ---- 后台自动记录（模块 2c'） ----
+  CommandDefinition(
+    name: 'tracking_rule_create',
+    aliases: ['新建映射规则'],
+    minPositionalArgs: 1,
+    maxPositionalArgs: 1,
+    allowedOptions: {'kind', 'activity'},
+    description:
+        '新建映射规则：tracking_rule_create <pattern> --kind=process|title --activity=<活动名>',
+  ),
+  CommandDefinition(
+    name: 'tracking_rule_update',
+    aliases: ['修改映射规则'],
+    minPositionalArgs: 1,
+    maxPositionalArgs: 1,
+    allowedOptions: {'kind', 'pattern', 'activity', 'sync'},
+    description:
+        '修改映射规则：tracking_rule_update <id> [--kind=...] [--pattern=...] [--activity=...] [--sync=true|false]',
+  ),
+  CommandDefinition(
+    name: 'tracking_rule_delete',
+    aliases: ['删除映射规则'],
+    minPositionalArgs: 1,
+    maxPositionalArgs: 1,
+    description: '删除映射规则：tracking_rule_delete <id>',
+  ),
 ];

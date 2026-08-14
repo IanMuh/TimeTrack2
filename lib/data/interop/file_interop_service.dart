@@ -25,8 +25,13 @@ class FileInteropService {
   static const _extensions = ['json'];
 
   /// 导出全部数据到用户选择的 .timetrack.json。
+  ///
+  /// [path]（可选，模块 3d 指令通道）：**显式文件路径**——非空时直接写入
+  /// 该路径（跳过 file_selector 对话框，供 AI/深链/自动化指令调用）；null
+  /// 时走对话框选择（阶段 4 UI 用）。返回实际写入路径。
   Future<AppResult<String?>> export({
     required String sourceDeviceId,
+    String? path,
   }) async {
     try {
       final bundle = await syncBundleRepository.exportBundle(
@@ -37,8 +42,14 @@ class FileInteropService {
           'timetrack-${DateFormat('yyyyMMdd-HHmmss').format(DateTime.now())}'
           '.timetrack.json';
 
-      final targetPath = await _saveTargetPath(fileName);
-      if (targetPath == null) return const AppFailure('未选择保存位置');
+      final String targetPath;
+      if (path != null && path.isNotEmpty) {
+        targetPath = path; // 指令通道：显式路径直接写
+      } else {
+        final picked = await _saveTargetPath(fileName);
+        if (picked == null) return const AppFailure('未选择保存位置');
+        targetPath = picked;
+      }
       final file = File(targetPath);
       await file.writeAsString(text, encoding: utf8);
       return AppSuccess(targetPath);
@@ -48,10 +59,20 @@ class FileInteropService {
   }
 
   /// 导入 .timetrack.json（校验 → LWW 合并 → 归一化）。
-  Future<AppResult<int>> import() async {
+  ///
+  /// [path]（可选，模块 3d 指令通道）：**显式文件路径**——非空时直接读取
+  /// 该文件（跳过 file_selector 对话框，供 AI/深链/自动化指令调用）；null
+  /// 时走对话框选择（阶段 4 UI 用）。返回包内记录总数。
+  Future<AppResult<int>> import({String? path}) async {
     try {
-      final file = await _openFile();
-      if (file == null) return const AppFailure('未选择文件');
+      final File file;
+      if (path != null && path.isNotEmpty) {
+        file = File(path); // 指令通道：显式路径直接读
+      } else {
+        final picked = await _openFile();
+        if (picked == null) return const AppFailure('未选择文件');
+        file = File(picked.path);
+      }
       final text = await file.readAsString(encoding: utf8);
       final bundle = const SyncBundleCodec().decode(text);
       final result = await syncBundleRepository.mergeBundle(bundle);

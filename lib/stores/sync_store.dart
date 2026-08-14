@@ -28,9 +28,10 @@ import '../constants/app_constants.dart';
 import '../constants/storage_keys.dart' show AppMetadataKeys;
 import '../data/cleanup/cleanup_service.dart';
 import '../utils/result.dart';
+import 'command_contracts.dart';
 
 /// 同步编排 store。
-class SyncStore extends ChangeNotifier {
+class SyncStore extends ChangeNotifier implements SyncNowProvider {
   SyncStore({
     required this.backend,
     required this.syncStatus,
@@ -128,6 +129,7 @@ class SyncStore extends ChangeNotifier {
   }
 
   /// 云同步（登录态；同步成功后编排清理——墓碑水位对齐）。
+  @override
   Future<AppResult<SyncReport>> syncNow() async {
     final user = _userId;
     if (user == null) {
