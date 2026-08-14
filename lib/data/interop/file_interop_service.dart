@@ -44,7 +44,10 @@ class FileInteropService {
 
       final String targetPath;
       if (path != null && path.isNotEmpty) {
-        targetPath = path; // 指令通道：显式路径直接写
+        // 指令通道显式路径：防御校验（防深链/AI 误写非 JSON/覆盖目录）。
+        final pathError = _validateExportPath(path);
+        if (pathError != null) return AppFailure(pathError);
+        targetPath = path;
       } else {
         final picked = await _saveTargetPath(fileName);
         if (picked == null) return const AppFailure('未选择保存位置');
@@ -67,7 +70,11 @@ class FileInteropService {
     try {
       final File file;
       if (path != null && path.isNotEmpty) {
-        file = File(path); // 指令通道：显式路径直接读
+        // 指令通道显式路径：存在性 + .json 扩展名校验（防深链/AI 读任意文件）。
+        if (!path.endsWith('.json')) return const AppFailure('导入路径必须以 .json 结尾');
+        final target = File(path);
+        if (!await target.exists()) return AppFailure('导入文件不存在：$path');
+        file = target;
       } else {
         final picked = await _openFile();
         if (picked == null) return const AppFailure('未选择文件');
@@ -97,6 +104,20 @@ class FileInteropService {
     } catch (e) {
       return AppFailure('导入失败：$e');
     }
+  }
+
+  /// 导出显式路径校验：扩展名 `.json`/`.timetrack.json` + 非目录（防误写
+  /// 覆盖任意文件/目录）。
+  static String? _validateExportPath(String path) {
+    if (!path.endsWith('.json')) return '导出路径必须以 .json 结尾';
+    try {
+      if (FileSystemEntity.isDirectorySync(path)) {
+        return '导出路径指向目录，请指定文件';
+      }
+    } on FileSystemException {
+      return null; // 目标不存在：可新建，合法
+    }
+    return null;
   }
 
   /// 保存目标路径（file_selector）；平台不支持保存对话框时降级选目录（老项目语义）。

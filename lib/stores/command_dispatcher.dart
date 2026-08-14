@@ -76,7 +76,10 @@ class CommandDispatcher {
         if (activityId == null) {
           return CommandFailure(_lastIdError ?? '活动名解析失败');
         }
-        final result = await timer.switchToActivity(activityId);
+        final result = await timer.switchToActivity(
+          activityId,
+          at: _todayAt(invocation.options['at']), // --at=HH:MM 透传
+        );
         return _fromAppResult(result, successMessage: '已切换到活动');
       case 'stop':
         final result = await timer.stopRunning();
@@ -135,6 +138,10 @@ class CommandDispatcher {
       case 'export':
         final deviceId = await _deviceId();
         if (deviceId == null) return const CommandFailure('读取设备标识失败');
+        // 契约：位置参数与 --path 二选一，同时给出报错（指令定义约定）。
+        if (invocation.args.isNotEmpty && invocation.options.containsKey('path')) {
+          return const CommandFailure('导出路径二选一：位置参数或 --path，不可同时给出');
+        }
         final path = invocation.options['path'] ??
             (invocation.args.isEmpty ? null : invocation.args.first);
         final result = await fileInterop.export(
@@ -167,10 +174,13 @@ class CommandDispatcher {
       // ---- 分类 ----
       case 'category_create':
         final parent = invocation.options['parent'];
-        final color = int.tryParse(invocation.options['color'] ?? '');
+        final colorRaw = invocation.options['color'];
+        if (colorRaw != null && int.tryParse(colorRaw) == null) {
+          return CommandFailure('非法颜色值：--color=<整数>');
+        }
         final result = await category.createCategory(
           name: invocation.args.first,
-          color: color ?? 0xff0f766e,
+          color: int.tryParse(colorRaw ?? '') ?? 0xff0f766e,
           parentId: parent,
         );
         return _fromAppResult(result, successMessage: '已新建分类');
@@ -298,14 +308,14 @@ class CommandDispatcher {
   }
 
   /// 读取设备标识（app_metadata `device_id` 键；缺失时生成并持久化——
-  /// 与 TimeEntryRepository 语义一致）。
+  /// 与 TimeEntryRepository 语义一致）。用 upsert 防并发 export 唯一约束冲突。
   Future<String?> _deviceId() async {
     final row = await (database.select(database.appMetadata)
           ..where((t) => t.key.equals('device_id')))
         .getSingleOrNull();
     if (row != null) return row.value;
     final id = const Uuid().v4();
-    await (database.into(database.appMetadata).insert(
+    await (database.into(database.appMetadata).insertOnConflictUpdate(
       AppMetadataCompanion.insert(key: 'device_id', value: id),
     ));
     return id;

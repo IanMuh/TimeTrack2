@@ -208,8 +208,9 @@ class SyncStore extends ChangeNotifier implements SyncNowProvider {
   /// 语义（与文档一致）：
   /// - [cursorOverride] != null（**同步触发**）：受限频——`last_cleanup_at`
   ///   距今 < 24h 时跳过（防每次同步都全表扫描）；到期才清理；
-  /// - [cursorOverride] == null（**手动触发**，阶段 4 设置页按钮）：不限频，
-  ///   走库内游标。
+  /// - [cursorOverride] == null（**手动触发**，阶段 4 设置页按钮/AppStore
+  ///   启动）：**受限频**——先查 [_cleanupDue] 到期才执行（启动路径防每次
+  ///   启动全表扫描+VACUUM）。
   /// [userId] 可选透传：同步编排传启动时捕获的用户（防 await 期间会话切换
   /// 导致清理作用域错误）；null 时用当前 [_userId]。
   Future<AppResult<void>> runCleanupIfDue({
@@ -219,12 +220,11 @@ class SyncStore extends ChangeNotifier implements SyncNowProvider {
     if (_cleanupRunning) {
       return const AppFailure('清理进行中，请稍后再试');
     }
-    // 手动清理（无水位）不限频：直接执行，跳过 _cleanupDue 的无效查询。
-    if (cursorOverride == null) {
-      return _runCleanup(userId: userId ?? _userId, cursorOverride: null);
+    // 手动清理（无水位）：先查限频到期（防启动路径每次全量清理）。
+    if (cursorOverride == null && !await _cleanupDue()) {
+      return const AppSuccess(null); // 未到期：跳过
     }
-    final due = await _cleanupDue();
-    if (!due) {
+    if (cursorOverride != null && !await _cleanupDue()) {
       return const AppSuccess(null); // 同步触发受限频：未到期跳过
     }
     return _runCleanup(userId: userId ?? _userId, cursorOverride: cursorOverride);
