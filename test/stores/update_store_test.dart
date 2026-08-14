@@ -176,19 +176,17 @@ void main() {
       h.verifier.gate = gate;
       final downloadFuture = h.store.download(); // 挂起在 gate（downloading 态）
       await pumpEventQueue();
-      expect(h.store.state, UpdateState.downloading);
-
-      final concurrent = await h.store.download(); // 重入
-      expect(concurrent, isA<AppFailure<UpdateVerifierResult>>()); // 拦截
-
-      // finally 兜底：断言失败也放行首次下载，防 Future 悬挂/泄漏。
       try {
-        gate.complete(); // 放行首次下载
-        await downloadFuture;
-        expect(h.store.state, UpdateState.verifying);
+        expect(h.store.state, UpdateState.downloading);
+        final concurrent = await h.store.download(); // 重入
+        expect(concurrent, isA<AppFailure<UpdateVerifierResult>>()); // 拦截
       } finally {
+        // finally 前移到全部断言前：任一断言失败也放行首次下载，防 Future
+        // 悬挂/泄漏（回归时表现为"失败"而非"悬挂"）。
         if (!gate.isCompleted) gate.complete();
       }
+      await downloadFuture;
+      expect(h.store.state, UpdateState.verifying);
     });
 
     test('完整流程：check → download → verifying → install → restartRequired', () async {
@@ -265,6 +263,16 @@ void main() {
       expect(row.value, '1.2.3');
     });
 
+    test('ignoreCurrentVersion：持久化版本到 app_metadata', () async {
+      h.manifest.onCheck = () => const AppSuccess(_availableWindows);
+      await h.store.check();
+      await h.store.ignoreCurrentVersion();
+      final row = await (h.db.select(h.db.appMetadata)
+            ..where((t) => t.key.equals('ignored_update_version')))
+          .getSingle();
+      expect(row.value, '1.2.3');
+    });
+
     test('安装：程序目录不可写 → failed', () async {
       h.manifest.onCheck = () => const AppSuccess(_availableWindows);
       await h.store.check();
@@ -275,14 +283,48 @@ void main() {
       expect(h.store.state, UpdateState.failed);
     });
 
-    test('ignoreCurrentVersion：持久化版本到 app_metadata', () async {
+    test('Error 类契约外异常：收敛为 failed，不卡在 checking（可重试）', () async {
+      // checkForUpdate 抛 StateError（Error 非 Exception）：catch 全收敛。
+      h.manifest.onCheck = () => throw StateError('清单解析缺陷');
+      await h.store.check();
+      expect(h.store.state, UpdateState.failed);
+      expect(h.store.status.errorMessage, contains('更新检查失败'));
+      // 修复后重试：failed → checking 合法。
       h.manifest.onCheck = () => const AppSuccess(_availableWindows);
       await h.store.check();
-      await h.store.ignoreCurrentVersion();
-      final row = await (h.db.select(h.db.appMetadata)
-            ..where((t) => t.key.equals('ignored_update_version')))
-          .getSingle();
-      expect(row.value, '1.2.3');
+      expect(h.store.state, UpdateState.available);
+    });
+
+    test('下载抛 Error：收敛为 failed，不卡 downloading', () async {
+      h.manifest.onCheck = () => const AppSuccess(_availableWindows);
+      await h.store.check();
+      h.verifier.onDownload = () => throw StateError('下载器缺陷');
+      await h.store.download();
+      expect(h.store.state, UpdateState.failed);
+      expect(h.store.status.errorMessage, contains('下载失败'));
+    });
+
+    test('安装失败后重试：返回失败不抛 StateError；重新下载后恢复', () async {
+      h.manifest.onCheck = () => const AppSuccess(_availableWindows);
+      await h.store.check();
+      await h.store.download();
+      h.installer.writable = false; // 安装失败 → failed
+      final failed = await h.store.install();
+      expect(failed.isSuccess, isFalse);
+      expect(h.store.state, UpdateState.failed);
+
+      // 失败态重试 install：返回失败（非 StateError 崩溃）。
+      final retry = await h.store.install();
+      expect(retry, isA<AppFailure<void>>());
+      expect(h.store.state, UpdateState.failed);
+
+      // 重新下载后恢复：failed → downloading → verifying → installing。
+      h.installer.writable = true;
+      await h.store.download();
+      expect(h.store.state, UpdateState.verifying);
+      final installed = await h.store.install();
+      expect(installed.isSuccess, isTrue);
+      expect(h.store.state, UpdateState.restartRequired);
     });
   });
 }
