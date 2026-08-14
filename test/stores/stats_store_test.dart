@@ -460,7 +460,7 @@ void main() {
       expect(notified, 2); // 失败路径不额外通知
     });
 
-    test('未过期失败：写入 lastError、清快照并通知', () async {
+    test('未过期失败：写入 lastError、清空已有快照并通知', () async {
       final gated = _GatedStatsRepository(
         activities: h.activities,
         categories: h.categories,
@@ -475,16 +475,26 @@ void main() {
 
       var notified = 0;
       store.addListener(() => notified++);
-      gated.failOnNext = true;
-      final result = await store.compute(
+      // 先成功计算一次写入快照，再注入未过期失败——真正验证"失败清空已有
+      // 快照"（而非从初始 null 出发的空断言）。
+      final ok = await store.compute(
         start: DateTime(2026, 8, 14, 10),
         end: DateTime(2026, 8, 14, 12),
         dimension: StatsDimension.activity,
       );
+      expect(ok, isNotNull);
+      expect(notified, 1); // 成功提交通知一次
+
+      gated.failOnNext = true;
+      final result = await store.compute(
+        start: DateTime(2026, 8, 14, 12), // 不同范围，避免命中缓存
+        end: DateTime(2026, 8, 14, 13),
+        dimension: StatsDimension.activity,
+      );
       expect(result, isNull);
       expect(store.lastError, '注入失败'); // 失败原因写入
-      expect(store.snapshot, isNull); // 快照清空
-      expect(notified, 1); // 失败提交通知一次
+      expect(store.snapshot, isNull); // 已有快照被清空
+      expect(notified, 2); // 成功 1 + 失败 1
     });
 
     test('dispose 后不再响应 dataRevision（不再清缓存）', () async {
