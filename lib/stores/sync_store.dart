@@ -217,38 +217,43 @@ class SyncStore extends ChangeNotifier implements SyncNowProvider {
     DateTime? cursorOverride,
     String? userId,
   }) async {
+    // 抢占互斥（await 前同步置位）：防 _cleanupDue 查询期间另一路调用
+    //（同步成功 fire-and-forget 与 AppStore 启动清理并发）同时通过检查
+    // 重复进入清理（TOCTOU——模块门禁 medium）。统一 try/finally 释放。
     if (_cleanupRunning) {
       return const AppFailure('清理进行中，请稍后再试');
     }
-    // 手动清理（无水位）：先查限频到期（防启动路径每次全量清理）。
-    if (cursorOverride == null && !await _cleanupDue()) {
-      return const AppSuccess(null); // 未到期：跳过
+    _cleanupRunning = true;
+    try {
+      // 手动清理（无水位）：先查限频到期（防启动路径每次全量清理）。
+      if (cursorOverride == null && !await _cleanupDue()) {
+        return const AppSuccess(null); // 未到期：跳过
+      }
+      if (cursorOverride != null && !await _cleanupDue()) {
+        return const AppSuccess(null); // 同步触发受限频：未到期跳过
+      }
+      return _runCleanup(userId: userId ?? _userId, cursorOverride: cursorOverride);
+    } finally {
+      _cleanupRunning = false;
+      if (!_disposed) notifyListeners(); // await 期间可能已 dispose
     }
-    if (cursorOverride != null && !await _cleanupDue()) {
-      return const AppSuccess(null); // 同步触发受限频：未到期跳过
-    }
-    return _runCleanup(userId: userId ?? _userId, cursorOverride: cursorOverride);
   }
 
   Future<AppResult<void>> _runCleanup({
     required String? userId,
     required DateTime? cursorOverride,
   }) async {
-    _cleanupRunning = true;
-    try {
-      final result = await cleanup.run(
-        userId: userId,
-        cursorOverride: cursorOverride,
-      );
-      if (result case AppFailure<CleanupReport> failure) {
-        _lastError = failure.message;
-        return AppFailure(failure.message);
-      }
-      return const AppSuccess(null);
-    } finally {
-      _cleanupRunning = false;
-      if (!_disposed) notifyListeners(); // await 期间可能已 dispose
+    // 互斥由 runCleanupIfDue 统一管理（抢占 + finally 释放）——本方法
+    // 不再各自处理 _cleanupRunning/notify，防重复复位与双通知。
+    final result = await cleanup.run(
+      userId: userId,
+      cursorOverride: cursorOverride,
+    );
+    if (result case AppFailure<CleanupReport> failure) {
+      _lastError = failure.message;
+      return AppFailure(failure.message);
     }
+    return const AppSuccess(null);
   }
 
   Future<bool> _cleanupDue() async {

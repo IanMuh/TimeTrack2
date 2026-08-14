@@ -136,23 +136,31 @@ class StatsStore extends ChangeNotifier {
       );
     }
     final range = sliceResult.requireValue();
-    final categoryMap = await repository.categoryMap();
-    if (categoryMap case AppFailure<Map<String, ActivityCategory>> failure) {
-      return _staleOrFailure(
-        failure.message,
-        seq: seq,
-        revisionAtStart: revisionAtStart,
-        start: start,
-        end: end,
-        dimension: dimension,
-      );
+    // categoryTree 维度才需要分类映射（其余维度 aggregate 忽略）——惰性加载
+    // 避免每次计算全量查分类表（性能：模块门禁 medium）。
+    final Map<String, ActivityCategory> categoryById;
+    if (dimension == StatsDimension.categoryTree) {
+      final categoryMap = await repository.categoryMap();
+      if (categoryMap case AppFailure<Map<String, ActivityCategory>> failure) {
+        return _staleOrFailure(
+          failure.message,
+          seq: seq,
+          revisionAtStart: revisionAtStart,
+          start: start,
+          end: end,
+          dimension: dimension,
+        );
+      }
+      categoryById = categoryMap.requireValue();
+    } else {
+      categoryById = const {};
     }
     final List<StatsGroupRow> rows;
     try {
       rows = repository.aggregate(
         range.slices,
         dimension,
-        categoryById: categoryMap.requireValue(),
+        categoryById: categoryById,
       );
     } catch (e) {
       // 聚合段异常（异常数据/模型契约变更）：与 slices/categoryMap 一致
@@ -182,7 +190,8 @@ class StatsStore extends ChangeNotifier {
       start: start,
       end: end,
       dimension: dimension,
-      rows: rows,
+      // 不可变视图：缓存快照被调用方就地篡改会静默污染（模块门禁 medium）。
+      rows: List<StatsGroupRow>.unmodifiable(rows),
       totalDuration: total,
       containsRunningEntry: range.hasRunningEntry,
     );

@@ -7,6 +7,8 @@
 /// - 编辑走 TimerStore（本 store 无写路径）。
 library;
 
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import '../data/repositories/time_entry_repository.dart';
@@ -21,7 +23,12 @@ class TimelineStore extends ChangeNotifier {
   }) {
     _dataRevisionListener = () {
       if (_range != null) {
-        loadRange(_range!.$1, _range!.$2);
+        // fire-and-forget 但显式吞纳 Error（模块门禁 medium）：loadRange 的
+        // catch 只收敛 Exception——监听器路径抛 Error 会成未处理异步异常。
+        unawaited(
+          loadRange(_range!.$1, _range!.$2)
+              .catchError((Object e) => debugPrint('TimelineStore reload 异常：$e')),
+        );
       }
     };
     dataRevision.addListener(_dataRevisionListener);
