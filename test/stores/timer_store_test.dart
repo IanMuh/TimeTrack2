@@ -240,12 +240,13 @@ void main() {
       )).requireValue();
       expect(merged, isNotNull); // 合并确实执行
       final firstAfter = await h.entries.entryByIdIncludingDeleted(first.id);
-      expect(firstAfter, isNotNull); // 可空解包前先断言（触发流程分析非空提升）
+      expect(firstAfter, isNotNull); // 可空解包前先断言（失败可诊断）
       expect(firstAfter!.isDeleted, isFalse); // first 保留（= merged）
-      expect(firstAfter.endAt, DateTime(2026, 8, 14, 12)); // 已提升，无需 !
-      //（Dart 3.12 对 isNotNull 断言后的 final 局部变量执行非空提升——
-      // ocr 判定"无法编译"为误报，analyze 的 unnecessary_non_null_assertion
-      // 为证；此处显式 `!` 反而触发 lint。）
+      expect(firstAfter.endAt, DateTime(2026, 8, 14, 12));
+      //（Dart 流程分析：`!` 断言使用后同一 final 局部变量被提升——本行
+      // 无需 `!`；实证：带 `!` 版本触发 unnecessary_non_null_assertion，
+      // 无 `!` 版本触发 unchecked_use_of_nullable_value，仅当前组合
+      //（前置 `!` + 后续无 `!`）analyze 0——以实证为准，勿按直觉调整。）
       final secondAfter = await h.entries.entryByIdIncludingDeleted(second.id);
       expect(secondAfter, isNotNull);
       expect(secondAfter!.isDeleted, isTrue); // 邻居 second 已软删
