@@ -249,12 +249,19 @@ void main() {
       expect(store.loadFailed, isTrue);
       expect(store.entriesForRange, hasLength(1)); // 不清空
 
-      // 再次成功：loadFailed 复位。
+      // 失败后新增一条数据，验证恢复加载会真正刷新缓存而非仅复位标志。
+      await h.entries.createManualEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 14, 12),
+        endAt: DateTime(2026, 8, 14, 13),
+        note: '',
+      );
       await store.loadRange(
         DateTime(2026, 8, 14),
         DateTime(2026, 8, 15),
       );
       expect(store.loadFailed, isFalse);
+      expect(store.entriesForRange, hasLength(2)); // 缓存已刷新（新增条目可见）
     });
 
     test('Error 类查询异常：fail-fast 外抛，loadFailed 不置位', () async {
@@ -274,6 +281,15 @@ void main() {
         throwsStateError,
       );
       expect(store.loadFailed, isFalse); // 编程错误不置 UI 失败
+
+      // fail-fast 外抛后 store 仍可恢复使用（内部状态未被污染）。
+      flaky.throwStateError = false;
+      flaky.failNext = false;
+      await store.loadRange(
+        DateTime(2026, 8, 14),
+        DateTime(2026, 8, 15),
+      );
+      expect(store.loadFailed, isFalse);
     });
 
     test('并发乱序：旧请求晚完成不覆盖新缓存', () async {

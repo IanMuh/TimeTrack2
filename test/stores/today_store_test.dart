@@ -55,9 +55,10 @@ class TestHarness {
   }
 }
 
-/// 查询计数/失败间谍。
-class _CountingEntries extends TimeEntryRepository {
-  _CountingEntries({
+/// 查询 spy：计数 entriesForRange 调用 + 可注入失败（验证 tick 是否真的
+/// 触发了 DB 查询、失败路径节流）。
+class _SpyEntries extends TimeEntryRepository {
+  _SpyEntries({
     required super.database,
     required super.activityRepository,
     required super.settingsRepository,
@@ -174,7 +175,7 @@ void main() {
     });
 
     test('时钟 tick：无运行条目不查库、有运行条目触发重载（spy 计数）', () async {
-      final counting = _CountingEntries(
+      final counting = _SpyEntries(
         database: h.db,
         activityRepository: h.activities,
         settingsRepository: h.settings,
@@ -222,7 +223,7 @@ void main() {
     });
 
     test('加载失败：loadFailed 置位，同日 tick 不重试（节流）', () async {
-      final counting = _CountingEntries(
+      final counting = _SpyEntries(
         database: h.db,
         activityRepository: h.activities,
         settingsRepository: h.settings,

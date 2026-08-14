@@ -55,7 +55,10 @@ class TodayStore extends ChangeNotifier {
   int _requestSeq = 0; // loadToday 请求序号（并发乱序防护）
   List<TimeEntry> _today = const [];
   bool _loadFailed = false;
-  DateTime? _lastLoadDay; // 最近一次成功加载的本地日（tick 跨日判定）
+  /// 最近一次**尝试**加载的本地日（成功/失败均写入——失败也标记"已尝试
+  /// 过该日"，防 DB 持续不可用时同日每秒重试；跨日 dayChanged=true 自动恢复。
+  /// 首次加载即失败的边界：同日恢复依赖 dataRevision 事件或跨日 tick）。
+  DateTime? _lastLoadDay;
 
   /// 今日条目（按 startAt 升序；dataRevision/tick 后自动刷新）。
   List<TimeEntry> get today => _today;
