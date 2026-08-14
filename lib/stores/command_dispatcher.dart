@@ -22,6 +22,7 @@ import '../viewmodels/commands/command_invocation.dart';
 import '../viewmodels/tracking_rule.dart';
 import 'category_store.dart';
 import 'command_contracts.dart';
+import 'data_revision.dart';
 import 'timer_store.dart';
 import 'tracking_store.dart';
 import 'undo_store.dart';
@@ -38,7 +39,8 @@ class CommandDispatcher {
     required this.activities,
     required this.fileInterop,
     required this.database,
-  });
+    DataRevision? dataRevision,
+  }) : _dataRevision = dataRevision ?? DataRevision();
 
   final UndoStore undo;
   final TimerStore timer;
@@ -49,6 +51,9 @@ class CommandDispatcher {
   final ActivityRepository activities;
   final FileInteropService fileInterop;
   final AppDatabase database;
+
+  /// dataRevision（模块 3d③：import 成功后 bump——数据变更使派生缓存失效）。
+  final DataRevision _dataRevision;
 
   /// 分发一条指令到对应 store 写路径；统一返回 [CommandResult]。
   ///
@@ -144,6 +149,11 @@ class CommandDispatcher {
           return const CommandFailure('导入需要 <路径> 或 --path=<路径>');
         }
         final result = await fileInterop.import(path: path);
+        if (result.isSuccess) {
+          // **dataRevision 三类来源收口（模块 3d③）**：import 合并改动本地
+          // 数据——bump 使派生缓存失效刷新（不变式 9）。
+          _dataRevision.bump();
+        }
         return _fromAppResult(result, successMessage: '导入完成');
 
       // ---- 更新 ----

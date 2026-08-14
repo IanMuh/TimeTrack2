@@ -8,6 +8,7 @@ import 'package:timetrack2/constants/app_constants.dart';
 import 'package:timetrack2/constants/storage_keys.dart' show AppMetadataKeys;
 import 'package:timetrack2/data/cleanup/cleanup_service.dart';
 import 'package:timetrack2/data/database/app_database.dart' hide ProfileSettings;
+import 'package:timetrack2/stores/data_revision.dart';
 import 'package:timetrack2/stores/sync_store.dart';
 import 'package:timetrack2/utils/result.dart';
 
@@ -76,10 +77,12 @@ class _TestHarness {
     syncStatus = SyncStatusStore(database: db);
     cleanup = CleanupService(database: db);
     backend = _MockBackend();
+    revision = DataRevision();
     store = SyncStore(
       backend: backend,
       syncStatus: syncStatus,
       cleanup: cleanup,
+      dataRevision: revision,
     );
   }
 
@@ -87,10 +90,12 @@ class _TestHarness {
   late final SyncStatusStore syncStatus;
   late final CleanupService cleanup;
   late final _MockBackend backend;
+  late final DataRevision revision;
   late final SyncStore store;
 
   Future<void> close() async {
     store.dispose();
+    revision.dispose();
     backend._authController.close();
     await db.close();
   }
@@ -135,6 +140,23 @@ void main() {
       expect(h.backend.syncCalls, 1);
       expect(h.store.lastError, '网络错误');
       expect(h.store.lastSyncAt, isNull); // 失败不推进
+    });
+
+    test('同步成功后 dataRevision 递增（三类来源收口）', () async {
+      final before = h.revision.value;
+      h.backend.emitLogin('user-1');
+      await pumpEventQueue();
+      expect(h.backend.syncCalls, 1);
+      expect(h.revision.value, before + 1); // 同步成功 bump（派生缓存失效）
+    });
+
+    test('同步失败：dataRevision 不递增', () async {
+      h.backend.syncFails = true;
+      h.backend.emitLogin('user-1');
+      await pumpEventQueue();
+      final revision = h.revision.value;
+      expect(h.backend.syncCalls, 1);
+      expect(h.revision.value, revision); // 失败不 bump
     });
 
     test('登出：清用户与同步状态', () async {

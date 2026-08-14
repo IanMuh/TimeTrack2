@@ -165,6 +165,7 @@ class AppStore {
       backend: backend ?? NoopSyncBackend(),
       syncStatus: syncStatus,
       cleanup: cleanup,
+      dataRevision: revision, // 三类来源收口：同步成功后 bump
     );
     final manifestService = UpdateManifestService(
       database: database,
@@ -195,6 +196,7 @@ class AppStore {
       activities: activities,
       fileInterop: fileInterop,
       database: database,
+      dataRevision: revision, // 三类来源收口：import 成功后 bump
     );
 
     final store = AppStore._(

@@ -29,6 +29,7 @@ import '../constants/storage_keys.dart' show AppMetadataKeys;
 import '../data/cleanup/cleanup_service.dart';
 import '../utils/result.dart';
 import 'command_contracts.dart';
+import 'data_revision.dart';
 
 /// 同步编排 store。
 class SyncStore extends ChangeNotifier implements SyncNowProvider {
@@ -36,7 +37,8 @@ class SyncStore extends ChangeNotifier implements SyncNowProvider {
     required this.backend,
     required this.syncStatus,
     required this.cleanup,
-  }) {
+    DataRevision? dataRevision,
+  }) : _dataRevision = dataRevision ?? DataRevision() {
     // 认证流异常兜底：后端流错误不逃逸为未处理异步异常。
     _authSubscription = backend.authStateStream.listen(
       _onAuthChanged,
@@ -51,6 +53,9 @@ class SyncStore extends ChangeNotifier implements SyncNowProvider {
   final SyncBackend backend;
   final SyncStatusStore syncStatus;
   final CleanupService cleanup;
+
+  /// dataRevision（模块 3d③ 三类来源收口：同步成功后 bump）。
+  final DataRevision _dataRevision;
 
   late final StreamSubscription<String?> _authSubscription;
 
@@ -160,6 +165,10 @@ class SyncStore extends ChangeNotifier implements SyncNowProvider {
       _lastTarget = report.target;
       _lastPulled = report.pulledRows;
       _lastPushed = report.pushedRows;
+      // **dataRevision 三类来源收口（模块 3d③）**：同步拉取可能改动本地
+      // 数据——bump 使派生缓存（Stats/Today/Category 等）失效刷新（不变式
+      // 9：任何数据变更写库成功后必须递增，防"同步后 UI 不刷新"）。
+      _dataRevision.bump();
       // 同步成功后编排清理（startedAt 水位 + 启动时捕获的 user——见类文档）。
       // fire-and-forget：显式吞纳错误防未处理异步异常（_cleanupDue/cleanup
       // 的 DB 异常与 ArgumentError 均被收敛为失败，不逃逸）。
