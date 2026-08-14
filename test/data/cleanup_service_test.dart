@@ -273,11 +273,19 @@ void main() {
       expect(left.length, 1, reason: '陈旧水位跳过：软删行保留');
     });
 
-    test('cursorOverride == 保留期截止 → 放行不跳过（边界）', () async {
+    test('cursorOverride == 保留期截止 → 放行不跳过（边界，固定时钟）', () async {
       await seedSoftDeleted('activities', 'a1', const Duration(days: 400));
-      // 恰在保留期截止的 override：不越界 → 正常清理（cutoff=override）。
-      final boundary = DateTime.now().subtract(const Duration(days: 180));
-      final report = (await service.run(cursorOverride: boundary)).requireValue();
+      // 边界 == 必须用固定时钟注入（run 内部 now 与测试侧 now 会微秒漂移，
+      // 使 override 恒早于 retentionCutoff 误入跳过分支——复用既有固定时钟模式）。
+      final fixedNow = DateTime.now().toUtc();
+      final pinnedService = CleanupService(
+        database: db,
+        vacuumThreshold: 5,
+        now: () => fixedNow,
+      );
+      final boundary = fixedNow.subtract(const Duration(days: 180));
+      final report = (await pinnedService.run(cursorOverride: boundary))
+          .requireValue();
       expect(report.skippedDueToOutOfRangeCursor, isFalse);
       expect(report.skippedDueToFutureCursor, isFalse);
       expect(report.skippedDueToNoSync, isFalse);
