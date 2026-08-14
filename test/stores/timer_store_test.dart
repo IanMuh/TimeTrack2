@@ -242,7 +242,7 @@ void main() {
       final firstAfter = await h.entries.entryByIdIncludingDeleted(first.id);
       expect(firstAfter, isNotNull); // 可空解包前先断言（失败可诊断）
       expect(firstAfter!.isDeleted, isFalse); // first 保留（= merged）
-      expect(firstAfter.endAt, DateTime(2026, 8, 14, 12));
+      expect(firstAfter!.endAt, DateTime(2026, 8, 14, 12));
       final secondAfter = await h.entries.entryByIdIncludingDeleted(second.id);
       expect(secondAfter, isNotNull);
       expect(secondAfter!.isDeleted, isTrue); // 邻居 second 已软删
