@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timetrack2/data/database/app_database.dart' hide ProfileSettings;
@@ -78,6 +80,24 @@ class _SpyEntries extends TimeEntryRepository {
   }
 }
 
+/// 可挂起查询（并发乱序测试）。
+class _GatedEntries extends TimeEntryRepository {
+  _GatedEntries({
+    required super.database,
+    required super.activityRepository,
+    required super.settingsRepository,
+  });
+
+  final gates = <Completer<void>>[];
+
+  @override
+  Future<List<TimeEntry>> entriesForRange(DateTime start, DateTime end) {
+    if (gates.isEmpty) return super.entriesForRange(start, end);
+    final gate = gates.removeAt(0);
+    return gate.future.then((_) => super.entriesForRange(start, end));
+  }
+}
+
 void main() {
   group('TodayStore', () {
     late TestHarness h;
@@ -127,6 +147,51 @@ void main() {
       h.revision.bump();
       await pumpEventQueue(); // dataRevision 监听触发 loadToday（async）
       expect(h.store.today, hasLength(2));
+    });
+
+    test('并发乱序：旧 loadToday 晚完成不覆盖新缓存', () async {
+      final a = (await h.activities.createActivity(name: 'A', color: 0))
+          .requireValue();
+      await h.entries.createManualEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 14, 9),
+        endAt: DateTime(2026, 8, 14, 10),
+        note: '',
+      );
+      final gated = _GatedEntries(
+        database: h.db,
+        activityRepository: h.activities,
+        settingsRepository: h.settings,
+      );
+      final revision = DataRevision();
+      final clock = ClockStore(autoStart: false);
+      final store = TodayStore(
+        entries: gated,
+        dataRevision: revision,
+        clock: clock,
+        now: () => h._fixedNow,
+      );
+      addTearDown(() {
+        store.dispose();
+        clock.dispose();
+        revision.dispose();
+      });
+
+      final gate = Completer<void>();
+      gated.gates.add(gate);
+      final futureA = store.loadToday(); // A 挂起
+      await pumpEventQueue();
+      await h.entries.createManualEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 14, 10),
+        endAt: DateTime(2026, 8, 14, 11),
+        note: '',
+      );
+      await store.loadToday(); // B 完成（含 2 条）
+      expect(store.today, hasLength(2));
+      gate.complete(); // A 晚完成（仅含 1 条旧数据）
+      await futureA;
+      expect(store.today, hasLength(2)); // 新缓存保持，未被 A 覆盖
     });
 
     test('totalDuration：运行中条目截至 effectiveNow', () async {

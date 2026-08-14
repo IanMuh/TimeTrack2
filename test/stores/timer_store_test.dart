@@ -74,22 +74,27 @@ void main() {
       await h.timer.refresh();
       expect(h.timer.runningEntry?.activityId, a.id);
       expect(h.timer.lastAction?.id, switched.id);
-      expect(h.revision.value, 1); // dataRevision bump
+      // 相对采样（防与写路径 bump 次数强耦合）。
+      final before = h.revision.value;
+      await h.timer.switchToActivity(a.id);
+      expect(h.revision.value, before + 1);
     });
 
     test('stop：结束运行条目并切到未分配', () async {
       final a = (await h.activities.createActivity(name: 'A', color: 0))
           .requireValue();
       await h.timer.switchToActivity(a.id);
+      final before = h.revision.value;
       final stopped = (await h.timer.stopRunning()).requireValue();
       expect(stopped.isRunning, isTrue);
       expect(stopped.activityId, isNot(a.id)); // 未分配活动
-      expect(h.revision.value, 2);
+      expect(h.revision.value, before + 1);
     });
 
     test('add：补记条目 isAuto 透传 + dataRevision', () async {
       final a = (await h.activities.createActivity(name: 'A', color: 0))
           .requireValue();
+      final before = h.revision.value;
       final added = (await h.timer.addEntry(
         activityId: a.id,
         startAt: DateTime(2026, 8, 14, 10),
@@ -99,7 +104,7 @@ void main() {
       )).requireValue();
       expect(added.isAuto, isTrue);
       expect(added.endAt, DateTime(2026, 8, 14, 11));
-      expect(h.revision.value, 1);
+      expect(h.revision.value, before + 1);
     });
 
     test('split：切割为两段', () async {
@@ -157,6 +162,40 @@ void main() {
       final current = await h.entries.entryByIdIncludingDeleted(added.id);
       expect(current, isNotNull);
       expect(current!.isDeleted, isTrue);
+      expect(h.timer.lastAction, isNull); // 删除后 lastAction 置空（契约）
+    });
+
+    test('边界：运行中条目 split/merge 拒绝；add 非法时间段拒绝；删除运行中', () async {
+      final a = (await h.activities.createActivity(name: 'A', color: 0))
+          .requireValue();
+      final running = (await h.timer.switchToActivity(a.id)).requireValue();
+
+      // 运行中条目 split → 仓储拒绝（AppFailure）。
+      final splitResult = await h.timer.splitEntry(
+        entryId: running.id,
+        splitAt: running.startAt.add(const Duration(minutes: 30)),
+      );
+      expect(splitResult.isSuccess, isFalse);
+      // 运行中条目 merge → 拒绝（AppFailure）。
+      final mergeResult = await h.timer.mergeWithNeighbor(
+        entryId: running.id,
+        mergePrevious: false,
+      );
+      expect(mergeResult.isSuccess, isFalse);
+      // add 非法时间段（startAt >= endAt）→ AppFailure 且不记 undo。
+      final beforeUndo = h.undo.undoDepth;
+      final addResult = await h.timer.addEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 14, 11),
+        endAt: DateTime(2026, 8, 14, 10),
+        note: '',
+      );
+      expect(addResult.isSuccess, isFalse);
+      expect(h.undo.undoDepth, beforeUndo); // 失败不记 undo
+      // 删除运行中条目：无守卫，删除后运行态缓存须刷新（不再有运行条目）。
+      await h.timer.deleteEntry(running.id);
+      await h.timer.refresh();
+      expect(h.timer.runningEntry, isNull);
     });
 
     test('merge 向左合并（mergePrevious=true）', () async {
