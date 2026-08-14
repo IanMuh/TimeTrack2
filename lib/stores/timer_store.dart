@@ -56,6 +56,11 @@ class TimerChangeApplier implements UndoApplier {
 
   final TimeEntryRepository _entries;
 
+  /// 恢复写库成功后的回调：供 store 递增 dataRevision 并刷新缓存
+  ///（恢复也是数据变更来源，UI 派生缓存须失效——3b 要点）。store 构造后
+  /// 注入（构造器初始化列表无法引用实例方法）。
+  void Function()? onApplied;
+
   /// 冲突预检（不写库）：按 [expected]（恢复前预期状态）校验当前库状态——
   /// undo 时 expected=after、redo 时 expected=before：
   /// - op.softDelete=false（预期当前为未删态）：行必须存在且未软删；
@@ -64,6 +69,8 @@ class TimerChangeApplier implements UndoApplier {
   ///（防撤销掉别人的修改）；行已物理删除 = 恢复目标已不存在，拒绝。
   @override
   Future<AppResult<void>> validate(Object? expected) async {
+    // 未知类型（含 null）：拒绝而非放行——与 apply 的未知类型失败一致，
+    // 防后续扩展/调用方缺陷时绕过冲突预检。
     if (expected case TimerEntryChange change) {
       for (final op in change.ops) {
         final current = await _entries.entryByIdIncludingDeleted(op.entry.id);
@@ -80,14 +87,19 @@ class TimerChangeApplier implements UndoApplier {
           }
         }
       }
+      return const AppSuccess(null);
     }
-    return const AppSuccess(null);
+    return const AppFailure('未知恢复目标类型');
   }
 
   @override
   Future<AppResult<void>> apply(Object? target) async {
     if (target case TimerEntryChange change) {
-      return _entries.restoreEntriesForUndo(change.ops);
+      final result = await _entries.restoreEntriesForUndo(change.ops);
+      if (result.isSuccess) {
+        onApplied?.call(); // 恢复写库成功：bump dataRevision + 刷新缓存
+      }
+      return result;
     }
     return const AppFailure('未知恢复目标类型');
   }
@@ -101,6 +113,14 @@ class TimerStore extends ChangeNotifier {
     required this.clock,
     required this.dataRevision,
   }) : _applier = TimerChangeApplier(entries) {
+    // 恢复写库成功 → bump + 刷新运行条目缓存（恢复也是数据变更来源，
+    // 且可能改变运行条目——如 switch undo 恢复旧运行）。refresh 为 async，
+    // 可能在 dispose 后恢复执行，须防护。
+    _applier.onApplied = () {
+      if (_disposed) return;
+      _afterWrite();
+      refresh();
+    };
     // 时钟 tick：刷新运行时长展示（runningEntry 时长随时间增长）。
     clock.addListener(notifyListeners);
   }
@@ -111,6 +131,10 @@ class TimerStore extends ChangeNotifier {
   final DataRevision dataRevision;
 
   final TimerChangeApplier _applier;
+
+  /// 已 dispose：恢复写库回调（async refresh）可能在 dispose 后才恢复执行，
+  /// 需防护"used after disposed"（回调由 undo 异步链驱动，时序不受控）。
+  bool _disposed = false;
 
   TimeEntry? _runningEntry;
   TimeEntry? _lastAction;
@@ -127,7 +151,10 @@ class TimerStore extends ChangeNotifier {
 
   /// 刷新运行条目缓存（时钟 tick 或外部数据变更后调用）。
   Future<void> refresh() async {
-    _runningEntry = await entries.runningEntry();
+    if (_disposed) return; // dispose 后静默跳过（防 async 恢复执行崩溃）
+    final running = await entries.runningEntry();
+    if (_disposed) return; // await 期间可能已 dispose
+    _runningEntry = running;
     notifyListeners();
   }
 
@@ -152,6 +179,7 @@ class TimerStore extends ChangeNotifier {
     }
     final after = result.requireValue();
     _lastAction = after;
+    _runningEntry = after; // 写路径同步刷新运行条目缓存（时钟 tick 不触发 refresh）
     _recordSwitchOrStop('切换', beforeRunning, after);
     _afterWrite();
     return result;
@@ -165,6 +193,7 @@ class TimerStore extends ChangeNotifier {
       return failure;
     }
     _lastAction = result.requireValue();
+    _runningEntry = result.requireValue(); // stop 后新运行（未分配）条目
     _recordSwitchOrStop('停止', beforeRunning, result.requireValue());
     _afterWrite();
     return result;
@@ -217,14 +246,20 @@ class TimerStore extends ChangeNotifier {
       return failure;
     }
     _lastAction = result.requireValue().first;
+    final parts = result.requireValue();
     if (before != null) {
       undo.record(
         label: '切割',
         changes: [
           UndoChange(
-            // before=原条目完整时段（undo 恢复覆盖切分后两段）；
+            // before=原条目完整时段（undo 恢复覆盖首段）+ 切分第二段软删
+            //（新 id 段残留会与恢复的完整条目重叠，须一并清除）；
             // after=空（redo 保持切分后状态——切分信息不重放）。
-            before: TimerEntryChange([(entry: before, softDelete: false)]),
+            before: TimerEntryChange([
+              (entry: before, softDelete: false),
+              for (final part in parts)
+                if (part.id != before.id) (entry: part, softDelete: true),
+            ]),
             after: const TimerEntryChange([]),
             applier: _applier,
           ),
@@ -252,25 +287,30 @@ class TimerStore extends ChangeNotifier {
       entryId: entryId,
       mergePrevious: mergePrevious,
     );
-    if (result case AppFailure<TimeEntry?> failure) {
-      return failure;
+    if (result case AppFailure failure) {
+      return AppFailure<TimeEntry?>(failure.message);
     }
     final merged = result.requireValue();
     if (merged == null || before == null) {
       _afterWrite();
-      return result; // 无合并对象/原条目缺失：无 undo 记录
+      return const AppSuccess(null); // 无合并对象/原条目缺失：无 undo 记录
     }
-    _lastAction = merged;
+    _lastAction = merged.entry;
+    _runningEntry = null; // 合并不涉及运行条目（合并仅已结束条目）
     final neighborValue = neighbor.requireValue();
     undo.record(
       label: '合并',
       changes: [
         UndoChange(
-          // before=原条目+邻居（undo 恢复二者，覆盖 merged）；
+          // before=原条目+邻居（undo 恢复二者，覆盖 merged）+ 合并产物
+          // 跨日派生段软删（新 id 段残留会与恢复条目重叠，须一并清除）；
           // after=空（redo 保持合并后状态——合并信息不重放）。
           before: TimerEntryChange([
             (entry: before, softDelete: false),
             if (neighborValue != null) (entry: neighborValue, softDelete: false),
+            for (final row in merged.savedRows)
+              if (row.id != before.id && row.id != neighborValue?.id)
+                (entry: row, softDelete: true),
           ]),
           after: const TimerEntryChange([]),
           applier: _applier,
@@ -278,7 +318,7 @@ class TimerStore extends ChangeNotifier {
       ],
     );
     _afterWrite();
-    return result;
+    return AppSuccess(merged.entry);
   }
 
   /// 删除时间段。
@@ -342,6 +382,7 @@ class TimerStore extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     clock.removeListener(notifyListeners);
     super.dispose();
   }

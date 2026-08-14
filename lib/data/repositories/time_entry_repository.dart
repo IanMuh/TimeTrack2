@@ -325,7 +325,12 @@ class TimeEntryRepository with RepositoryMappings {
   }
 
   /// 与相邻条目合并（合并后软删相邻，取并集时间窗与合并 note）。
-  Future<AppResult<TimeEntry?>> mergeEntryWithNeighbor({
+  ///
+  /// 返回：合并结果 [entry]（首段，id 同原条目）+ [savedRows]（实际入库
+  /// 全部行，含跨日切分的派生段——undo 恢复需清除这些段）；无合并对象
+  ///（无邻居/阈值超限/跨活动）→ null。
+  Future<AppResult<({TimeEntry entry, List<TimeEntry> savedRows})?>>
+      mergeEntryWithNeighbor({
     required String entryId,
     required bool mergePrevious,
   }) async {
@@ -334,14 +339,15 @@ class TimeEntryRepository with RepositoryMappings {
         entryId: entryId,
         mergePrevious: mergePrevious,
       );
-      if (neighborResult case AppFailure<TimeEntry?> failure) {
+      if (neighborResult case AppFailure failure) {
         return AppFailure(failure.message);
       }
-      final neighbor = neighborResult.requireValue();
-      if (neighbor == null) {
+      final found = neighborResult.requireValue();
+      if (found == null) {
         return const AppSuccess(null); // 无合并对象
       }
-      final current = (await entryById(entryId))!;
+      final current = found.current;
+      final neighbor = found.neighbor;
 
       final now = _now();
       final merged = current.copyWith(
@@ -368,31 +374,41 @@ class TimeEntryRepository with RepositoryMappings {
         occurredAt: now,
         message: mergePrevious ? '合并左侧' : '合并右侧',
       );
-      return AppSuccess(saved.first);
+      return AppSuccess((entry: saved.first, savedRows: saved));
     } catch (e) {
       return AppFailure('合并条目失败：$e');
     }
   }
 
   /// 查询 merge 的实际合并对象（与 [mergeEntryWithNeighbor] 内部判定一致）：
-  /// TimerStore 采集 undo 恢复快照用。判定失败/无对象返回 null（AppSuccess）。
+  /// TimerStore 采集 undo 恢复快照用。
+  ///
+  /// 语义：无合并对象 / 阈值超限（间隔 > 阈值，业务上不可合并）→ null
+  ///（AppSuccess）；判定失败（条目缺失/已删/运行中）→ AppFailure。
   Future<AppResult<TimeEntry?>> neighborForMerge({
     required String entryId,
     required bool mergePrevious,
   }) async {
     try {
-      return await _findMergeNeighbor(
+      final result = await _findMergeNeighbor(
         entryId: entryId,
         mergePrevious: mergePrevious,
       );
+      if (result case AppFailure failure) {
+        return AppFailure(failure.message);
+      }
+      return AppSuccess(result.requireValue()?.neighbor);
     } catch (e) {
       return AppFailure('查询合并邻居失败：$e');
     }
   }
 
-  /// merge 邻居判定（与 merge 主体共用，消除逻辑漂移）：
-  /// 同日相邻 + 同活动 + 非零长 + 间隔 <= 阈值 → 返回邻居；否则 null。
-  Future<AppResult<TimeEntry?>> _findMergeNeighbor({
+  /// merge 邻居判定（与 merge 主体共用，消除逻辑漂移；返回判定所用的
+  /// [current] 供调用方复用——消除二次查询的 TOCTOU 与强制解包）：
+  /// 同日相邻 + 同活动 + 非零长 + 间隔 <= 阈值 → 返回 (current, neighbor)；
+  /// 无合并对象/阈值超限 → null（AppSuccess）；判定失败 → AppFailure。
+  Future<AppResult<({TimeEntry current, TimeEntry neighbor})?>>
+      _findMergeNeighbor({
     required String entryId,
     required bool mergePrevious,
   }) async {
@@ -429,11 +445,9 @@ class TimeEntryRepository with RepositoryMappings {
         ? current.startAt.difference(neighborEnd)
         : neighbor.startAt.difference(current.endAt!);
     if (gap.inMinutes > thresholdMinutes) {
-      return AppFailure(
-        '与相邻条目间隔 ${gap.inMinutes} 分钟，超过合并阈值 $thresholdMinutes 分钟',
-      );
+      return const AppSuccess(null); // 业务上不可合并 = 无合并对象
     }
-    return AppSuccess(neighbor);
+    return AppSuccess((current: current, neighbor: neighbor));
   }
 
   /// 软删时间条目。
@@ -451,33 +465,6 @@ class TimeEntryRepository with RepositoryMappings {
       return const AppSuccess(null);
     } catch (e) {
       return AppFailure('删除时间段失败：$e');
-    }
-  }
-
-  /// undo/redo 恢复写库（**快照权威，非 LWW**——恢复的是操作时快照状态，
-  /// 不做远端更新比较；配合 [UndoStore] 的内容状态校验，本地 undo 语义）。
-  ///
-  /// - [entry]：恢复目标状态（undo 时 = 操作前快照；redo 时 = 操作后快照）。
-  ///   saved 前 updatedAt 推进到 [at]（默认 now）——恢复作为一次新修改参与
-  ///   同步传播（LWW/删除传播），保留原 id（跨日条目沿用既有段切分归一化）；
-  /// - [softDelete]：true 时改为软删该条目（deletedAt = 推进后的 updatedAt）。
-  /// 单事务原子；失败返回可读原因（调用方 [UndoStore] 栈不动、可重试）。
-  Future<AppResult<void>> restoreEntryForUndo(
-    TimeEntry entry, {
-    required bool softDelete,
-    DateTime? at,
-  }) async {
-    try {
-      final now = at ?? _now();
-      await database.transaction(() async {
-        final target = softDelete
-            ? entry.copyWith(deletedAt: now, updatedAt: now)
-            : entry.copyWith(updatedAt: now);
-        await _saveEntryRows(database, target);
-      });
-      return const AppSuccess(null);
-    } catch (e) {
-      return AppFailure('恢复条目失败：$e');
     }
   }
 

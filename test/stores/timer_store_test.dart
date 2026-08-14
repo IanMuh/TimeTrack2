@@ -154,6 +154,64 @@ void main() {
       expect(current, isNotNull);
       expect(current!.isDeleted, isTrue);
     });
+
+    test('merge 向左合并（mergePrevious=true）', () async {
+      final a = (await h.activities.createActivity(name: 'A', color: 0))
+          .requireValue();
+      final first = (await h.timer.addEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 14, 10),
+        endAt: DateTime(2026, 8, 14, 11),
+        note: '',
+      )).requireValue();
+      final second = (await h.timer.addEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 14, 11),
+        endAt: DateTime(2026, 8, 14, 12),
+        note: '',
+      )).requireValue();
+      final merged = (await h.timer.mergeWithNeighbor(
+        entryId: second.id,
+        mergePrevious: true, // 向左合并 first
+      )).requireValue();
+      expect(merged, isNotNull);
+      expect(merged!.startAt, DateTime(2026, 8, 14, 10));
+      expect(merged.endAt, DateTime(2026, 8, 14, 12));
+      // undo：恢复 first 与 second。
+      await h.undo.undo();
+      expect(
+          (await h.entries.entryByIdIncludingDeleted(first.id))!.isDeleted,
+          isFalse);
+      expect(
+          (await h.entries.entryByIdIncludingDeleted(second.id))!.isDeleted,
+          isFalse);
+    });
+
+    test('无运行条目时 stop：开始未分配，无 undo 记录', () async {
+      final before = h.undo.undoDepth;
+      final stopped = (await h.timer.stopRunning()).requireValue();
+      expect(stopped.isRunning, isTrue);
+      expect(stopped.activityId, isNotNull); // 未分配活动
+      // beforeRunning == null → _recordSwitchOrStop 直接返回（无 undo 记录）。
+      expect(h.undo.undoDepth, before);
+      expect(h.undo.canUndo, isFalse);
+    });
+
+    test('undo 恢复写库后 dataRevision 递增（恢复作为新修改参与同步）', () async {
+      final a = (await h.activities.createActivity(name: 'A', color: 0))
+          .requireValue();
+      await h.timer.addEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 14, 10),
+        endAt: DateTime(2026, 8, 14, 11),
+        note: '',
+      );
+      final afterAdd = h.revision.value; // 1
+      await h.undo.undo(); // 软删新条目（恢复写库）
+      expect(h.revision.value, afterAdd + 1); // undo 恢复 bump
+      await h.undo.redo(); // 恢复新条目（恢复写库）
+      expect(h.revision.value, afterAdd + 2); // redo 恢复 bump
+    });
   });
 
   group('TimerStore undo/redo 往返', () {
@@ -242,6 +300,13 @@ void main() {
       expect(restored!.isDeleted, isFalse);
       expect(restored.startAt, DateTime(2026, 8, 14, 10));
       expect(restored.endAt, DateTime(2026, 8, 14, 11));
+      // 切分第二段（新 id）必须被软删——残留会与恢复的完整条目重叠。
+      final all = await h.entries.allEntries();
+      final surviving = all
+          .where((e) => !e.isDeleted && e.activityId == a.id)
+          .toList();
+      expect(surviving, hasLength(1)); // 仅恢复的原条目，无残留段
+      expect(surviving.single.id, added.id);
 
       await h.undo.redo(); // redo 无动作：保持恢复后的完整时段
       final afterRedo = await h.entries.entryByIdIncludingDeleted(added.id);
