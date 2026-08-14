@@ -44,17 +44,30 @@ class TestHarness {
   }
 }
 
-/// 查询抛异常（加载失败路径）。
-class _ThrowingEntries extends TimeEntryRepository {
-  _ThrowingEntries({
+/// 查询抛异常（加载失败路径；可切换成功/失败——失败后恢复测试用）。
+class _FlakyEntries extends TimeEntryRepository {
+  _FlakyEntries({
     required super.database,
     required super.activityRepository,
     required super.settingsRepository,
   });
 
+  /// 置真时下一次查询抛 Exception；否则正常查询。
+  bool failNext = true;
+
+  /// 置真时抛 StateError（Error 类：fail-fast 外抛）。
+  bool throwStateError = false;
+
   @override
   Future<List<TimeEntry>> entriesForRange(DateTime start, DateTime end) {
-    throw Exception('DB 故障');
+    if (throwStateError) {
+      throw StateError('编程错误'); // Error 类：fail-fast 外抛
+    }
+    if (failNext) {
+      failNext = false;
+      throw Exception('DB 故障');
+    }
+    return super.entriesForRange(start, end);
   }
 }
 
@@ -178,13 +191,13 @@ void main() {
     });
 
     test('加载异常：loadFailed 置位且不抛未处理异常', () async {
-      final throwing = _ThrowingEntries(
+      final flaky = _FlakyEntries(
         database: h.db,
         activityRepository: h.activities,
         settingsRepository: h.settings,
       );
       final revision = DataRevision();
-      final store = TimelineStore(entries: throwing, dataRevision: revision);
+      final store = TimelineStore(entries: flaky, dataRevision: revision);
       addTearDown(() {
         store.dispose();
         revision.dispose();
@@ -195,6 +208,72 @@ void main() {
       );
       expect(store.loadFailed, isTrue);
       expect(store.entriesForRange, isEmpty);
+    });
+
+    test('加载失败后：旧缓存不清空，成功加载后 loadFailed 复位', () async {
+      final a = (await h.activities.createActivity(name: 'A', color: 0))
+          .requireValue();
+      await h.entries.createManualEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 14, 10),
+        endAt: DateTime(2026, 8, 14, 11),
+        note: '',
+      );
+      final flaky = _FlakyEntries(
+        database: h.db,
+        activityRepository: h.activities,
+        settingsRepository: h.settings,
+      );
+      final revision = DataRevision();
+      final store = TimelineStore(entries: flaky, dataRevision: revision);
+      addTearDown(() {
+        store.dispose();
+        revision.dispose();
+      });
+
+      // 首次成功加载（failNext 默认 true，先关掉）。
+      flaky.failNext = false;
+      await store.loadRange(
+        DateTime(2026, 8, 14),
+        DateTime(2026, 8, 15),
+      );
+      expect(store.loadFailed, isFalse);
+      expect(store.entriesForRange, hasLength(1));
+
+      // 再次加载失败：旧缓存保持（UI 继续显示旧数据），loadFailed 置位。
+      flaky.failNext = true;
+      await store.loadRange(
+        DateTime(2026, 8, 14),
+        DateTime(2026, 8, 15),
+      );
+      expect(store.loadFailed, isTrue);
+      expect(store.entriesForRange, hasLength(1)); // 不清空
+
+      // 再次成功：loadFailed 复位。
+      await store.loadRange(
+        DateTime(2026, 8, 14),
+        DateTime(2026, 8, 15),
+      );
+      expect(store.loadFailed, isFalse);
+    });
+
+    test('Error 类查询异常：fail-fast 外抛，loadFailed 不置位', () async {
+      final flaky = _FlakyEntries(
+        database: h.db,
+        activityRepository: h.activities,
+        settingsRepository: h.settings,
+      )..throwStateError = true;
+      final revision = DataRevision();
+      final store = TimelineStore(entries: flaky, dataRevision: revision);
+      addTearDown(() {
+        store.dispose();
+        revision.dispose();
+      });
+      await expectLater(
+        store.loadRange(DateTime(2026, 8, 14), DateTime(2026, 8, 15)),
+        throwsStateError,
+      );
+      expect(store.loadFailed, isFalse); // 编程错误不置 UI 失败
     });
 
     test('并发乱序：旧请求晚完成不覆盖新缓存', () async {

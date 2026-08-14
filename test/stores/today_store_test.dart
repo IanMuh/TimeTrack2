@@ -55,7 +55,7 @@ class TestHarness {
   }
 }
 
-/// 查询计数间谍（验证 tick 是否真的触发了 DB 查询）。
+/// 查询计数/失败间谍。
 class _CountingEntries extends TimeEntryRepository {
   _CountingEntries({
     required super.database,
@@ -64,10 +64,15 @@ class _CountingEntries extends TimeEntryRepository {
   });
 
   int entriesForRangeCalls = 0;
+  bool failNext = false;
 
   @override
   Future<List<TimeEntry>> entriesForRange(DateTime start, DateTime end) {
     entriesForRangeCalls++;
+    if (failNext) {
+      failNext = false;
+      throw Exception('DB 故障');
+    }
     return super.entriesForRange(start, end);
   }
 }
@@ -199,10 +204,13 @@ void main() {
       final callsAfterLoad = counting.entriesForRangeCalls;
       expect(callsAfterLoad, greaterThanOrEqualTo(1));
 
-      // 无运行条目：tick 不查库（计数不变）。
+      // 无运行条目：tick 不查库也不通知（计数不变、无监听通知）。
+      var notified = 0;
+      store.addListener(() => notified++);
       clock.notifyListeners();
       await pumpEventQueue();
       expect(counting.entriesForRangeCalls, callsAfterLoad);
+      expect(notified, 0); // 无运行条目 tick 不通知（不重建 UI）
 
       // 有运行条目：tick 触发重载（计数 +1）。
       await h.entries.switchToActivity(a.id, at: h._fixedNow);
@@ -211,6 +219,44 @@ void main() {
       clock.notifyListeners();
       await pumpEventQueue();
       expect(counting.entriesForRangeCalls, callsWithRunning + 1);
+    });
+
+    test('加载失败：loadFailed 置位，同日 tick 不重试（节流）', () async {
+      final counting = _CountingEntries(
+        database: h.db,
+        activityRepository: h.activities,
+        settingsRepository: h.settings,
+      );
+      final revision = DataRevision();
+      final clock = ClockStore(autoStart: false);
+      final store = TodayStore(
+        entries: counting,
+        dataRevision: revision,
+        clock: clock,
+        now: () => h._fixedNow,
+      );
+      addTearDown(() {
+        store.dispose();
+        clock.dispose();
+        revision.dispose();
+      });
+
+      counting.failNext = true;
+      await store.loadToday();
+      expect(store.loadFailed, isTrue);
+      final callsAfterFail = counting.entriesForRangeCalls;
+
+      // 同日无运行条目：tick 不再触发查询（_lastLoadDay 已标记尝试过该日）。
+      clock.notifyListeners();
+      await pumpEventQueue();
+      expect(counting.entriesForRangeCalls, callsAfterFail);
+
+      // 跨日后 tick 触发重载（自动恢复），loadFailed 复位。
+      h._fixedNow = DateTime(2026, 8, 15, 0, 1);
+      clock.notifyListeners();
+      await pumpEventQueue();
+      expect(counting.entriesForRangeCalls, greaterThan(callsAfterFail));
+      expect(store.loadFailed, isFalse);
     });
 
     test('跨日 tick：窗口前移强制重载', () async {

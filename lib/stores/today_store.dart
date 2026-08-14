@@ -82,6 +82,10 @@ class TodayStore extends ChangeNotifier {
     } on Exception catch (_) {
       // 仅收敛 Exception（连接/IO 类）；Error 编程错误不吞，fail-fast 外抛。
       if (_disposed || seq != _requestSeq) return;
+      // 失败也标记"已尝试过该日"：无运行条目时 dayChanged 不再触发，
+      // 防 DB 持续不可用时每秒重试查询（跨日仍会自动恢复——新日
+      // dayChanged=true 触发重载）。
+      _lastLoadDay = todayStart;
       _loadFailed = true; // 加载失败：置位供 UI 提示（不抛未处理异常）
     }
     notifyListeners();
