@@ -183,7 +183,7 @@ void main() {
       final revision = DataRevision();
       final clock = ClockStore(autoStart: false);
       final store = TodayStore(
-        entries: counting,
+        entries: spy,
         dataRevision: revision,
         clock: clock,
         now: () => h._fixedNow,
@@ -231,7 +231,7 @@ void main() {
       final revision = DataRevision();
       final clock = ClockStore(autoStart: false);
       final store = TodayStore(
-        entries: counting,
+        entries: spy,
         dataRevision: revision,
         clock: clock,
         now: () => h._fixedNow,
