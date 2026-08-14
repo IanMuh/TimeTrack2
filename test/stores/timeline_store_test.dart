@@ -1,0 +1,342 @@
+import 'dart:async';
+
+import 'package:drift/native.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:timetrack2/data/database/app_database.dart' hide ProfileSettings;
+import 'package:timetrack2/data/repositories/activity_repository.dart';
+import 'package:timetrack2/data/repositories/category_repository.dart';
+import 'package:timetrack2/data/repositories/settings_repository.dart';
+import 'package:timetrack2/data/repositories/time_entry_repository.dart';
+import 'package:timetrack2/stores/data_revision.dart';
+import 'package:timetrack2/stores/timeline_store.dart';
+import 'package:timetrack2/viewmodels/time_entry.dart';
+
+class TestHarness {
+  TestHarness() {
+    db = AppDatabase(NativeDatabase.memory());
+    activities = ActivityRepository(database: db);
+    categories = CategoryRepository(database: db);
+    settings = SettingsRepository(database: db);
+    entries = TimeEntryRepository(
+      database: db,
+      activityRepository: activities,
+      settingsRepository: settings,
+    );
+    revision = DataRevision();
+    store = TimelineStore(
+      entries: entries,
+      dataRevision: revision,
+    );
+  }
+
+  late final AppDatabase db;
+  late final ActivityRepository activities;
+  late final CategoryRepository categories;
+  late final SettingsRepository settings;
+  late final TimeEntryRepository entries;
+  late final DataRevision revision;
+  late final TimelineStore store;
+
+  Future<void> close() async {
+    store.dispose();
+    revision.dispose();
+    await db.close();
+  }
+}
+
+/// 查询抛异常（加载失败路径；可切换成功/失败——失败后恢复测试用）。
+class _FlakyEntries extends TimeEntryRepository {
+  _FlakyEntries({
+    required super.database,
+    required super.activityRepository,
+    required super.settingsRepository,
+  });
+
+  /// 置真时下一次查询抛 Exception；否则正常查询。
+  bool failNext = true;
+
+  /// 置真时抛 StateError（Error 类：fail-fast 外抛）。
+  bool throwStateError = false;
+
+  @override
+  Future<List<TimeEntry>> entriesForRange(DateTime start, DateTime end) {
+    if (throwStateError) {
+      throw StateError('编程错误'); // Error 类：fail-fast 外抛
+    }
+    if (failNext) {
+      failNext = false;
+      throw Exception('DB 故障');
+    }
+    return super.entriesForRange(start, end);
+  }
+}
+
+/// 可挂起查询（并发乱序测试）。
+class _GatedEntries extends TimeEntryRepository {
+  _GatedEntries({
+    required super.database,
+    required super.activityRepository,
+    required super.settingsRepository,
+  });
+
+  final gates = <Completer<void>>[];
+
+  @override
+  Future<List<TimeEntry>> entriesForRange(DateTime start, DateTime end) {
+    if (gates.isEmpty) return super.entriesForRange(start, end);
+    final gate = gates.removeAt(0);
+    return gate.future.then((_) => super.entriesForRange(start, end));
+  }
+}
+
+void main() {
+  group('TimelineStore', () {
+    late TestHarness h;
+
+    setUp(() => h = TestHarness());
+    tearDown(() => h.close());
+
+    test('loadRange：只含范围内条目（含跨日裁剪语义由仓储保证）', () async {
+      final a = (await h.activities.createActivity(name: 'A', color: 0))
+          .requireValue();
+      await h.entries.createManualEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 14, 9),
+        endAt: DateTime(2026, 8, 14, 10),
+        note: '',
+      );
+      await h.entries.createManualEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 13, 9),
+        endAt: DateTime(2026, 8, 13, 10),
+        note: '',
+      );
+      await h.store.loadRange(
+        DateTime(2026, 8, 14),
+        DateTime(2026, 8, 15),
+      );
+      expect(h.store.loadedRange, (DateTime(2026, 8, 14), DateTime(2026, 8, 15)));
+      expect(h.store.entriesForRange, hasLength(1));
+      expect(h.store.entriesForRange.single.startAt, DateTime(2026, 8, 14, 9));
+    });
+
+    test('dataRevision 变更自动重新加载当前范围', () async {
+      final a = (await h.activities.createActivity(name: 'A', color: 0))
+          .requireValue();
+      await h.entries.createManualEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 14, 9),
+        endAt: DateTime(2026, 8, 14, 10),
+        note: '',
+      );
+      await h.store.loadRange(
+        DateTime(2026, 8, 14),
+        DateTime(2026, 8, 15),
+      );
+      expect(h.store.entriesForRange, hasLength(1));
+
+      await h.entries.createManualEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 14, 10),
+        endAt: DateTime(2026, 8, 14, 11),
+        note: '',
+      );
+      h.revision.bump();
+      await pumpEventQueue();
+      expect(h.store.entriesForRange, hasLength(2));
+    });
+
+    test('未加载范围时 dataRevision 变更不崩', () async {
+      h.revision.bump();
+      await pumpEventQueue();
+      expect(h.store.loadedRange, isNull);
+    });
+
+    test('窗口重叠/边界条目计入范围', () async {
+      final a = (await h.activities.createActivity(name: 'A', color: 0))
+          .requireValue();
+      // 跨窗口条目（23:00→次日 01:00，窗口 8/14 整天）。
+      await h.entries.createManualEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 14, 23),
+        endAt: DateTime(2026, 8, 15, 1),
+        note: '',
+      );
+      // 恰在窗口起点的条目。
+      await h.entries.createManualEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 14),
+        endAt: DateTime(2026, 8, 14, 0, 30),
+        note: '',
+      );
+      // 窗口外（8/15 起）的条目。
+      await h.entries.createManualEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 15, 1),
+        endAt: DateTime(2026, 8, 15, 2),
+        note: '',
+      );
+      await h.store.loadRange(
+        DateTime(2026, 8, 14),
+        DateTime(2026, 8, 15),
+      );
+      // 跨窗口与起点条目计入（与窗口重叠即返回整行）；窗口外不含。
+      expect(h.store.entriesForRange, hasLength(2));
+      expect(
+        h.store.entriesForRange.every(
+          (e) => e.startAt.isBefore(DateTime(2026, 8, 15)),
+        ),
+        isTrue,
+      );
+    });
+
+    test('加载异常：loadFailed 置位且不抛未处理异常', () async {
+      final flaky = _FlakyEntries(
+        database: h.db,
+        activityRepository: h.activities,
+        settingsRepository: h.settings,
+      );
+      final revision = DataRevision();
+      final store = TimelineStore(entries: flaky, dataRevision: revision);
+      addTearDown(() {
+        store.dispose();
+        revision.dispose();
+      });
+      await store.loadRange(
+        DateTime(2026, 8, 14),
+        DateTime(2026, 8, 15),
+      );
+      expect(store.loadFailed, isTrue);
+      expect(store.entriesForRange, isEmpty);
+    });
+
+    test('加载失败后：旧缓存不清空，成功加载后 loadFailed 复位', () async {
+      final a = (await h.activities.createActivity(name: 'A', color: 0))
+          .requireValue();
+      await h.entries.createManualEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 14, 10),
+        endAt: DateTime(2026, 8, 14, 11),
+        note: '',
+      );
+      final flaky = _FlakyEntries(
+        database: h.db,
+        activityRepository: h.activities,
+        settingsRepository: h.settings,
+      );
+      final revision = DataRevision();
+      final store = TimelineStore(entries: flaky, dataRevision: revision);
+      addTearDown(() {
+        store.dispose();
+        revision.dispose();
+      });
+
+      // 首次成功加载（failNext 默认 true，先关掉）。
+      flaky.failNext = false;
+      await store.loadRange(
+        DateTime(2026, 8, 14),
+        DateTime(2026, 8, 15),
+      );
+      expect(store.loadFailed, isFalse);
+      expect(store.entriesForRange, hasLength(1));
+
+      // 再次加载失败：旧缓存保持（UI 继续显示旧数据），loadFailed 置位。
+      flaky.failNext = true;
+      await store.loadRange(
+        DateTime(2026, 8, 14),
+        DateTime(2026, 8, 15),
+      );
+      expect(store.loadFailed, isTrue);
+      expect(store.entriesForRange, hasLength(1)); // 不清空
+
+      // 失败后新增一条数据，验证恢复加载会真正刷新缓存而非仅复位标志。
+      await h.entries.createManualEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 14, 12),
+        endAt: DateTime(2026, 8, 14, 13),
+        note: '',
+      );
+      await store.loadRange(
+        DateTime(2026, 8, 14),
+        DateTime(2026, 8, 15),
+      );
+      expect(store.loadFailed, isFalse);
+      expect(store.entriesForRange, hasLength(2)); // 缓存已刷新（新增条目可见）
+    });
+
+    test('Error 类查询异常：fail-fast 外抛，loadFailed 不置位', () async {
+      final flaky = _FlakyEntries(
+        database: h.db,
+        activityRepository: h.activities,
+        settingsRepository: h.settings,
+      )..throwStateError = true;
+      final revision = DataRevision();
+      final store = TimelineStore(entries: flaky, dataRevision: revision);
+      addTearDown(() {
+        store.dispose();
+        revision.dispose();
+      });
+      await expectLater(
+        store.loadRange(DateTime(2026, 8, 14), DateTime(2026, 8, 15)),
+        throwsStateError,
+      );
+      expect(store.loadFailed, isFalse); // 编程错误不置 UI 失败
+
+      // fail-fast 外抛后 store 仍可恢复使用（内部状态未被污染）。
+      flaky.throwStateError = false;
+      flaky.failNext = false;
+      await store.loadRange(
+        DateTime(2026, 8, 14),
+        DateTime(2026, 8, 15),
+      );
+      expect(store.loadFailed, isFalse);
+    });
+
+    test('并发乱序：旧请求晚完成不覆盖新缓存', () async {
+      final a = (await h.activities.createActivity(name: 'A', color: 0))
+          .requireValue();
+      await h.entries.createManualEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 14, 10),
+        endAt: DateTime(2026, 8, 14, 11),
+        note: '',
+      );
+      await h.entries.createManualEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 15, 10),
+        endAt: DateTime(2026, 8, 15, 11),
+        note: '',
+      );
+      final gated = _GatedEntries(
+        database: h.db,
+        activityRepository: h.activities,
+        settingsRepository: h.settings,
+      );
+      final revision = DataRevision();
+      final store = TimelineStore(entries: gated, dataRevision: revision);
+      addTearDown(() {
+        store.dispose();
+        revision.dispose();
+      });
+
+      final gateA = Completer<void>();
+      gated.gates.add(gateA);
+      final futureA = store.loadRange(
+        DateTime(2026, 8, 14), // A 挂起（8/14 窗口）
+        DateTime(2026, 8, 15),
+      );
+      await pumpEventQueue();
+      await store.loadRange( // B 立即完成（8/15 窗口）
+        DateTime(2026, 8, 15),
+        DateTime(2026, 8, 16),
+      );
+      gateA.complete(); // A 晚完成
+      await futureA;
+
+      // 新请求 B 保持：A 的结果被序号守卫丢弃。
+      expect(store.loadedRange, (DateTime(2026, 8, 15), DateTime(2026, 8, 16)));
+      expect(store.entriesForRange, hasLength(1));
+      expect(store.entriesForRange.single.startAt, DateTime(2026, 8, 15, 10));
+    });
+  });
+}
