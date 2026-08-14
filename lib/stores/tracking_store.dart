@@ -81,9 +81,9 @@ class TrackingStore extends ChangeNotifier {
     // fire-and-forget：显式吞纳异常防未处理异步异常（时钟监听器传播）。
     unawaited(poll().catchError((Object e) {
       // poll 内部已有 AppResult 收敛；此兜底防仓储契约外异常逃逸。
-      if (!_disposed) {
-        _lastPoll = DateTime.fromMillisecondsSinceEpoch(0); // 下轮可重试
-      }
+      // 不重置 _lastPoll（调用前已置 now）——重试自然受 pollInterval 节流
+      //（防持久性错误下每 tick 高频无效调用）；debugPrint 暴露异常便于排障。
+      debugPrint('TrackingStore: poll 异常 ${e.runtimeType}: $e');
     }));
   }
 
@@ -99,6 +99,7 @@ class TrackingStore extends ChangeNotifier {
       if (process == null || process.isEmpty) return; // 无前台进程：不动作
       final title = detector.windowTitle;
       final rulesResult = await rules.activeRules();
+      if (_disposed) return; // await 期间可能已 dispose（与其他 await 复查一致）
       if (rulesResult case AppFailure<List<TrackingRule>> _) {
         return; // 规则加载失败：保持现状（下一轮重试）
       }
@@ -156,6 +157,9 @@ class TrackingStore extends ChangeNotifier {
     if (pattern.contains('*')) {
       // 段通配：`code*.exe` → 前缀 code + 后缀 .exe 同时校验（`*` 前后段，
       // 防 `code-not-exe.txt` 误命中）。
+      // **单 `*` 约束**：仅支持一个通配符（多星号/前导星号如 `*code*.exe`
+      // 语义未定义，按首个 `*` 拆分会静默失效——产品语义即单段通配，
+      // 多 `*` 规则建议在 UI 校验阶段拒绝）。
       final star = pattern.indexOf('*');
       final prefix = pattern.substring(0, star);
       final suffix = pattern.substring(star + 1);

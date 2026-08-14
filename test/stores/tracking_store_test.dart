@@ -183,6 +183,14 @@ void main() {
       h.detector.windowTitle = '项目A - 文档';
       await h.tracking.poll();
       expect((await h.entries.runningEntry())!.activityId, a.id); // 有效规则命中
+
+      // 标题不匹配（有效正则）：不切换、不崩。
+      final b = (await h.activities.createActivity(name: 'B', color: 0))
+          .requireValue();
+      await h.timer.switchToActivity(b.id);
+      h.detector.windowTitle = '无关标题';
+      await h.tracking.poll();
+      expect((await h.entries.runningEntry())!.activityId, b.id); // 保持 B
     });
 
     test('同进程多规则取最先', () async {
