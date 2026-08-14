@@ -196,6 +196,20 @@ void main() {
       expect(h.store.lastError, isNull);
       expect(h.store.userId, isNull);
     });
+
+    test('后端抛异常（会话一致）：记录同步异常并复位 syncing', () async {
+      final gate = Completer<void>();
+      h.backend._syncGate = gate;
+      h.backend.throwOnSync = true;
+      h.backend.emitLogin('user-1');
+      await pumpEventQueue();
+      gate.complete(); // 放行：syncNow 抛异常
+      await pumpEventQueue();
+      // 会话一致子路径：_lastError 写"同步异常"、syncing 复位。
+      expect(h.store.lastError, contains('同步异常'));
+      expect(h.store.syncing, isFalse);
+      expect(h.store.userId, 'user-1'); // 会话未变
+    });
   });
 
   group('SyncStore 清理编排', () {
