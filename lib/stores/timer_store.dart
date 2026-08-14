@@ -387,6 +387,11 @@ class TimerStore extends ChangeNotifier {
       if (before == null) {
         return const AppFailure('条目不存在，无法删除');
       }
+      // 已软删条目再次删除：与 split/merge 校验语义一致拒绝（防误删后撤销
+      // 复活早已删除条目——模块门禁 medium）。
+      if (before.isDeleted) {
+        return const AppFailure('条目已删除，无法重复删除');
+      }
       final result = await entries.deleteEntry(before);
       if (result case AppFailure<void> failure) {
         return failure;

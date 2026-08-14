@@ -80,15 +80,16 @@ class TimeEntryRepository with RepositoryMappings {
 
   /// 按 id 查询（**含软删行**）：undo 恢复快照采集用——操作后软删的旧行
   /// 需读取其软删态作为 after 快照。
+  ///
+  /// 与 [entryById] 一致**不吞异常**（模块门禁 medium）：查询失败（连接/
+  /// 语句异常）与"行不存在"必须区分——吞成 null 会让 undo 冲突预检误报
+  /// "条目已被删除"、merge 快照采集静默跳过 undo 记录，真实故障被掩盖。
+  /// 异常由调用方（TimerChangeApplier/merge 快照采集）的 AppResult 收敛。
   Future<TimeEntry?> entryByIdIncludingDeleted(String entryId) async {
-    try {
-      final query = database.select(database.timeEntries)
-        ..where((t) => t.id.equals(entryId));
-      final row = await query.getSingleOrNull();
-      return row == null ? null : timeEntryFromRow(row);
-    } catch (_) {
-      return null;
-    }
+    final query = database.select(database.timeEntries)
+      ..where((t) => t.id.equals(entryId));
+    final row = await query.getSingleOrNull();
+    return row == null ? null : timeEntryFromRow(row);
   }
 
   /// 全量条目（含已删除，bundle 导出用；updated_at 升序）。

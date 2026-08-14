@@ -105,15 +105,11 @@ class SettingsStore extends ChangeNotifier {
     if (_saving) return const AppFailure('保存进行中，请稍后再试');
     _saving = true;
     try {
-      // _current 未加载（首次 reload 前/失败后）时读取库内现状作为 undo 基准
-      // ——防旧库配置被覆盖而丢失且无法撤销。
-      var before = _current;
-      if (before == null) {
-        final existing = await settings.settings();
-        if (existing.isSuccess) {
-          before = existing.requireValue();
-        }
-      }
+      // **undo 基准从库重读（模块门禁 medium）**：云同步经 applyIfRemoteNewer
+      // 直写库不刷新 _current——用缓存基准会把远端更新回退丢失（与 LWW
+      // 冲突）。始终从库读当前值作为基准。
+      final existing = await settings.settings();
+      final before = existing.isSuccess ? existing.requireValue() : _current;
       // copyWith 不自动推进 updatedAt：显式推进到 now（LWW 传播必需）。
       final now = DateTime.now();
       final withNow = next.copyWith(updatedAt: now);
