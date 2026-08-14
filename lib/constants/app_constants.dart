@@ -19,8 +19,9 @@ class AppConstants {
   static final farFutureDate = DateTime(2100);
 
   /// Dart 可表示的最大 DateTime，作为重叠计算中的"无限"哨兵。
-  static final maxDateTime =
-      DateTime.fromMillisecondsSinceEpoch(8640000000000000);
+  static final maxDateTime = DateTime.fromMillisecondsSinceEpoch(
+    8640000000000000,
+  );
 
   /// 单条运行中条目超过此时长视为可疑。
   static const suspiciousEntryHours = 12;
@@ -54,4 +55,16 @@ class AppConstants {
 
   /// LAN 配对码位数（6 位数字）。
   static const lanPairingCodeLength = 6;
+
+  /// 软删行保留期（天）：软删超此天数才允许物理删除（模块 2f）。
+  ///
+  /// **默认值（单一事实来源）**：`CleanupService.retentionDays()` 的常量回退
+  /// 取此值；阶段 4 设置页可经 `app_metadata[deletedRetentionDays]` 覆盖
+  ///（读侧已就位，只加写入口）。
+  static const defaultDeletedRetentionDays = 180;
+
+  /// VACUUM 阈值（行）：单次清理物理删除超过此行数才执行 VACUUM +
+  /// wal_checkpoint(TRUNCATE)——小删除/零删除不触发全库重写（空间回收与
+  /// I/O 成本权衡）。
+  static const cleanupVacuumThresholdRows = 1000;
 }

@@ -32,6 +32,10 @@ class AppMetadataKeys {
   /// 清理上次执行的保留期清理时间（控制清理频率）。
   static const lastCleanupAt = 'last_cleanup_at';
 
+  /// 软删行保留期覆盖值（天；阶段 4 设置页写入，`CleanupService.retentionDays`
+  /// 读：无值/非法回退 [AppConstants.defaultDeletedRetentionDays]）。
+  static const deletedRetentionDays = 'deleted_retention_days';
+
   /// 全部键名（与定义同处维护；测试遍历做唯一性/非空校验，新增键自动纳入）。
   static const all = <String>[
     deviceId,
@@ -41,5 +45,6 @@ class AppMetadataKeys {
     ignoredUpdateVersion,
     lastCheckedManifestVersion,
     lastCleanupAt,
+    deletedRetentionDays,
   ];
 }
