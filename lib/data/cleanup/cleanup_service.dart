@@ -197,6 +197,8 @@ class CleanupService with RepositoryMappings {
     try {
       final retention = await retentionDays();
       final now = (_now?.call() ?? DateTime.now()).toUtc();
+      // 保留期截止（先于游标/override 分支计算——override 下界校验依赖它）。
+      final retentionCutoff = now.subtract(Duration(days: retention));
 
       // ---- sync 感知守卫（保留不变式 #5 落地）----
       // 游标键：登录用户读分区键 `last_sync_at:<userId>`（SyncStatusStore 写入
@@ -207,14 +209,14 @@ class CleanupService with RepositoryMappings {
       if (cursorOverride != null) {
         // 编排水位优先：跳过库内游标读取与损坏判定（override 为同步开始
         // 时刻，本字段语义即"最近一次可信同步时刻"，无需读库）。
-        // **契约防御（r-cursorOverride）**：override 必须在保留期内合理
-        // 窗口（不得晚于 now，也不得早于保留期上界）——防调用方误传异常
-        // 时间戳导致 cutoff 错位/物理删除范围失控。仅 SyncStore 同步编排
-        // 传入（startedAt 水位）。
+        // **契约防御（r-cursorOverride）**：override 不得晚于 now（防未来
+        // 水位跳过），也不得早于保留期截止（防陈旧水位使 [override, 保留
+        // 截止) 区间内已超期墓碑永久无法清理）——违规均视为契约错误跳过。
         final override = cursorOverride.toUtc();
-        if (override.isAfter(now)) {
+        if (override.isAfter(now) || override.isBefore(retentionCutoff)) {
           try {
-            stderr.writeln('[cleanup] cursorOverride 晚于当前时刻（$override）——清理跳过');
+            stderr.writeln(
+                '[cleanup] cursorOverride 越界（$override，now=$now，retention=$retentionCutoff）——清理跳过');
           } catch (_) {
             // 日志写入失败不影响跳过结论。
           }
@@ -262,7 +264,6 @@ class CleanupService with RepositoryMappings {
       // cutoff（r1/r2 统一）——恰等于游标时刻的墓碑视为同步窗口边缘（是否
       // 已传播不确定），保守留待下一轮；设备停止同步时 cutoff 恒等于游标、
       // 恰等于游标的行也永远满足 `< cutoff` 的上界（不会永久滞留）。
-      final retentionCutoff = now.subtract(Duration(days: retention));
       final cutoff = lastSyncAt.isBefore(retentionCutoff)
           ? lastSyncAt
           : retentionCutoff;

@@ -130,6 +130,7 @@ class CategoryStore extends ChangeNotifier {
   final CategoryChangeApplier _applier;
 
   bool _disposed = false;
+  bool _loadFailed = false; // reload 失败标志（缓存保持旧值，UI 提示用）
 
   void _reloadOnDataChange() {
     if (_disposed) return;
@@ -170,19 +171,30 @@ class CategoryStore extends ChangeNotifier {
     final seq = ++_reloadSeq;
     final categoriesResult = await categories.categories();
     if (categoriesResult case AppFailure<List<ActivityCategory>> _) {
-      return; // 加载失败保持旧缓存（下一轮数据变更再试）
+      if (_disposed || seq != _reloadSeq) return;
+      // 失败置位供 UI 提示（缓存保持旧值）——防"写成功但缓存静默陈旧"。
+      _loadFailed = true;
+      notifyListeners();
+      return;
     }
     if (_disposed || seq != _reloadSeq) return; // await 期间 dispose/更新的 reload
     final linksResult = await categories.links();
     if (linksResult case AppFailure<List<ActivityCategoryLink>> _) {
+      if (_disposed || seq != _reloadSeq) return;
+      _loadFailed = true;
+      notifyListeners();
       return;
     }
     if (_disposed || seq != _reloadSeq) return;
     _all = List<ActivityCategory>.unmodifiable(categoriesResult.requireValue());
     _links = List<ActivityCategoryLink>.unmodifiable(linksResult.requireValue());
+    _loadFailed = false;
     _rebuildIndexes();
     notifyListeners();
   }
+
+  /// 最近一次分类/链接加载失败（缓存保持旧值；UI 提示用）。
+  bool get loadFailed => _loadFailed;
 
   /// 分类 id → 分类模型（缓存 map，UI 查询用）。
   Map<String, ActivityCategory> get categoryById => _categoryById;
