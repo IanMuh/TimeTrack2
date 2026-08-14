@@ -165,10 +165,11 @@ class UpdateStore extends ChangeNotifier {
     final AppResult<UpdateCheckResult> result;
     try {
       result = await manifestService.checkForUpdate();
-    } on Exception catch (e) {
-      // 契约外异常（AppResult 未覆盖路径）：收敛为失败，防状态停留 checking。
-      // 文案脱敏（不拼 $e——可能含内部 URL/路径细节），详细原因写 stderr。
-      stderr.writeln('[update] 检查异常：$e');
+    } catch (e) {
+      // 契约外异常（AppResult 未覆盖路径，含 Error 类）：收敛为失败，防
+      // 状态停留 checking。文案脱敏（不拼 $e——可能含内部 URL/路径细节），
+      // 详细原因写 stderr（安全日志函数，防 stderr 抛异常跳过收敛）。
+      _logSafe('[update] 检查异常：$e');
       _fail('更新检查失败，请稍后重试');
       return AppFailure('更新检查失败，请稍后重试');
     }
@@ -237,10 +238,9 @@ class UpdateStore extends ChangeNotifier {
           }
         },
       );
-    } on Exception catch (e) {
-      // 契约外异常（AppResult 未覆盖路径）：收敛为失败，防状态停留
-      // downloading（与 check() 一致）。
-      stderr.writeln('[update] 下载异常：$e');
+    } catch (e) {
+      // 契约外异常（含 Error 类）：收敛为失败，防状态停留 downloading。
+      _logSafe('[update] 下载异常：$e');
       _fail('下载失败，请稍后重试');
       return const AppFailure('下载失败，请稍后重试');
     }
@@ -251,7 +251,7 @@ class UpdateStore extends ChangeNotifier {
         receivedBytes: 0,
         clearTotalBytes: true,
       );
-      notifyListeners();
+      if (!_closed) notifyListeners(); // dispose 后不通知（async 驱动路径）
       return failure;
     }
     final verified = result.requireValue();
@@ -270,8 +270,13 @@ class UpdateStore extends ChangeNotifier {
     if (verified == null) {
       return const AppFailure('尚未完成下载校验，无法安装');
     }
+    // 重入/失败态守卫：installing 中或 failed（安装失败后重试须重新下载——
+    // failed 不是 installing 的合法源态，直接迁移会抛 StateError）。
     if (_status.state == UpdateState.installing) {
       return const AppFailure('安装已在进行中');
+    }
+    if (_status.state == UpdateState.failed) {
+      return const AppFailure('安装失败，请重新下载后再试');
     }
     // 平台分发：仅 Windows 走 WindowsInstaller；Android 阶段 4 未支持；
     // Linux/macOS 无安装器（业务失败）。
@@ -303,9 +308,9 @@ class UpdateStore extends ChangeNotifier {
       }
       _transition(UpdateState.restartRequired);
       return const AppSuccess(null);
-    } on Exception catch (e) {
-      // 契约外异常收敛（防状态停留 installing）。
-      stderr.writeln('[update] 安装异常：$e');
+    } catch (e) {
+      // 契约外异常（含 Error 类）收敛（防状态停留 installing）。
+      _logSafe('[update] 安装异常：$e');
       return _fail('安装失败，请稍后重试');
     }
   }
@@ -314,6 +319,17 @@ class UpdateStore extends ChangeNotifier {
     _status = _status.copyWith(state: UpdateState.failed, errorMessage: message);
     if (!_closed) notifyListeners(); // dispose 后不通知
     return AppFailure(message);
+  }
+
+  /// 安全 stderr 日志：stderr 已关闭/管道断开时 writeln 会再抛（项目
+  /// update_verifier r14 既有约定）——包一层防从 catch 分支逃逸（跳过
+  /// 后续收敛逻辑、状态停留）。
+  static void _logSafe(String message) {
+    try {
+      stderr.writeln(message);
+    } catch (_) {
+      // 日志写入失败不影响收敛结论。
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -348,7 +364,7 @@ class UpdateStore extends ChangeNotifier {
       ));
       return const AppSuccess(null);
     } on Exception catch (e) {
-      stderr.writeln('[update] 记录忽略版本失败：$e');
+      _logSafe('[update] 记录忽略版本失败：$e');
       return const AppFailure('记录忽略版本失败');
     }
   }
@@ -365,7 +381,7 @@ class UpdateStore extends ChangeNotifier {
       ));
       return const AppSuccess(null);
     } on Exception catch (e) {
-      stderr.writeln('[update] 记录检查版本失败：$e');
+      _logSafe('[update] 记录检查版本失败：$e');
       return const AppFailure('记录检查版本失败');
     }
   }

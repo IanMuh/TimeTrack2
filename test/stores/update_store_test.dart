@@ -181,9 +181,14 @@ void main() {
       final concurrent = await h.store.download(); // 重入
       expect(concurrent, isA<AppFailure<UpdateVerifierResult>>()); // 拦截
 
-      gate.complete(); // 放行首次下载
-      await downloadFuture;
-      expect(h.store.state, UpdateState.verifying);
+      // finally 兜底：断言失败也放行首次下载，防 Future 悬挂/泄漏。
+      try {
+        gate.complete(); // 放行首次下载
+        await downloadFuture;
+        expect(h.store.state, UpdateState.verifying);
+      } finally {
+        if (!gate.isCompleted) gate.complete();
+      }
     });
 
     test('完整流程：check → download → verifying → install → restartRequired', () async {
