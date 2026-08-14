@@ -52,6 +52,7 @@ class CleanupReport {
     required this.vacuumed,
     this.skippedDueToNoSync = false,
     this.skippedDueToFutureCursor = false,
+    this.skippedDueToOutOfRangeCursor = false,
   });
 
   /// 各表物理删除行数（键为表名常量，见 [CleanupService.tableNames]）。
@@ -67,6 +68,11 @@ class CleanupReport {
   /// 水位防御）跳过物理删除——与 [skippedDueToNoSync] 语义区分，防排查
   /// 把未来时间戳误报为"从未同步"。
   final bool skippedDueToFutureCursor;
+
+  /// 是否因 cursorOverride 早于保留期截止（陈旧水位——[override, 保留
+  /// 截止) 区间内已超期墓碑无法清理，视为契约违规）跳过物理删除——与
+  /// [skippedDueToFutureCursor] 区分，防把陈旧水位误报为未来水位。
+  final bool skippedDueToOutOfRangeCursor;
 
   int get deletedTotal => deletedByTable.values.fold(0, (sum, n) => sum + n);
 }
@@ -213,10 +219,11 @@ class CleanupService with RepositoryMappings {
         // 水位跳过），也不得早于保留期截止（防陈旧水位使 [override, 保留
         // 截止) 区间内已超期墓碑永久无法清理）——违规均视为契约错误跳过。
         final override = cursorOverride.toUtc();
-        if (override.isAfter(now) || override.isBefore(retentionCutoff)) {
+        if (override.isAfter(now)) {
+          // 未来水位：晚于 now 的越界。
           try {
             stderr.writeln(
-                '[cleanup] cursorOverride 越界（$override，now=$now，retention=$retentionCutoff）——清理跳过');
+                '[cleanup] cursorOverride 晚于当前时刻（$override，now=$now）——清理跳过');
           } catch (_) {
             // 日志写入失败不影响跳过结论。
           }
@@ -225,6 +232,22 @@ class CleanupService with RepositoryMappings {
               deletedByTable: {},
               vacuumed: false,
               skippedDueToFutureCursor: true,
+            ),
+          );
+        }
+        if (override.isBefore(retentionCutoff)) {
+          // 陈旧水位：早于保留期截止（已超期墓碑无法清理，视为契约违规）。
+          try {
+            stderr.writeln(
+                '[cleanup] cursorOverride 早于保留期截止（$override，retention=$retentionCutoff）——清理跳过');
+          } catch (_) {
+            // 日志写入失败不影响跳过结论。
+          }
+          return AppSuccess(
+            const CleanupReport(
+              deletedByTable: {},
+              vacuumed: false,
+              skippedDueToOutOfRangeCursor: true,
             ),
           );
         }

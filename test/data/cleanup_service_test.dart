@@ -261,6 +261,29 @@ void main() {
       expect(meta, isEmpty, reason: '未来水位跳过不写 last_cleanup_at');
     });
 
+    test('cursorOverride 早于保留期截止 → skippedDueToOutOfRangeCursor 跳过', () async {
+      // 陈旧水位（保留期 180 天，override 在 200 天前）：独立跳过原因。
+      await seedSoftDeleted('activities', 'a1', const Duration(days: 400));
+      final stale = DateTime.now().subtract(const Duration(days: 200));
+      final report = (await service.run(cursorOverride: stale)).requireValue();
+      expect(report.skippedDueToOutOfRangeCursor, isTrue);
+      expect(report.skippedDueToFutureCursor, isFalse);
+      expect(report.deletedTotal, 0);
+      final left = await (db.select(db.activities)).get();
+      expect(left.length, 1, reason: '陈旧水位跳过：软删行保留');
+    });
+
+    test('cursorOverride == 保留期截止 → 放行不跳过（边界）', () async {
+      await seedSoftDeleted('activities', 'a1', const Duration(days: 400));
+      // 恰在保留期截止的 override：不越界 → 正常清理（cutoff=override）。
+      final boundary = DateTime.now().subtract(const Duration(days: 180));
+      final report = (await service.run(cursorOverride: boundary)).requireValue();
+      expect(report.skippedDueToOutOfRangeCursor, isFalse);
+      expect(report.skippedDueToFutureCursor, isFalse);
+      expect(report.skippedDueToNoSync, isFalse);
+      expect(report.deletedByTable['activities'], 1, reason: '边界水位正常清理');
+    });
+
     test('cursorOverride 正常水位：跳过库内游标读取，直接物理删除', () async {
       // 无库内游标（从未同步）但 override 水位可信：物理删除执行——
       // 证明 override 分支绕过了 sync 守卫（库内路径会 skippedDueToNoSync）。
