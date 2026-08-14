@@ -143,6 +143,18 @@ class UndoStore extends ChangeNotifier {
     if (changes.isEmpty) {
       throw ArgumentError.value(changes, 'changes', 'undo 记录至少需要一条 change');
     }
+    // 运行时校验 no-op change（release 同样拦截）：UndoChange 的 assert 仅在
+    // debug 生效，release 下 before/after 均 null 的 change 会入栈并触发真实
+    // apply(null)（updatedAt 推进/ActionLog），造成无意义库写入。
+    for (var i = 0; i < changes.length; i++) {
+      if (changes[i].before == null && changes[i].after == null) {
+        throw ArgumentError.value(
+          changes[i],
+          'changes[$i]',
+          'change 的 before 与 after 至少一个非 null（no-op change 无意义）',
+        );
+      }
+    }
     _undoStack.add(UndoRecord(label: label, changes: changes));
     if (_undoStack.length > _maxDepth) {
       _undoStack.removeAt(0);

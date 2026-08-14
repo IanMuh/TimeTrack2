@@ -169,6 +169,7 @@ void main() {
 
     test('深度超限丢最旧', () async {
       final boundedStore = UndoStore(maxDepth: 2);
+      addTearDown(boundedStore.dispose); // 创建后立即注册：断言失败也保证释放
       final applier = _FakeApplier();
       for (var i = 0; i < 3; i++) {
         boundedStore.record(
@@ -186,7 +187,6 @@ void main() {
 
       final result = await boundedStore.undo(); // op0 已被丢弃
       expect(result, isA<AppFailure<void>>());
-      addTearDown(boundedStore.dispose); // 断言失败也保证释放
     });
 
     test('两阶段：任一 validate 失败则整组拒绝、不 apply、栈不动', () async {
@@ -322,10 +322,15 @@ void main() {
     });
 
     test('UndoChange before 与 after 均 null 被拒（no-op change 无意义）', () {
+      // debug：构造期 const assert 立即暴露（抛 AssertionError）。
       expect(
         () => UndoChange(before: null, after: null, applier: _FakeApplier()),
         throwsAssertionError,
       );
+      // record() 层运行时校验（ArgumentError）为 release 防御：debug 下
+      // no-op change 无法被构造出来传入 record()（构造即抛 assert），故该
+      // 分支无法在 flutter test（debug）中直接覆盖——release 语义由
+      // 实现保证（防 apply(null) 触发无意义库写入）。
     });
 
     test('空白 label 被拒（debug 断言暴露编程错误）', () {
@@ -522,6 +527,7 @@ void main() {
       // 最小合法边界：maxDepth: 1 必须可用（构造本身即隐含"不抛"校验），
       // 且丢最旧生效。
       final minStore = UndoStore(maxDepth: 1);
+      addTearDown(minStore.dispose); // 创建后立即注册：断言失败也保证释放
       minStore.record(
         label: 'a',
         changes: [UndoChange(before: 'B1', after: 'A1', applier: _FakeApplier())],
@@ -532,7 +538,6 @@ void main() {
       );
       expect(minStore.undoDepth, 1); // 超限丢最旧
       expect(minStore.lastUndoLabel, 'b');
-      addTearDown(minStore.dispose); // 断言失败也保证释放
     });
   });
 }
