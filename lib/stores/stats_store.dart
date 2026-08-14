@@ -198,6 +198,10 @@ class StatsStore extends ChangeNotifier {
 
   /// 当前有效快照中与 [start]/[end]/[dimension] 匹配者（过期/并发丢弃时
   /// 供调用方复用）；无匹配返回 null。
+  ///
+  /// 与顶部缓存命中守卫保持一致：仅当 revision 未变（快照对应当前数据）
+  /// 且非运行中快照（时间敏感）时才可复用——过期请求不得因此拿到旧
+  /// revision 的统计或按更早 effectiveNow 计算的时间敏感数据。
   StatsSnapshot? _cachedMatching(
     DateTime start,
     DateTime end,
@@ -205,6 +209,8 @@ class StatsStore extends ChangeNotifier {
   ) {
     final current = _snapshot;
     if (current != null &&
+        _snapshotRevision == _dataRevision.value &&
+        !current.containsRunningEntry &&
         current.start == start &&
         current.end == end &&
         current.dimension == dimension) {

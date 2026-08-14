@@ -52,6 +52,7 @@ class TestHarness {
 
 /// 可挂起的统计仓储：slicesForRange 按调用顺序消费 [gates] 中未放行的
 /// Completer 挂起——用于确定性控制并发 compute 的完成顺序（TOCTOU/竞态测试）。
+/// [failOnNext] 置真时，下一次放行的调用返回 [failureMessage]（失败分支测试）。
 class _GatedStatsRepository extends StatsRepository {
   _GatedStatsRepository({
     required super.activities,
@@ -62,6 +63,10 @@ class _GatedStatsRepository extends StatsRepository {
   /// 每次 slicesForRange 调用消耗一个；队列空 = 不挂起直接执行。
   final gates = <Completer<void>>[];
 
+  /// 置真时下一次放行的调用返回失败（失败分支测试）。
+  bool failOnNext = false;
+  String failureMessage = '注入失败';
+
   @override
   Future<AppResult<({List<StatsEntrySlice> slices, bool hasRunningEntry})>>
       slicesForRange({
@@ -70,18 +75,31 @@ class _GatedStatsRepository extends StatsRepository {
     DateTime? effectiveNow,
   }) {
     if (gates.isEmpty) {
-      return super.slicesForRange(
-        start: start,
-        end: end,
-        effectiveNow: effectiveNow,
-      );
+      return _run(start: start, end: end, effectiveNow: effectiveNow);
     }
     final gate = gates.removeAt(0);
-    return gate.future.then((_) => super.slicesForRange(
+    return gate.future.then((_) => _run(
           start: start,
           end: end,
           effectiveNow: effectiveNow,
         ));
+  }
+
+  Future<AppResult<({List<StatsEntrySlice> slices, bool hasRunningEntry})>>
+      _run({
+    required DateTime start,
+    required DateTime end,
+    DateTime? effectiveNow,
+  }) {
+    if (failOnNext) {
+      failOnNext = false;
+      return Future.value(AppFailure(failureMessage));
+    }
+    return super.slicesForRange(
+      start: start,
+      end: end,
+      effectiveNow: effectiveNow,
+    );
   }
 }
 
@@ -301,6 +319,90 @@ void main() {
       final resultA = await futureA;
       expect(resultA, isNull); //           A 与当前快照参数不同 → null
       expect(store.snapshot, same(resultB)); // 快照仍是 B，未被 A 覆盖
+    });
+
+    test('并发同参：旧请求晚完成返回新请求已提交的快照（匹配参数）', () async {
+      final gated = _GatedStatsRepository(
+        activities: h.activities,
+        categories: h.categories,
+        entries: h.entries,
+      );
+      final revision = DataRevision();
+      final store = StatsStore(repository: gated, dataRevision: revision);
+      addTearDown(() {
+        store.dispose();
+        revision.dispose();
+      });
+
+      final gateA = Completer<void>();
+      final gateB = Completer<void>();
+      gated.gates.add(gateA);
+      gated.gates.add(gateB);
+      // A、B 同范围同维度。
+      final start = DateTime(2026, 8, 14, 10);
+      final end = DateTime(2026, 8, 14, 12);
+      final futureA = store.compute(
+        start: start,
+        end: end,
+        dimension: StatsDimension.activity,
+      );
+      await pumpEventQueue();
+      final futureB = store.compute(
+        start: start,
+        end: end,
+        dimension: StatsDimension.activity,
+      );
+      await pumpEventQueue();
+
+      gateB.complete(); // 新请求 B 先完成 → 写入快照
+      final resultB = await futureB;
+      expect(resultB, isNotNull);
+
+      gateA.complete(); // 旧请求 A 晚完成 → 返回 B 的快照（参数匹配）
+      final resultA = await futureA;
+      expect(resultA, same(resultB)); // 复用匹配快照，而非 null
+      expect(store.snapshot, same(resultB));
+    });
+
+    test('过期失败不触碰 store 状态（不清快照/不覆盖错误/不通知）', () async {
+      final gated = _GatedStatsRepository(
+        activities: h.activities,
+        categories: h.categories,
+        entries: h.entries,
+      );
+      final revision = DataRevision();
+      final store = StatsStore(repository: gated, dataRevision: revision);
+      addTearDown(() {
+        store.dispose();
+        revision.dispose();
+      });
+
+      // 先成功计算一次，写入快照。
+      final ok = await store.compute(
+        start: DateTime(2026, 8, 14, 10),
+        end: DateTime(2026, 8, 14, 12),
+        dimension: StatsDimension.activity,
+      );
+      expect(ok, isNotNull);
+
+      // 第二次 compute 挂起，期间 bump revision（清缓存），随后失败放行。
+      final gate = Completer<void>();
+      gated.gates.add(gate);
+      gated.failOnNext = true;
+      final failingFuture = store.compute(
+        start: DateTime(2026, 8, 14, 12),
+        end: DateTime(2026, 8, 14, 13),
+        dimension: StatsDimension.activity,
+      );
+      await pumpEventQueue();
+      revision.bump();
+      gate.complete();
+      final result = await failingFuture;
+
+      // 过期失败：不覆盖 store 状态（revision 已变 → 守卫丢弃）。
+      expect(result, isNull);
+      expect(store.snapshot, isNull); // 快照已被 bump 清空，未被失败覆盖
+      expect(store.lastError, isNull); // 错误未被写入
     });
 
     test('dispose 后不再响应 dataRevision（不再清缓存）', () async {
