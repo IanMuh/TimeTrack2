@@ -46,7 +46,10 @@ class UndoChange {
     required this.before,
     required this.after,
     required this.applier,
-  });
+  }) : assert(
+          before != null || after != null,
+          'before 与 after 至少一个非 null（无实际写库动作的 no-op change 无意义）',
+        );
 
   /// 操作前快照（null = 新建）。
   final Object? before;
@@ -62,9 +65,16 @@ class UndoChange {
 ///
 /// 组合操作（如递归级联删除分类）的所有 change 收在**同一**记录内——
 /// 恢复时整体校验、整体应用（计划风险 10 核心）。
+///
+/// **原子性契约（r 模块门禁）**：同一记录内的所有 change **必须由同一
+/// 事务化 applier 覆盖**——领域 store 用单个 drift transaction 包裹整条
+/// 记录的恢复写库。本层不跨仓储做事务，apply 中途失败的组合原子性由
+/// 实现（3b 的事务化 applier）保证；违反此契约时，多 change 记录在 apply
+/// 中途失败会留下部分改写状态（库/栈不一致、重试 validate 可能失败）。
 class UndoRecord {
   UndoRecord({required this.label, required List<UndoChange> changes})
-      : changes = List.unmodifiable(changes);
+      : assert(label.trim().isNotEmpty, 'undo 记录 label 不能为空'),
+        changes = List.unmodifiable(changes);
 
   /// 用户可读标签（UI 撤销提示、日志）。
   final String label;

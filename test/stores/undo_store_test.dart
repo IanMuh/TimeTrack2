@@ -14,9 +14,6 @@ class _FakeApplier implements UndoApplier {
   /// apply 是否失败（模拟写库异常；实现正常不该发生，防御验证）。
   bool applyFails;
 
-  /// validate 前回调（模拟校验期间触发新 record，测试恢复期防护）。
-  void Function()? onValidate;
-
   /// apply 前的回调（模拟恢复写库触发的副作用，测试执行期保护）。
   void Function()? onApply;
 
@@ -25,7 +22,6 @@ class _FakeApplier implements UndoApplier {
 
   @override
   Future<AppResult<void>> validate(Object? expected) async {
-    onValidate?.call();
     if (validateFails) return const AppFailure('冲突：数据已被修改');
     validated.add(expected);
     return const AppSuccess(null);
@@ -190,7 +186,7 @@ void main() {
 
       final result = await boundedStore.undo(); // op0 已被丢弃
       expect(result, isA<AppFailure<void>>());
-      boundedStore.dispose();
+      addTearDown(boundedStore.dispose); // 断言失败也保证释放
     });
 
     test('两阶段：任一 validate 失败则整组拒绝、不 apply、栈不动', () async {
@@ -293,6 +289,53 @@ void main() {
       expect(applyLog, ['first', 'second', 'first', 'second']);
       expect(first.applied, ['cat', null]); // redo 应用 after（null = 删除）
       expect(second.applied, ['sub', null]);
+    });
+
+    test('多 change apply 中途失败：栈不动；修复后重试成功（事务化契约交付 3b）', () async {
+      final first = _FakeApplier();
+      final second = _FakeApplier(applyFails: true);
+      store.record(
+        label: '删除分类',
+        changes: [
+          UndoChange(before: 'cat', after: null, applier: first),
+          UndoChange(before: 'sub', after: null, applier: second),
+        ],
+      );
+
+      final result = await store.undo();
+      expect(result, isA<AppFailure<void>>());
+      expect(second.applied, isEmpty); // 第二个 apply 失败
+      // 记录未迁移：留在 undo 栈（部分应用后不允许静默丢记录）。
+      expect(store.canUndo, isTrue);
+      expect(store.canRedo, isFalse);
+
+      // 修复后重试：恢复成功、记录迁移到 redo。
+      // （真实库中"部分写"由 3b 事务化 applier 的 drift transaction 杜绝；
+      // 本层测试锁定失败不卡死——重试路径可达。）
+      second.applyFails = false;
+      final retryResult = await store.undo();
+      expect(retryResult, isA<AppSuccess<void>>());
+      expect(store.canUndo, isFalse);
+      expect(store.canRedo, isTrue);
+      expect(first.applied, ['cat', 'cat']);
+      expect(second.applied, ['sub']);
+    });
+
+    test('UndoChange before 与 after 均 null 被拒（no-op change 无意义）', () {
+      expect(
+        () => UndoChange(before: null, after: null, applier: _FakeApplier()),
+        throwsAssertionError,
+      );
+    });
+
+    test('空白 label 被拒（debug 断言暴露编程错误）', () {
+      expect(
+        () => store.record(
+          label: '   ',
+          changes: [UndoChange(before: 'B', after: 'A', applier: _FakeApplier())],
+        ),
+        throwsAssertionError,
+      );
     });
 
     test('validate 挂起窗口触发的 record 被忽略（真实异步重入）', () async {
@@ -489,7 +532,7 @@ void main() {
       );
       expect(minStore.undoDepth, 1); // 超限丢最旧
       expect(minStore.lastUndoLabel, 'b');
-      minStore.dispose();
+      addTearDown(minStore.dispose); // 断言失败也保证释放
     });
   });
 }
