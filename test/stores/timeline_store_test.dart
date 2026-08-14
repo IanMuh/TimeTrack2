@@ -103,5 +103,43 @@ void main() {
       await pumpEventQueue();
       expect(h.store.loadedRange, isNull);
     });
+
+    test('窗口重叠/边界条目计入范围', () async {
+      final a = (await h.activities.createActivity(name: 'A', color: 0))
+          .requireValue();
+      // 跨窗口条目（23:00→次日 01:00，窗口 8/14 整天）。
+      await h.entries.createManualEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 14, 23),
+        endAt: DateTime(2026, 8, 15, 1),
+        note: '',
+      );
+      // 恰在窗口起点的条目。
+      await h.entries.createManualEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 14),
+        endAt: DateTime(2026, 8, 14, 0, 30),
+        note: '',
+      );
+      // 窗口外（8/15 起）的条目。
+      await h.entries.createManualEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 15, 1),
+        endAt: DateTime(2026, 8, 15, 2),
+        note: '',
+      );
+      await h.store.loadRange(
+        DateTime(2026, 8, 14),
+        DateTime(2026, 8, 15),
+      );
+      // 跨窗口与起点条目计入（与窗口重叠即返回整行）；窗口外不含。
+      expect(h.store.entriesForRange, hasLength(2));
+      expect(
+        h.store.entriesForRange.every(
+          (e) => e.startAt.isBefore(DateTime(2026, 8, 15)),
+        ),
+        isTrue,
+      );
+    });
   });
 }

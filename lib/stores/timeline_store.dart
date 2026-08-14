@@ -33,6 +33,7 @@ class TimelineStore extends ChangeNotifier {
   late final VoidCallback _dataRevisionListener;
 
   bool _disposed = false;
+  int _loadSeq = 0; // loadRange 请求序号（并发乱序防护）
   (DateTime, DateTime)? _range;
   List<TimeEntry> _rangeEntries = const [];
   bool _loadFailed = false;
@@ -47,13 +48,23 @@ class TimelineStore extends ChangeNotifier {
   bool get loadFailed => _loadFailed;
 
   /// 加载 [start, end) 范围条目。
+  ///
+  /// 请求序号守卫：dataRevision 触发/UI 快速切换范围并发时，仅最新请求
+  /// 结果写入缓存（防旧请求晚完成覆盖新数据）；查询异常置 [loadFailed]
+  /// 供 UI 提示（不抛未处理异常）。
   Future<void> loadRange(DateTime start, DateTime end) async {
     if (_disposed) return;
+    final seq = ++_loadSeq;
     _range = (start, end);
-    final loaded = await entries.entriesForRange(start, end);
-    if (_disposed) return;
-    _rangeEntries = List.unmodifiable(loaded);
-    _loadFailed = false;
+    try {
+      final loaded = await entries.entriesForRange(start, end);
+      if (_disposed || seq != _loadSeq) return;
+      _rangeEntries = List.unmodifiable(loaded);
+      _loadFailed = false;
+    } catch (_) {
+      if (_disposed || seq != _loadSeq) return;
+      _loadFailed = true;
+    }
     notifyListeners();
   }
 

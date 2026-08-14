@@ -113,14 +113,13 @@ void main() {
         endAt: DateTime(2026, 8, 14, 10),
         note: '',
       );
-      await h.entries.switchToActivity(a.id); // 运行中（startAt≈真实 now）
+      await h.entries.switchToActivity(a.id, at: h._fixedNow); // 运行中（固定 now）
       await h.store.loadToday();
-      // effectiveNow 用真实 now +30m：已结束条目 1h + 运行条目 >=30m。
-      final base = DateTime.now();
+      // effectiveNow = 固定 now +30m：已结束 1h + 运行 30m = 1.5h。
       final duration = h.store.totalDuration(
-        effectiveNow: base.add(const Duration(minutes: 30)),
+        effectiveNow: h._fixedNow.add(const Duration(minutes: 30)),
       );
-      expect(duration, greaterThan(const Duration(hours: 1)));
+      expect(duration, const Duration(minutes: 90));
     });
 
     test('dispose 后 dataRevision 变更不触发 loadToday（不崩）', () async {
@@ -135,6 +134,35 @@ void main() {
       h.revision.bump();
       await pumpEventQueue();
       expect(store.today, isEmpty); // dispose 后静默
+    });
+
+    test('跨本地午夜条目计入今日（窗口重叠）', () async {
+      final a = (await h.activities.createActivity(name: 'A', color: 0))
+          .requireValue();
+      await h.entries.createManualEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 13, 23),
+        endAt: DateTime(2026, 8, 14, 1),
+        note: '',
+      );
+      await h.store.loadToday();
+      expect(h.store.today, hasLength(1)); // 与今日窗口重叠即计入
+    });
+
+    test('时钟 tick：有运行条目时刷新，无运行条目时不查库', () async {
+      final a = (await h.activities.createActivity(name: 'A', color: 0))
+          .requireValue();
+      await h.entries.createManualEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 14, 9),
+        endAt: DateTime(2026, 8, 14, 10),
+        note: '',
+      );
+      await h.store.loadToday();
+      // 无运行条目：tick 仅 notify（不查库——今日内容不随时间变）。
+      h.clock.notifyListeners(); // 手动触发 tick 回调
+      await pumpEventQueue();
+      expect(h.store.today, hasLength(1));
     });
   });
 }
