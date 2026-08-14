@@ -223,13 +223,17 @@ void main() {
       expect(h.store.state, UpdateState.verifying);
     });
 
-    test('进度回调驱动字段更新（不逐条迁移状态）', () async {
+    test('进度回调驱动字段更新（时间节流：间隔达标才更新）', () async {
       h.manifest.onCheck = () => const AppSuccess(_availableWindows);
       await h.store.check();
       final future = h.store.download();
+      // 时间节流（≥100ms）：第一次回调立即更新。
       h.verifier.onProgressCapture!(50, 100);
+      // 100ms 后第二次回调：更新进度。
+      await Future<void>.delayed(const Duration(milliseconds: 110));
+      h.verifier.onProgressCapture!(80, 100);
       await future;
-      expect(h.store.status.receivedBytes, 50); // 进度字段被更新
+      expect(h.store.status.receivedBytes, 80); // 最近一次节流内更新
       expect(h.store.status.totalBytes, 100);
       expect(h.store.state, UpdateState.verifying);
     });

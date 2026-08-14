@@ -158,10 +158,23 @@ class UpdateStore extends ChangeNotifier {
   // 编排
   // ---------------------------------------------------------------------------
 
-  /// 检查更新（来自 idle/available/failed 均可）。
+  /// 检查更新（来自 idle/upToDate/available/failed 均可）。
   Future<AppResult<UpdateCheckResult>> check() async {
     if (_closed) return const AppFailure('更新服务已关闭');
+    // 重入保护（与 download() 幂等契约一致）：流程进行中重复检查返回
+    // 失败而非让 _transition 抛未捕获 StateError。
+    if (_status.state == UpdateState.checking ||
+        _status.state == UpdateState.downloading ||
+        _status.state == UpdateState.verifying ||
+        _status.state == UpdateState.installing) {
+      return const AppFailure('更新检查已在进行中');
+    }
     _transition(UpdateState.checking);
+    // 离开 downloading 相关状态：重置进度字段（防 failed/upToDate/available
+    // 残留上次下载进度，UI 展示不一致）。
+    if (_status.receivedBytes != 0 || _status.totalBytes != null) {
+      _status = _status.copyWith(receivedBytes: 0, clearTotalBytes: true);
+    }
     final AppResult<UpdateCheckResult> result;
     try {
       result = await manifestService.checkForUpdate();
@@ -216,20 +229,18 @@ class UpdateStore extends ChangeNotifier {
       _fail('当前平台无可用更新包');
       return const AppFailure('当前平台无可用更新包');
     }
-    // 进度节流：最后一次回调更新进度字段（不逐条迁移状态）。
+    // 进度节流：仅按时间阈值（≥100ms）更新——`received != lastReceived`
+    // 的字节判断会让高频分块回调恒真、时间节流完全失效；时间阈值天然覆盖
+    // 字节变化（间隔足够时必更新），下载结束后补发最后一次进度防最终值丢失。
     var lastProgressAt = DateTime.now();
-    var lastReceived = 0;
     final AppResult<UpdateVerifierResult> result;
     try {
       result = await verifier.downloadAndVerify(
         artifact,
         onProgress: (received, total) {
-          // 节流合并：≥ 100ms 或字节变化才更新（防高频回调重建）。
           final now = DateTime.now();
-          if (now.difference(lastProgressAt) >= const Duration(milliseconds: 100) ||
-              received != lastReceived) {
+          if (now.difference(lastProgressAt) >= const Duration(milliseconds: 100)) {
             lastProgressAt = now;
-            lastReceived = received;
             _status = _status.copyWith(
               receivedBytes: received,
               totalBytes: total,
@@ -270,13 +281,13 @@ class UpdateStore extends ChangeNotifier {
     if (verified == null) {
       return const AppFailure('尚未完成下载校验，无法安装');
     }
-    // 重入/失败态守卫：installing 中或 failed（安装失败后重试须重新下载——
-    // failed 不是 installing 的合法源态，直接迁移会抛 StateError）。
-    if (_status.state == UpdateState.installing) {
-      return const AppFailure('安装已在进行中');
-    }
-    if (_status.state == UpdateState.failed) {
-      return const AppFailure('安装失败，请重新下载后再试');
+    // 源态强制校验：仅 verifying 是 installing 的合法源态（迁移表声明）。
+    // downloading/upToDate/available/failed 等状态调用 install 属非法迁移，
+    // 直接返回失败而非让 _transition 抛未捕获 StateError（幂等契约：
+    // 失败返回而非崩溃）。_verifiedResult 不随 failed/check 清空，前置
+    // null 校验可被陈旧产物绕过——源态校验补上这一缺口。
+    if (_status.state != UpdateState.verifying) {
+      return const AppFailure('尚未完成下载校验，无法安装');
     }
     // 平台分发：仅 Windows 走 WindowsInstaller；Android 阶段 4 未支持；
     // Linux/macOS 无安装器（业务失败）。
@@ -316,7 +327,13 @@ class UpdateStore extends ChangeNotifier {
   }
 
   AppResult<void> _fail(String message) {
-    _status = _status.copyWith(state: UpdateState.failed, errorMessage: message);
+    // 统一失败路径：重置进度字段（防 failed 残留下载进度，UI 展示不一致）。
+    _status = _status.copyWith(
+      state: UpdateState.failed,
+      errorMessage: message,
+      receivedBytes: 0,
+      clearTotalBytes: true,
+    );
     if (!_closed) notifyListeners(); // dispose 后不通知
     return AppFailure(message);
   }

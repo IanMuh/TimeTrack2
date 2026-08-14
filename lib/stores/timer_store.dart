@@ -325,8 +325,9 @@ class TimerStore extends ChangeNotifier {
         UndoChange(
           // before=原条目+邻居（undo 恢复二者，覆盖 merged）+ 合并产物
           // 跨日派生段软删（新 id 段残留会与恢复条目重叠，须一并清除）；
-          // after=操作后状态（merged 首段 + 邻居软删）——redo 恢复合并后
-          // 状态，且 validate 可校验（非空 after 防冲突预检绕过）。
+          // after=操作后状态（**合并产物全部入库行**——首段+跨日派生段，
+          // 与 before 清理逻辑对称；只含首段会致 redo 恢复截断/数据丢失）
+          // + 邻居软删。
           before: TimerEntryChange([
             (entry: before, softDelete: false),
             if (neighborValue != null) (entry: neighborValue, softDelete: false),
@@ -335,7 +336,7 @@ class TimerStore extends ChangeNotifier {
                 (entry: row, softDelete: true),
           ]),
           after: TimerEntryChange([
-            (entry: merged.entry, softDelete: false),
+            for (final row in merged.savedRows) (entry: row, softDelete: false),
             if (neighborValue != null) (entry: neighborValue, softDelete: true),
           ]),
           applier: _applier,
