@@ -254,6 +254,11 @@ void main() {
       expect(report.deletedTotal, 0);
       final left = await (db.select(db.activities)).get();
       expect(left.length, 1, reason: '未来水位跳过：软删行保留');
+      // 未来水位跳过不推进清理时刻（同"从未同步"契约）。
+      final meta = await (db.select(
+        db.appMetadata,
+      )..where((t) => t.key.equals(AppMetadataKeys.lastCleanupAt))).get();
+      expect(meta, isEmpty, reason: '未来水位跳过不写 last_cleanup_at');
     });
 
     test('cursorOverride 正常水位：跳过库内游标读取，直接物理删除', () async {

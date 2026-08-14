@@ -17,6 +17,7 @@ class _MockBackend implements SyncBackend {
 
   bool configured;
   bool syncFails = false; // 测试内字段赋值控制（同步失败用例）
+  bool throwOnSync = false; // true 时 syncNow 真抛异常（on Exception 分支）
   String? currentUser;
   int syncCalls = 0;
   Completer<void>? _syncGate; // 非空时 syncNow 挂起（并发/会话切换测试）
@@ -52,6 +53,7 @@ class _MockBackend implements SyncBackend {
       _syncGate = null;
       await gate.future;
     }
+    if (throwOnSync) throw Exception('后端崩溃'); // on Exception 分支
     if (syncFails) return const AppFailure('网络错误');
     return const AppSuccess(SyncReport(
       target: SyncTarget.supabase,
@@ -178,6 +180,21 @@ void main() {
       expect(h.store.lastPushed, isNull);
       expect(h.store.userId, isNull);
       expect(h.store.cleanupRunning, isFalse); // 不触发清理
+    });
+
+    test('后端抛异常 + 会话切换：on Exception 分支不污染新会话 _lastError', () async {
+      final gate = Completer<void>();
+      h.backend._syncGate = gate;
+      h.backend.throwOnSync = true;
+      h.backend.emitLogin('user-1');
+      await pumpEventQueue();
+      h.backend.emitLogout(); // 登出（会话已切换）
+      await pumpEventQueue();
+      gate.complete(); // 放行：syncNow 抛异常进入 on Exception
+      await pumpEventQueue();
+      // 会话不一致：返回"会话已切换"且不写 _lastError（防旧会话报错写回）。
+      expect(h.store.lastError, isNull);
+      expect(h.store.userId, isNull);
     });
   });
 
