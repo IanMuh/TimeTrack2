@@ -239,11 +239,13 @@ void main() {
         mergePrevious: false, // 合并右侧 second：current=first 保留为 merged，邻居 second 软删
       )).requireValue();
       expect(merged, isNotNull); // 合并确实执行
-      final firstAfter = (await h.entries.entryByIdIncludingDeleted(first.id))!;
-      expect(firstAfter.isDeleted, isFalse); // first 保留（= merged）
+      final firstAfter = await h.entries.entryByIdIncludingDeleted(first.id);
+      expect(firstAfter, isNotNull); // 可空解包前先断言（失败可诊断）
+      expect(firstAfter!.isDeleted, isFalse); // first 保留（= merged）
       expect(firstAfter.endAt, DateTime(2026, 8, 14, 12));
-      final secondAfter = (await h.entries.entryByIdIncludingDeleted(second.id))!;
-      expect(secondAfter.isDeleted, isTrue); // 邻居 second 已软删
+      final secondAfter = await h.entries.entryByIdIncludingDeleted(second.id);
+      expect(secondAfter, isNotNull);
+      expect(secondAfter!.isDeleted, isTrue); // 邻居 second 已软删
       // 运行态缓存必须保留（未被合并清空）。
       expect(h.timer.runningEntry?.id, running.id);
       expect(h.timer.runningEntry?.isRunning, isTrue);
@@ -272,10 +274,12 @@ void main() {
       )).requireValue();
       expect(merged, isNull); // 无合并对象（阈值超限归为业务 null）
       expect(h.undo.undoDepth, before); // 无 undo 记录
-      expect((await h.entries.entryByIdIncludingDeleted(second.id))!.isDeleted,
-          isFalse); // 未被软删
-      expect((await h.entries.entryByIdIncludingDeleted(first.id))!.isDeleted,
-          isFalse); // 邻居也未受影响
+      final secondAfter = await h.entries.entryByIdIncludingDeleted(second.id);
+      expect(secondAfter, isNotNull);
+      expect(secondAfter!.isDeleted, isFalse); // 未被软删
+      final firstAfter = await h.entries.entryByIdIncludingDeleted(first.id);
+      expect(firstAfter, isNotNull);
+      expect(firstAfter!.isDeleted, isFalse); // 邻居也未受影响
     });
 
     test('undo 恢复写库后 dataRevision 递增（恢复作为新修改参与同步）', () async {
