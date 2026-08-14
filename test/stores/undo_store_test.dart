@@ -62,10 +62,18 @@ class _ThrowingApplier implements UndoApplier {
 }
 
 /// 抛 **Error**（编程错误）：实现不得吞掉，应 fail-fast 外抛。
+/// （Dart 中 Error 不实现 Exception，`on Exception catch` 不会捕获它们。）
 class _ErrorApplier implements UndoApplier {
+  _ErrorApplier({this.throwOnValidate = true});
+
+  /// validate 是否抛 Error；apply 恒抛（覆盖 apply 段 Error fail-fast 时用
+  /// `throwOnValidate: false` 让校验通过）。
+  final bool throwOnValidate;
+
   @override
   Future<AppResult<void>> validate(Object? expected) async {
-    throw StateError('applier 实现缺陷');
+    if (throwOnValidate) throw StateError('applier 实现缺陷');
+    return const AppSuccess(null);
   }
 
   @override
@@ -363,9 +371,34 @@ void main() {
       );
       // Error 不应被吞成 AppFailure——Future 以 error 结束（外抛暴露缺陷）。
       await expectLater(store.undo(), throwsStateError);
-      // 异常外抛后 _executing 由 finally 复位，栈保持可恢复。
+      // 外抛后 _executing 必须已复位：追加 record + undo 成功，证明 store 可
+      // 继续使用（仅栈标志无法区分 _executing 是否卡死——卡死时 record 被
+      // 静默忽略、undo 被互斥拒绝，栈断言仍通过）。
+      store.record(
+        label: 'after-error',
+        changes: [UndoChange(before: 'C', after: 'D', applier: _FakeApplier())],
+      );
+      expect(await store.undo(), isA<AppSuccess<void>>());
+      // 失败的 op 栈不动仍留存（undo 栈）；after-error 已成功撤销（redo 栈）。
       expect(store.canUndo, isTrue);
+      expect(store.lastUndoLabel, 'op');
+      expect(store.canRedo, isTrue);
+      expect(store.lastRedoLabel, 'after-error');
+    });
+
+    test('applier 在 apply 段抛 Error（validate 通过）：fail-fast 外抛、记录可重试', () async {
+      final applyErrorApplier = _ErrorApplier(throwOnValidate: false);
+      store.record(
+        label: 'op',
+        changes: [UndoChange(before: 'B', after: 'A', applier: applyErrorApplier)],
+      );
+      // validate 通过、apply 抛 Error：apply 段 catch 不得吞（独立代码路径）。
+      await expectLater(store.undo(), throwsStateError);
+      // 记录仍留在 undo 栈（_restore 的 finally 复位 _executing 后未迁移）。
+      expect(store.canUndo, isTrue);
+      expect(store.undoDepth, 1);
       expect(store.canRedo, isFalse);
+      expect(store.lastUndoLabel, 'op');
     });
 
     test('空栈 undo/redo 返回失败', () async {
@@ -433,6 +466,20 @@ void main() {
     test('maxDepth <= 0 构造被拒（运行时校验，release 同样生效）', () {
       expect(() => UndoStore(maxDepth: 0), throwsArgumentError);
       expect(() => UndoStore(maxDepth: -1), throwsArgumentError);
+      // 最小合法边界：maxDepth: 1 必须可用，且丢最旧生效。
+      expect(() => UndoStore(maxDepth: 1), returnsNormally);
+      final minStore = UndoStore(maxDepth: 1);
+      minStore.record(
+        label: 'a',
+        changes: [UndoChange(before: 'B1', after: 'A1', applier: _FakeApplier())],
+      );
+      minStore.record(
+        label: 'b',
+        changes: [UndoChange(before: 'B2', after: 'A2', applier: _FakeApplier())],
+      );
+      expect(minStore.undoDepth, 1); // 超限丢最旧
+      expect(minStore.lastUndoLabel, 'b');
+      minStore.dispose();
     });
   });
 }
