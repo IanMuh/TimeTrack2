@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timetrack2/stores/undo_store.dart';
 import 'package:timetrack2/utils/result.dart';
@@ -38,7 +40,8 @@ class _FakeApplier implements UndoApplier {
   }
 }
 
-/// 契约外行为：validate/apply 抛未归约异常（模拟连接错误等）。
+/// 契约外行为：validate/apply 抛未归约 **Exception**（模拟连接错误等；
+/// Error 类编程错误由 fail-fast 外抛路径覆盖，见对应测试）。
 class _ThrowingApplier implements UndoApplier {
   _ThrowingApplier({this.throwOnValidate = true});
 
@@ -48,13 +51,47 @@ class _ThrowingApplier implements UndoApplier {
 
   @override
   Future<AppResult<void>> validate(Object? expected) async {
-    if (throwOnValidate) throw StateError('网络中断');
+    if (throwOnValidate) throw Exception('网络中断');
     return const AppSuccess(null);
   }
 
   @override
   Future<AppResult<void>> apply(Object? target) async {
-    throw StateError('网络中断');
+    throw Exception('网络中断');
+  }
+}
+
+/// 抛 **Error**（编程错误）：实现不得吞掉，应 fail-fast 外抛。
+class _ErrorApplier implements UndoApplier {
+  @override
+  Future<AppResult<void>> validate(Object? expected) async {
+    throw StateError('applier 实现缺陷');
+  }
+
+  @override
+  Future<AppResult<void>> apply(Object? target) async {
+    throw StateError('applier 实现缺陷');
+  }
+}
+
+/// validate 挂起在 [gate] 上直到外部放行：模拟真实异步 I/O 挂起窗口，
+/// 覆盖"validate 进行中触发新 record"的并发重入。
+class _CompleterApplier implements UndoApplier {
+  _CompleterApplier(this._gate);
+
+  final Completer<void> _gate;
+  final applied = <Object?>[];
+
+  @override
+  Future<AppResult<void>> validate(Object? expected) async {
+    await _gate.future;
+    return const AppSuccess(null);
+  }
+
+  @override
+  Future<AppResult<void>> apply(Object? target) async {
+    applied.add(target);
+    return const AppSuccess(null);
   }
 }
 
@@ -222,11 +259,15 @@ void main() {
       expect(store.canRedo, isTrue);
       expect(store.redoDepth, 1);
       expect(store.canUndo, isFalse);
+      expect(store.lastRedoLabel, 'op'); // 与 validate 失败用例对称：可重试
     });
 
     test('多 change 记录成功恢复：按列表顺序 apply（级联恢复语义）', () async {
-      final first = _FakeApplier();
-      final second = _FakeApplier();
+      // 用共享执行日志断言真实交错顺序：独立 applied 列表无法区分
+      // "先 first 后 second" 与 "先 second 后 first"（各列表断言仍各自通过）。
+      final applyLog = <String>[];
+      final first = _FakeApplier()..onApply = () => applyLog.add('first');
+      final second = _FakeApplier()..onApply = () => applyLog.add('second');
       store.record(
         label: '删除分类',
         changes: [
@@ -235,35 +276,39 @@ void main() {
         ],
       );
       await store.undo();
+      expect(applyLog, ['first', 'second']); // 按列表顺序 apply
       expect(first.applied, ['cat']);
       expect(second.applied, ['sub']);
       expect(first.validated, [null]);
       expect(second.validated, [null]);
       await store.redo();
+      expect(applyLog, ['first', 'second', 'first', 'second']);
       expect(first.applied, ['cat', null]); // redo 应用 after（null = 删除）
       expect(second.applied, ['sub', null]);
     });
 
-    test('validate 异步阶段触发的 record 被忽略（防栈错位）', () async {
+    test('validate 挂起窗口触发的 record 被忽略（真实异步重入）', () async {
       final newOp = _FakeApplier();
-      // validate 挂起（异步回调内触发新 record）：恢复期间 record 必须被忽略，
-      // 否则新记录入栈 → source.removeLast() 弹出新记录而非本次恢复的记录。
-      final asyncApplier = _FakeApplier()
-        ..onValidate = () {
-          store.record(
-            label: 'new',
-            changes: [UndoChange(before: 'X', after: 'Y', applier: newOp)],
-          );
-        };
+      // 用 Completer 让 validate 真正挂起：在挂起窗口内触发新 record，覆盖
+      // 真实异步 I/O 重入窗口（而非 validate 的同步段回调）。
+      final gate = Completer<void>();
+      final asyncApplier = _CompleterApplier(gate);
       store.record(
         label: 'op',
         changes: [UndoChange(before: 'B', after: 'A', applier: asyncApplier)],
       );
 
-      final result = await store.undo();
+      final undoFuture = store.undo(); // validate 挂起在 gate 上
+      await pumpEventQueue();
+      store.record(
+        label: 'new',
+        changes: [UndoChange(before: 'X', after: 'Y', applier: newOp)],
+      );
+      gate.complete(); // 放行 validate → 继续恢复
+      final result = await undoFuture;
       expect(result, isA<AppSuccess<void>>());
       expect(asyncApplier.applied, ['B']); // 本次恢复的记录被正确应用
-      expect(newOp.applied, isEmpty); //     validate 期 record 未入栈执行
+      expect(newOp.applied, isEmpty); //     validate 挂起期 record 被忽略
       expect(store.canUndo, isFalse); //     undo 栈只剩 op（已迁移）
       expect(store.canRedo, isTrue); //      redo 未被新记录清空
       expect(store.redoDepth, 1);
@@ -286,7 +331,7 @@ void main() {
       expect(store.redoDepth, 1);
     });
 
-    test('applier 抛异常（契约外）：转为 AppFailure，不逃逸为异步 error', () async {
+    test('applier 抛 Exception（契约外）：转为 AppFailure，不逃逸为异步 error', () async {
       // validate 抛异常 → undo 返回 AppFailure（而不是 Future 以 error 结束）。
       final validateThrowing = _ThrowingApplier();
       store.record(
@@ -307,6 +352,19 @@ void main() {
       final applyResult = await store.undo();
       expect(applyResult, isA<AppFailure<void>>());
       expect(store.canUndo, isTrue); // 栈不动（op2 仍在，op 也仍在）
+      expect(store.canRedo, isFalse);
+    });
+
+    test('applier 抛 Error（编程错误）：fail-fast 外抛，不转为业务失败', () async {
+      final errorApplier = _ErrorApplier();
+      store.record(
+        label: 'op',
+        changes: [UndoChange(before: 'B', after: 'A', applier: errorApplier)],
+      );
+      // Error 不应被吞成 AppFailure——Future 以 error 结束（外抛暴露缺陷）。
+      await expectLater(store.undo(), throwsStateError);
+      // 异常外抛后 _executing 由 finally 复位，栈保持可恢复。
+      expect(store.canUndo, isTrue);
       expect(store.canRedo, isFalse);
     });
 
@@ -370,6 +428,11 @@ void main() {
 
     test('空 changes 记录被拒绝（编程错误）', () {
       expect(() => store.record(label: 'x', changes: []), throwsArgumentError);
+    });
+
+    test('maxDepth <= 0 构造被拒（运行时校验，release 同样生效）', () {
+      expect(() => UndoStore(maxDepth: 0), throwsArgumentError);
+      expect(() => UndoStore(maxDepth: -1), throwsArgumentError);
     });
   });
 }

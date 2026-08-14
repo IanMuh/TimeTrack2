@@ -18,11 +18,16 @@ class DataRevision extends ValueNotifier<int> {
   void bump() => value += 1;
 
   /// 收敛 value 写入：禁止外部回退修订号（UI 缓存可能按"新号 > 旧号"顺序
-  /// 比较失效，回退会漏失效）。debug 下断言报错；release 下静默拒绝回退。
+  /// 比较失效，回退会漏失效）。debug 下断言报错；release 下静默拒绝并记
+  /// debug 日志（被拒的写入在 release 无返回值可见，日志提供可观测信号防
+  /// 静默不一致难以排查）。
   @override
   set value(int newValue) {
     assert(newValue >= value, '修订号必须单调递增，不允许回退');
-    if (newValue < value) return;
+    if (newValue < value) {
+      debugPrint('DataRevision: 拒绝回退 newValue=$newValue current=$value');
+      return;
+    }
     super.value = newValue;
   }
 }

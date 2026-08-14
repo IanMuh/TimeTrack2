@@ -12,6 +12,8 @@
 ///   的交互复杂，如实降级）。
 library;
 
+import 'dart:io' show stderr;
+
 import 'package:flutter/foundation.dart';
 
 import '../utils/result.dart';
@@ -115,12 +117,19 @@ class UndoStore extends ChangeNotifier {
   ///
   /// - 新操作清空 redo 栈；
   /// - 深度超限丢最旧；
-  /// - [changes] 为空 = 编程错误（[ArgumentError]）。
+  /// - [changes] 为空 = 编程错误（[ArgumentError]）；
+  /// - **恢复执行期（[undo]/[redo] 全程）的 record 被静默忽略**——调用方必须
+  ///   保证恢复期间不发起新编辑（UI 侧锁定编辑入口）；被忽略的编辑既不进栈，
+  ///   随后的 apply 又可能用旧快照覆盖库状态（数据丢失风险），此前提不可省略。
   void record({required String label, required List<UndoChange> changes}) {
     // 恢复执行期防护放最前：执行期内任何 record 一律忽略（防误清 redo）。
     // 若先判 changes.isEmpty 再判 _executing，恢复期触发空 changes 的 record
     // 会抛 ArgumentError 打断恢复流程，与本条防护语义冲突。
-    if (_executing) return;
+    if (_executing) {
+      debugPrint('UndoStore: 忽略恢复执行期的 record（label=$label）——'
+          '调用方应保证恢复期间不发起新编辑');
+      return;
+    }
     if (changes.isEmpty) {
       throw ArgumentError.value(changes, 'changes', 'undo 记录至少需要一条 change');
     }
@@ -144,7 +153,9 @@ class UndoStore extends ChangeNotifier {
     // record 与并发 restore 都被隔离（防"validate 期间新 record 入栈 →
     // source.removeLast() 弹出的是新记录而非本记录"的错位）。
     if (_executing) {
-      return AppFailure(restoringBefore ? '撤销进行中，请稍后再试' : '重做进行中，请稍后再试');
+      // 中性文案：正在进行的可能是相反方向的恢复（redo 执行中点了 undo），
+      // 按本次请求方向措辞会误导。
+      return const AppFailure('恢复操作进行中，请稍后再试');
     }
     final source = restoringBefore ? _undoStack : _redoStack;
     final target = restoringBefore ? _redoStack : _undoStack;
@@ -184,13 +195,16 @@ class UndoStore extends ChangeNotifier {
     final verb = restoringBefore ? '撤销' : '重做';
     for (final change in record.changes) {
       final expected = restoringBefore ? change.after : change.before;
-      // 契约：applier 恒返回 AppResult；防御性捕获抛出的异常（连接错误等），
-      // 转 AppFailure 收敛，保持 undo()/redo() 恒以 AppResult 结束
-      //（不被异步异常逃逸打断调用方统一失败处理路径）。
+      // 契约：applier 恒返回 AppResult；防御性捕获抛出的**Exception**（连接
+      // 错误等），转 AppFailure 收敛，保持 undo()/redo() 恒以 AppResult 结束。
+      // Error（TypeError/NoSuchMethodError 等编程错误）**不吞**——fail-fast
+      // 外抛暴露 applier 实现缺陷（异步上下文抛 Error 同样走 zone 全局处理）。
+      // 用户文案脱敏（只带异常类型），原始异常写 stderr 供排障。
       final AppResult<void> result;
       try {
         result = await change.applier.validate(expected);
-      } catch (e) {
+      } on Exception catch (e) {
+        stderr.writeln('[undo] $verb校验异常：$e');
         return AppFailure('$verb被拒绝：校验异常 ${e.runtimeType}');
       }
       if (result case AppFailure<void> failure) {
@@ -202,7 +216,8 @@ class UndoStore extends ChangeNotifier {
       final AppResult<void> result;
       try {
         result = await change.applier.apply(target);
-      } catch (e) {
+      } on Exception catch (e) {
+        stderr.writeln('[undo] $verb应用异常：$e');
         return AppFailure('$verb失败：应用异常 ${e.runtimeType}');
       }
       if (result case AppFailure<void> failure) {
