@@ -1,0 +1,107 @@
+import 'package:drift/native.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:timetrack2/data/database/app_database.dart' hide ProfileSettings;
+import 'package:timetrack2/data/repositories/activity_repository.dart';
+import 'package:timetrack2/data/repositories/category_repository.dart';
+import 'package:timetrack2/data/repositories/settings_repository.dart';
+import 'package:timetrack2/data/repositories/time_entry_repository.dart';
+import 'package:timetrack2/stores/data_revision.dart';
+import 'package:timetrack2/stores/timeline_store.dart';
+
+class TestHarness {
+  TestHarness() {
+    db = AppDatabase(NativeDatabase.memory());
+    activities = ActivityRepository(database: db);
+    categories = CategoryRepository(database: db);
+    settings = SettingsRepository(database: db);
+    entries = TimeEntryRepository(
+      database: db,
+      activityRepository: activities,
+      settingsRepository: settings,
+    );
+    revision = DataRevision();
+    store = TimelineStore(
+      entries: entries,
+      dataRevision: revision,
+    );
+  }
+
+  late final AppDatabase db;
+  late final ActivityRepository activities;
+  late final CategoryRepository categories;
+  late final SettingsRepository settings;
+  late final TimeEntryRepository entries;
+  late final DataRevision revision;
+  late final TimelineStore store;
+
+  Future<void> close() async {
+    store.dispose();
+    revision.dispose();
+    await db.close();
+  }
+}
+
+void main() {
+  group('TimelineStore', () {
+    late TestHarness h;
+
+    setUp(() => h = TestHarness());
+    tearDown(() => h.close());
+
+    test('loadRange：只含范围内条目（含跨日裁剪语义由仓储保证）', () async {
+      final a = (await h.activities.createActivity(name: 'A', color: 0))
+          .requireValue();
+      await h.entries.createManualEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 14, 9),
+        endAt: DateTime(2026, 8, 14, 10),
+        note: '',
+      );
+      await h.entries.createManualEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 13, 9),
+        endAt: DateTime(2026, 8, 13, 10),
+        note: '',
+      );
+      await h.store.loadRange(
+        DateTime(2026, 8, 14),
+        DateTime(2026, 8, 15),
+      );
+      expect(h.store.loadedRange, (DateTime(2026, 8, 14), DateTime(2026, 8, 15)));
+      expect(h.store.entriesForRange, hasLength(1));
+      expect(h.store.entriesForRange.single.startAt, DateTime(2026, 8, 14, 9));
+    });
+
+    test('dataRevision 变更自动重新加载当前范围', () async {
+      final a = (await h.activities.createActivity(name: 'A', color: 0))
+          .requireValue();
+      await h.entries.createManualEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 14, 9),
+        endAt: DateTime(2026, 8, 14, 10),
+        note: '',
+      );
+      await h.store.loadRange(
+        DateTime(2026, 8, 14),
+        DateTime(2026, 8, 15),
+      );
+      expect(h.store.entriesForRange, hasLength(1));
+
+      await h.entries.createManualEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 14, 10),
+        endAt: DateTime(2026, 8, 14, 11),
+        note: '',
+      );
+      h.revision.bump();
+      await pumpEventQueue();
+      expect(h.store.entriesForRange, hasLength(2));
+    });
+
+    test('未加载范围时 dataRevision 变更不崩', () async {
+      h.revision.bump();
+      await pumpEventQueue();
+      expect(h.store.loadedRange, isNull);
+    });
+  });
+}
