@@ -99,9 +99,10 @@ void main() {
       await h.settings.applyIfRemoteNewer(remote);
       expect(h.store.current!.reminderMinutes, base.reminderMinutes); // _current 未刷新
 
-      // save 一次（库基准应读到 60 而非过期的 base）。
-      await h.store.save(base.copyWith(reminderMinutes: 45));
-      await h.undo.undo();
+      // save 一次（库基准应读到 60 而非过期的 base）。显式检查成功防假阳性。
+      expect((await h.store.save(base.copyWith(reminderMinutes: 45))).isSuccess,
+          isTrue);
+      expect((await h.undo.undo()).isSuccess, isTrue);
       await h.store.reload();
       // 撤销应恢复库中的远端值 60（而非过期的 base 值）。
       expect(h.store.current!.reminderMinutes, 60);
