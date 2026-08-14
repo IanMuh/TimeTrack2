@@ -28,14 +28,16 @@ class TodayStore extends ChangeNotifier {
     };
     dataRevision.addListener(_dataRevisionListener);
     _clockListener = () {
-      // 时钟 tick：今日运行条目总时长随时间增长，静默刷新（不阻塞 UI）。
-      // 仅当今日存在运行条目时才触发 DB 查询（无运行条目时今日窗口内容
-      // 不随时间变化，避免每秒无谓查询与重建）。
+      // 时钟 tick：仅两种情形需要重新加载——
+      // 1) 今日存在运行条目（总时长随时间增长）；
+      // 2) 本地日已变更（查询窗口前移，否则 _today 停留昨日条目）。
+      // 其余情形今日窗口内容与时长均不随时间变化：不查库也不通知
+      //（避免每秒无谓 DB 查询与 UI 重建）。
+      final now = _now();
       final hasRunning = _today.any((e) => e.endAt == null);
-      if (hasRunning) {
+      final dayChanged = now.startOfDay != _lastLoadDay;
+      if (hasRunning || dayChanged) {
         loadToday();
-      } else {
-        notifyListeners(); // 无运行条目：仅刷新展示（时长不变，不查库）
       }
     };
     clock.addListener(_clockListener);
@@ -53,6 +55,7 @@ class TodayStore extends ChangeNotifier {
   int _requestSeq = 0; // loadToday 请求序号（并发乱序防护）
   List<TimeEntry> _today = const [];
   bool _loadFailed = false;
+  DateTime? _lastLoadDay; // 最近一次成功加载的本地日（tick 跨日判定）
 
   /// 今日条目（按 startAt 升序；dataRevision/tick 后自动刷新）。
   List<TimeEntry> get today => _today;
@@ -74,8 +77,10 @@ class TodayStore extends ChangeNotifier {
       final loaded = await entries.entriesForRange(todayStart, tomorrowStart);
       if (_disposed || seq != _requestSeq) return;
       _today = List.unmodifiable(loaded);
+      _lastLoadDay = todayStart;
       _loadFailed = false;
-    } catch (_) {
+    } on Exception catch (_) {
+      // 仅收敛 Exception（连接/IO 类）；Error 编程错误不吞，fail-fast 外抛。
       if (_disposed || seq != _requestSeq) return;
       _loadFailed = true; // 加载失败：置位供 UI 提示（不抛未处理异常）
     }

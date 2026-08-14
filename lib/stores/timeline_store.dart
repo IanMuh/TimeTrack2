@@ -61,7 +61,9 @@ class TimelineStore extends ChangeNotifier {
       if (_disposed || seq != _loadSeq) return;
       _rangeEntries = List.unmodifiable(loaded);
       _loadFailed = false;
-    } catch (_) {
+    } on Exception catch (_) {
+      // 仅收敛 Exception（连接/IO 类）；Error 编程错误不吞，fail-fast 外抛
+      //（暴露真实 bug）。
       if (_disposed || seq != _loadSeq) return;
       _loadFailed = true;
     }

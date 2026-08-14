@@ -8,6 +8,7 @@ import 'package:timetrack2/data/repositories/time_entry_repository.dart';
 import 'package:timetrack2/stores/clock_store.dart';
 import 'package:timetrack2/stores/data_revision.dart';
 import 'package:timetrack2/stores/today_store.dart';
+import 'package:timetrack2/viewmodels/time_entry.dart';
 
 class TestHarness {
   TestHarness() {
@@ -39,7 +40,8 @@ class TestHarness {
   late final ClockStore clock;
   late final TodayStore store;
 
-  final DateTime _fixedNow = DateTime(2026, 8, 14, 12);
+  /// 可变的"当前时刻"（跨日/tick 用例重赋值；重赋值后 lint 不再要求 final）。
+  DateTime _fixedNow = DateTime(2026, 8, 14, 12);
 
   bool _closed = false;
 
@@ -50,6 +52,23 @@ class TestHarness {
     clock.dispose();
     revision.dispose();
     await db.close();
+  }
+}
+
+/// 查询计数间谍（验证 tick 是否真的触发了 DB 查询）。
+class _CountingEntries extends TimeEntryRepository {
+  _CountingEntries({
+    required super.database,
+    required super.activityRepository,
+    required super.settingsRepository,
+  });
+
+  int entriesForRangeCalls = 0;
+
+  @override
+  Future<List<TimeEntry>> entriesForRange(DateTime start, DateTime end) {
+    entriesForRangeCalls++;
+    return super.entriesForRange(start, end);
   }
 }
 
@@ -149,7 +168,25 @@ void main() {
       expect(h.store.today, hasLength(1)); // 与今日窗口重叠即计入
     });
 
-    test('时钟 tick：有运行条目时刷新，无运行条目时不查库', () async {
+    test('时钟 tick：无运行条目不查库、有运行条目触发重载（spy 计数）', () async {
+      final counting = _CountingEntries(
+        database: h.db,
+        activityRepository: h.activities,
+        settingsRepository: h.settings,
+      );
+      final revision = DataRevision();
+      final clock = ClockStore(autoStart: false);
+      final store = TodayStore(
+        entries: counting,
+        dataRevision: revision,
+        clock: clock,
+        now: () => h._fixedNow,
+      );
+      addTearDown(() {
+        store.dispose();
+        clock.dispose();
+        revision.dispose();
+      });
       final a = (await h.activities.createActivity(name: 'A', color: 0))
           .requireValue();
       await h.entries.createManualEntry(
@@ -158,11 +195,41 @@ void main() {
         endAt: DateTime(2026, 8, 14, 10),
         note: '',
       );
-      await h.store.loadToday();
-      // 无运行条目：tick 仅 notify（不查库——今日内容不随时间变）。
-      h.clock.notifyListeners(); // 手动触发 tick 回调
+      await store.loadToday();
+      final callsAfterLoad = counting.entriesForRangeCalls;
+      expect(callsAfterLoad, greaterThanOrEqualTo(1));
+
+      // 无运行条目：tick 不查库（计数不变）。
+      clock.notifyListeners();
       await pumpEventQueue();
+      expect(counting.entriesForRangeCalls, callsAfterLoad);
+
+      // 有运行条目：tick 触发重载（计数 +1）。
+      await h.entries.switchToActivity(a.id, at: h._fixedNow);
+      await store.loadToday(); // 刷新今日缓存含运行条目
+      final callsWithRunning = counting.entriesForRangeCalls;
+      clock.notifyListeners();
+      await pumpEventQueue();
+      expect(counting.entriesForRangeCalls, callsWithRunning + 1);
+    });
+
+    test('跨日 tick：窗口前移强制重载', () async {
+      final a = (await h.activities.createActivity(name: 'A', color: 0))
+          .requireValue();
+      await h.entries.createManualEntry(
+        activityId: a.id,
+        startAt: DateTime(2026, 8, 14, 23),
+        endAt: DateTime(2026, 8, 14, 23, 30),
+        note: '',
+      );
+      await h.store.loadToday();
       expect(h.store.today, hasLength(1));
+
+      // 跨到 8/15：tick 时 dayChanged → 强制重载（无运行条目也查库）。
+      h._fixedNow = DateTime(2026, 8, 15, 0, 1);
+      h.clock.notifyListeners();
+      await pumpEventQueue();
+      expect(h.store.today, isEmpty); // 新窗口（8/15）无条目
     });
   });
 }
