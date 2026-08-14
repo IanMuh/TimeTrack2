@@ -11,9 +11,12 @@
 /// - **tick 轮询**：TimerStore 时钟 tick 驱动，限频（防每 tick 重复命中同一
 ///   活动）；命中后记录 lastMatchedRule 供 UI 展示。
 ///
-/// 匹配优先级：同进程命中多条规则时按规则插入序取**最先**（activeRules 已
-/// 按 updatedAt 排序）。
+/// 匹配优先级：同进程命中多条规则时取**最先**——规则列表顺序 =
+/// activeRules 按 updatedAt 升序（后修改的规则优先级更低；无独立插入序
+/// 字段——注释如实描述，勿按"插入序"解读）。
 library;
+
+import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
@@ -73,31 +76,48 @@ class TrackingStore extends ChangeNotifier {
     if (_disposed) return;
     final now = _now();
     if (now.difference(_lastPoll) < pollInterval) return; // 限频
+    if (_polling) return; // 防重入：上一轮 poll 未完成时不重复进入
     _lastPoll = now;
-    poll();
+    // fire-and-forget：显式吞纳异常防未处理异步异常（时钟监听器传播）。
+    unawaited(poll().catchError((Object e) {
+      // poll 内部已有 AppResult 收敛；此兜底防仓储契约外异常逃逸。
+      if (!_disposed) {
+        _lastPoll = DateTime.fromMillisecondsSinceEpoch(0); // 下轮可重试
+      }
+    }));
   }
+
+  bool _polling = false;
 
   /// 检测前台并自动切换（供 tick 驱动与手动调用；fake 测试直接调）。
   Future<void> poll() async {
     if (_disposed) return;
-    final process = detector.processName;
-    if (process == null || process.isEmpty) return; // 无前台进程：不动作
-    final title = detector.windowTitle;
-    final rulesResult = await rules.activeRules();
-    if (rulesResult case AppFailure<List<TrackingRule>> _) {
-      return; // 规则加载失败：保持现状（下一轮重试）
-    }
-    final matched = _match(process, title, rulesResult.requireValue());
-    if (matched == null) return;
-    final current = await timer.entries.runningEntry();
-    if (current != null && current.activityId == matched.activityId) {
-      return; // 已在该活动：不重复切换
-    }
-    final result = await timer.switchToActivity(matched.activityId, isAuto: true);
-    if (result.isSuccess) {
-      _lastMatchedActivityId = matched.activityId;
-      _lastMatchNote = matched.pattern;
-      notifyListeners();
+    if (_polling) return; // 重入保护（手动调用与 tick 并发时只执行一轮）
+    _polling = true;
+    try {
+      final process = detector.processName;
+      if (process == null || process.isEmpty) return; // 无前台进程：不动作
+      final title = detector.windowTitle;
+      final rulesResult = await rules.activeRules();
+      if (rulesResult case AppFailure<List<TrackingRule>> _) {
+        return; // 规则加载失败：保持现状（下一轮重试）
+      }
+      final matched = _match(process, title, rulesResult.requireValue());
+      if (matched == null) return;
+      final current = await timer.entries.runningEntry();
+      if (_disposed) return; // await 期间可能已 dispose
+      if (current != null && current.activityId == matched.activityId) {
+        return; // 已在该活动：不重复切换
+      }
+      final result = await timer.switchToActivity(matched.activityId, isAuto: true);
+      if (_disposed) return; // await 期间可能已 dispose
+      if (result.isSuccess) {
+        _lastMatchedActivityId = matched.activityId;
+        _lastMatchNote = matched.pattern;
+        notifyListeners();
+      }
+    } finally {
+      _polling = false;
     }
   }
 
@@ -134,9 +154,13 @@ class TrackingStore extends ChangeNotifier {
   static bool _processMatches(String process, String pattern) {
     if (pattern == '*') return true; // 全通配
     if (pattern.contains('*')) {
-      // 段通配：`code*.exe` → 前缀匹配；`*` 前后段。
-      final prefix = pattern.substring(0, pattern.indexOf('*'));
-      return process.startsWith(prefix);
+      // 段通配：`code*.exe` → 前缀 code + 后缀 .exe 同时校验（`*` 前后段，
+      // 防 `code-not-exe.txt` 误命中）。
+      final star = pattern.indexOf('*');
+      final prefix = pattern.substring(0, star);
+      final suffix = pattern.substring(star + 1);
+      return process.startsWith(prefix) &&
+          (suffix.isEmpty || process.endsWith(suffix));
     }
     return process == pattern; // 精确
   }

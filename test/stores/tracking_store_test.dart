@@ -49,6 +49,7 @@ class _TestHarness {
       dataRevision: revision,
       clock: clock,
       detector: detector,
+      pollInterval: const Duration(seconds: 5), // 显式传（防隐式默认耦合）
       now: () => _fixedNow,
     );
   }
@@ -126,7 +127,7 @@ void main() {
       expect((await h.entries.runningEntry())!.activityId, b.id); // 保持 B
     });
 
-    test('段通配 `code*.exe` 命中', () async {
+    test('段通配 `code*.exe` 前缀+后缀命中；后缀不符不命中', () async {
       final h = _TestHarness();
       addTearDown(h.close);
       final a = (await h.activities.createActivity(name: 'A', color: 0))
@@ -135,6 +136,14 @@ void main() {
       h.detector.processName = 'code-2.exe';
       await h.tracking.poll();
       expect((await h.entries.runningEntry())!.activityId, a.id);
+
+      // 后缀不符（code-not-exe.txt）：不应命中（防前缀-only 误命中）。
+      final b = (await h.activities.createActivity(name: 'B', color: 0))
+          .requireValue();
+      await h.timer.switchToActivity(b.id);
+      h.detector.processName = 'code-not-exe.txt';
+      await h.tracking.poll();
+      expect((await h.entries.runningEntry())!.activityId, b.id); // 保持 B
     });
 
     test('title 正则：仅标题匹配即切换（不要求进程命中）', () async {
@@ -153,25 +162,27 @@ void main() {
       expect((await h.entries.runningEntry())!.activityId, a.id);
     });
 
-    test('title 不匹配 / 非法正则：不切换不崩', () async {
+    test('title 不匹配 / 非法正则跳过：有效规则仍命中（跳过并继续）', () async {
       final h = _TestHarness();
       addTearDown(h.close);
       final a = (await h.activities.createActivity(name: 'A', color: 0))
           .requireValue();
-      await h.seedRule(
-        process: r'项目.*文档',
-        kind: TrackingRuleMatchKind.title,
-        activityId: a.id,
-      );
+      // 非法正则规则排在**可命中的有效规则之前**——若实现遇 FormatException
+      // 终止整个循环（而非"跳过继续"），有效规则将无法命中，测试失败。
       await h.seedRule(
         process: r'[', // 非法正则
         kind: TrackingRuleMatchKind.title,
         activityId: a.id,
       );
+      await h.seedRule(
+        process: r'项目.*文档',
+        kind: TrackingRuleMatchKind.title,
+        activityId: a.id,
+      );
       h.detector.processName = 'any.exe';
-      h.detector.windowTitle = '无关标题';
+      h.detector.windowTitle = '项目A - 文档';
       await h.tracking.poll();
-      expect(await h.entries.runningEntry(), isNull); // 未命中
+      expect((await h.entries.runningEntry())!.activityId, a.id); // 有效规则命中
     });
 
     test('同进程多规则取最先', () async {
