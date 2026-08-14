@@ -399,6 +399,16 @@ void main() {
       expect(store.undoDepth, 1);
       expect(store.canRedo, isFalse);
       expect(store.lastUndoLabel, 'op');
+      // 外抛后 _executing 必须已复位：追加 record + undo 成功，证明 store 可
+      // 继续使用（仅栈标志无法区分 _executing 是否卡死）。
+      store.record(
+        label: 'after-error',
+        changes: [UndoChange(before: 'C', after: 'D', applier: _FakeApplier())],
+      );
+      expect(await store.undo(), isA<AppSuccess<void>>());
+      expect(store.lastUndoLabel, 'op'); // 失败的 op 仍留存
+      expect(store.canRedo, isTrue);
+      expect(store.lastRedoLabel, 'after-error');
     });
 
     test('空栈 undo/redo 返回失败', () async {
@@ -466,8 +476,8 @@ void main() {
     test('maxDepth <= 0 构造被拒（运行时校验，release 同样生效）', () {
       expect(() => UndoStore(maxDepth: 0), throwsArgumentError);
       expect(() => UndoStore(maxDepth: -1), throwsArgumentError);
-      // 最小合法边界：maxDepth: 1 必须可用，且丢最旧生效。
-      expect(() => UndoStore(maxDepth: 1), returnsNormally);
+      // 最小合法边界：maxDepth: 1 必须可用（构造本身即隐含"不抛"校验），
+      // 且丢最旧生效。
       final minStore = UndoStore(maxDepth: 1);
       minStore.record(
         label: 'a',
