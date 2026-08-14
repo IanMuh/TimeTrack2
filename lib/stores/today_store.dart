@@ -28,20 +28,27 @@ class TodayStore extends ChangeNotifier {
     };
     dataRevision.addListener(_dataRevisionListener);
     _clockListener = () {
-      // 时钟 tick：仅两种情形需要重新加载——
+      // 时钟 tick：三种情形需要重新加载——
       // 1) 今日存在运行条目（总时长随时间增长）；
-      // 2) 本地日已变更（查询窗口前移，否则 _today 停留昨日条目）。
+      // 2) 本地日已变更（查询窗口前移，否则 _today 停留昨日条目）；
+      // 3) 上次加载失败且已达退避间隔（有界重试自愈——单次瞬时 DB 故障
+      //    不导致整日数据缺失，同时防每秒重试风暴）。
       // 其余情形今日窗口内容与时长均不随时间变化：不查库也不通知
       //（避免每秒无谓 DB 查询与 UI 重建）。
       final now = _now();
       final hasRunning = _today.any((e) => e.endAt == null);
       final dayChanged = now.startOfDay != _lastLoadDay;
-      if (hasRunning || dayChanged) {
+      final retryDue = _loadFailed &&
+          now.difference(_lastFailTime) >= retryInterval;
+      if (hasRunning || dayChanged || retryDue) {
         loadToday();
       }
     };
     clock.addListener(_clockListener);
   }
+
+  /// 失败后重试间隔（有界退避：瞬时故障在若干秒后自动重试一次）。
+  final Duration retryInterval = const Duration(seconds: 30);
 
   final TimeEntryRepository entries;
   final DataRevision dataRevision;
@@ -55,9 +62,10 @@ class TodayStore extends ChangeNotifier {
   int _requestSeq = 0; // loadToday 请求序号（并发乱序防护）
   List<TimeEntry> _today = const [];
   bool _loadFailed = false;
+  DateTime _lastFailTime = DateTime.fromMillisecondsSinceEpoch(0); // 失败退避基准
   /// 最近一次**尝试**加载的本地日（成功/失败均写入——失败也标记"已尝试
   /// 过该日"，防 DB 持续不可用时同日每秒重试；跨日 dayChanged=true 自动恢复。
-  /// 首次加载即失败的边界：同日恢复依赖 dataRevision 事件或跨日 tick）。
+  /// 失败后由 [retryInterval] 有界退避自动重试（防单次瞬时故障整日缺失）。
   DateTime? _lastLoadDay;
 
   /// 今日条目（按 startAt 升序；dataRevision/tick 后自动刷新）。
@@ -87,10 +95,11 @@ class TodayStore extends ChangeNotifier {
     } on Exception catch (_) {
       // 仅收敛 Exception（连接/IO 类）；Error 编程错误不吞，fail-fast 外抛。
       if (_disposed || seq != _requestSeq) return;
-      // 失败也标记"已尝试过该日"：无运行条目时 dayChanged 不再触发，
-      // 防 DB 持续不可用时每秒重试查询（跨日仍会自动恢复——新日
-      // dayChanged=true 触发重载）。
+      // 失败也标记"已尝试过该日"（无运行条目时 dayChanged 不再触发，
+      // 防 DB 持续不可用时每秒重试）+ 记录失败时刻（retryInterval 有界
+      // 退避自愈——单次瞬时故障不导致整日数据缺失）。
       _lastLoadDay = todayStart;
+      _lastFailTime = now;
       _loadFailed = true; // 加载失败：置位供 UI 提示（不抛未处理异常）
     }
     notifyListeners();

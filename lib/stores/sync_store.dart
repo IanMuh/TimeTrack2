@@ -18,6 +18,7 @@
 library;
 
 import 'dart:async';
+import 'dart:io' show stderr;
 
 import 'package:flutter/foundation.dart';
 
@@ -55,6 +56,8 @@ class SyncStore extends ChangeNotifier {
   bool _disposed = false;
   String? _userId;
   bool _syncing = false;
+  /// 互斥被拒时待重放的登录用户（同步结束后重试——防切换账号后不自动同步）。
+  String? _pendingSyncUserId;
   bool _cleanupRunning = false;
   String? _lastError;
   DateTime? _lastSyncAt;
@@ -86,6 +89,9 @@ class SyncStore extends ChangeNotifier {
     _userId = userId;
     if (userId != null) {
       // 登录成功自动云同步（fire-and-forget；失败记录错误供 UI）。
+      // 旧账号同步进行中时 _syncing 互斥会拒绝本轮——记录 pending 登录，
+      // 当前同步结束后重放（防"切换账号后新账号不自动同步"）。
+      _pendingSyncUserId = userId;
       syncNow();
     } else {
       // 认证流登出（会话过期/被踢）：与 signOut 同口径完全重置编排状态。
@@ -170,6 +176,13 @@ class SyncStore extends ChangeNotifier {
       return AppFailure('同步异常：$e');
     } finally {
       _syncing = false;
+      // pending 登录重放：同步期间新登录（互斥被拒）在当前同步结束后重试
+      // ——防"切换账号后新账号不自动同步"（旧同步结果已被会话校验丢弃）。
+      final pending = _pendingSyncUserId;
+      if (pending != null && pending != _userId) {
+        _pendingSyncUserId = null;
+        if (_userId != null) syncNow();
+      }
       if (!_disposed) notifyListeners(); // await 期间可能已 dispose
     }
   }
@@ -223,15 +236,32 @@ class SyncStore extends ChangeNotifier {
   }
 
   Future<bool> _cleanupDue() async {
-    final db = syncStatus.database;
-    final row = await (db.select(db.appMetadata)
-          ..where((t) => t.key.equals(AppMetadataKeys.lastCleanupAt)))
-        .getSingleOrNull();
-    if (row == null) return true; // 从未清理：到期
-    final last = DateTime.tryParse(row.value);
-    if (last == null) return true; // 损坏：到期（重跑）
-    return DateTime.now().difference(last) >=
-        const Duration(hours: AppConstants.cleanupIntervalHours);
+    try {
+      final db = syncStatus.database;
+      final row = await (db.select(db.appMetadata)
+            ..where((t) => t.key.equals(AppMetadataKeys.lastCleanupAt)))
+          .getSingleOrNull();
+      if (row == null) return true; // 从未清理：到期
+      final last = DateTime.tryParse(row.value);
+      if (last == null) return true; // 损坏：到期（重跑）
+      return DateTime.now().difference(last) >=
+          const Duration(hours: AppConstants.cleanupIntervalHours);
+    } on Exception catch (e) {
+      // DB 异常收敛为"到期"（保守触发清理，由 cleanup.run 内部守卫兜底）——
+      // 防 _cleanupDue 抛错使 runCleanupIfDue 以 error 完成（契约：恒返回
+      // AppResult，UI 可感知）。
+      _logSafe('清理限频查询失败：$e');
+      return true;
+    }
+  }
+
+  /// 安全 stderr 日志（stderr 管道断开时 writeln 会再抛——包一层防逃逸）。
+  static void _logSafe(String message) {
+    try {
+      stderr.writeln(message);
+    } catch (_) {
+      // 日志写入失败不影响结论。
+    }
   }
 
   // ---------------------------------------------------------------------------
