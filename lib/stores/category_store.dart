@@ -117,6 +117,10 @@ class CategoryStore extends ChangeNotifier {
       dataRevision.bump();
       reload();
     };
+    // 订阅 dataRevision：其他 store（Timer/Settings）与未来同步导入/undo
+    // 恢复 bump 时统一重建树缓存（不变式 9——防"分类改完统计/选择器不刷新"
+    // 的历史问题）。_reloadSeq 序号守卫天然去重并发 reload。
+    dataRevision.addListener(_reloadOnDataChange);
   }
 
   final CategoryRepository categories;
@@ -126,6 +130,11 @@ class CategoryStore extends ChangeNotifier {
   final CategoryChangeApplier _applier;
 
   bool _disposed = false;
+
+  void _reloadOnDataChange() {
+    if (_disposed) return;
+    reload();
+  }
 
   /// reload 序号守卫：_afterWrite/onApplied 以 fire-and-forget 触发 reload，
   /// 连续写/undo/redo 时并发 reload 可能乱序完成——仅应用最新一次启动的结果
@@ -325,8 +334,11 @@ class CategoryStore extends ChangeNotifier {
 
   /// 删除分类（递归软删子孙及 links，一条 undo 记录）。
   Future<AppResult<CategoryDeletion>> deleteCategory(String categoryId) async {
-    final category = _categoryById[categoryId];
-    if (category == null) {
+    // 直接按 id 查仓储（含删行）：不依赖树缓存新鲜度——新建后立即删除
+    //（reload 未完成）或外部变更致缓存过期时不得误报"分类不存在"。
+    final category =
+        await categories.categoryByIdIncludingDeleted(categoryId);
+    if (category == null || category.isDeleted) {
       return const AppFailure('分类不存在，无法删除');
     }
     final result = await categories.deleteCategory(category);
@@ -431,6 +443,7 @@ class CategoryStore extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    dataRevision.removeListener(_reloadOnDataChange);
     super.dispose();
   }
 }

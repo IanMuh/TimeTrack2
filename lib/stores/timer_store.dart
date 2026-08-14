@@ -183,9 +183,15 @@ class TimerStore extends ChangeNotifier {
       return failure;
     }
     final after = result.requireValue();
+    // 采集操作后旧运行实际状态（已结束 endAt）——undo after 快照需可校验。
+    TimeEntry? oldRunningAfter;
+    if (beforeRunning != null) {
+      oldRunningAfter =
+          await entries.entryByIdIncludingDeleted(beforeRunning.id);
+    }
     _lastAction = after;
     _runningEntry = after; // 写路径同步刷新运行条目缓存（时钟 tick 不触发 refresh）
-    _recordSwitchOrStop('切换', beforeRunning, after);
+    _recordSwitchOrStop('切换', beforeRunning, after, oldRunningAfter);
     _afterWrite();
     return result;
   }
@@ -197,9 +203,15 @@ class TimerStore extends ChangeNotifier {
     if (result case AppFailure<TimeEntry> failure) {
       return failure;
     }
+    // 采集操作后旧运行实际状态（已结束 endAt）——undo after 快照需可校验。
+    TimeEntry? oldRunningAfter;
+    if (beforeRunning != null) {
+      oldRunningAfter =
+          await entries.entryByIdIncludingDeleted(beforeRunning.id);
+    }
     _lastAction = result.requireValue();
     _runningEntry = result.requireValue(); // stop 后新运行（未分配）条目
-    _recordSwitchOrStop('停止', beforeRunning, result.requireValue());
+    _recordSwitchOrStop('停止', beforeRunning, result.requireValue(), oldRunningAfter);
     _afterWrite();
     return result;
   }
@@ -259,13 +271,16 @@ class TimerStore extends ChangeNotifier {
           UndoChange(
             // before=原条目完整时段（undo 恢复覆盖首段）+ 切分第二段软删
             //（新 id 段残留会与恢复的完整条目重叠，须一并清除）；
-            // after=空（redo 保持切分后状态——切分信息不重放）。
+            // after=操作后状态（原条目切分态 + 第二段）——redo 恢复切分后
+            // 状态，且 validate 可校验（非空 after 防冲突预检绕过）。
             before: TimerEntryChange([
               (entry: before, softDelete: false),
               for (final part in parts)
                 if (part.id != before.id) (entry: part, softDelete: true),
             ]),
-            after: const TimerEntryChange([]),
+            after: TimerEntryChange([
+              for (final part in parts) (entry: part, softDelete: false),
+            ]),
             applier: _applier,
           ),
         ],
@@ -310,7 +325,8 @@ class TimerStore extends ChangeNotifier {
         UndoChange(
           // before=原条目+邻居（undo 恢复二者，覆盖 merged）+ 合并产物
           // 跨日派生段软删（新 id 段残留会与恢复条目重叠，须一并清除）；
-          // after=空（redo 保持合并后状态——合并信息不重放）。
+          // after=操作后状态（merged 首段 + 邻居软删）——redo 恢复合并后
+          // 状态，且 validate 可校验（非空 after 防冲突预检绕过）。
           before: TimerEntryChange([
             (entry: before, softDelete: false),
             if (neighborValue != null) (entry: neighborValue, softDelete: false),
@@ -318,7 +334,10 @@ class TimerStore extends ChangeNotifier {
               if (row.id != before.id && row.id != neighborValue?.id)
                 (entry: row, softDelete: true),
           ]),
-          after: const TimerEntryChange([]),
+          after: TimerEntryChange([
+            (entry: merged.entry, softDelete: false),
+            if (neighborValue != null) (entry: neighborValue, softDelete: true),
+          ]),
           applier: _applier,
         ),
       ],
@@ -337,6 +356,7 @@ class TimerStore extends ChangeNotifier {
     if (result case AppFailure<void> failure) {
       return failure;
     }
+    _lastAction = null; // 删除：lastAction 置空（契约：删除为 null）
     undo.record(
       label: '删除',
       changes: [
@@ -358,9 +378,15 @@ class TimerStore extends ChangeNotifier {
   /// switch/stop 共用 undo 记录：
   /// - before（undo 恢复）：旧运行条目恢复未结束态 + **新运行条目软删**
   ///   （回到切换前状态——只有旧运行在运行，不残留新条目双运行）；
-  /// - after（redo）：空操作（保持切换后现状）。
+  /// - after（redo 恢复操作后状态）：旧运行已结束态 + 新运行恢复运行——
+  ///   非空 after 让 validate 可校验（防冲突预检绕过）。
   /// 旧运行条目为 null（无切换前运行）时无撤销意义（无操作）。
-  void _recordSwitchOrStop(String label, TimeEntry? beforeRunning, TimeEntry? after) {
+  void _recordSwitchOrStop(
+    String label,
+    TimeEntry? beforeRunning,
+    TimeEntry? after,
+    TimeEntry? oldRunningAfter,
+  ) {
     if (beforeRunning == null) {
       return;
     }
@@ -374,7 +400,14 @@ class TimerStore extends ChangeNotifier {
             if (after != null && after.id != beforeRunning.id)
               (entry: after, softDelete: true),
           ]),
-          after: const TimerEntryChange([]), // redo 无动作
+          after: TimerEntryChange([
+            // 旧运行操作后已结束态（redo 写回结束）。
+            if (oldRunningAfter != null)
+              (entry: oldRunningAfter, softDelete: false),
+            // 新运行条目（redo 恢复运行态）。
+            if (after != null && after.id != beforeRunning.id)
+              (entry: after, softDelete: false),
+          ]),
           applier: _applier,
         ),
       ],

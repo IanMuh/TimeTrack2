@@ -61,6 +61,19 @@ class StatsRepository {
       return const AppSuccess((slices: [], hasRunningEntry: false));
     }
     final now = effectiveNow ?? DateTime.now();
+    // 先查条目：范围为空时提前返回，避免无谓的参考数据加载
+    //（activities/categories/links 三全量查询）。
+    final List<TimeEntry> rangeEntries;
+    try {
+      rangeEntries = await entries.entriesForRange(start, end);
+    } catch (e) {
+      // 与其余查询一致收敛为 AppResult（entriesForRange 无内部 try/catch，
+      // DB 异常会直接抛出——不得穿透本方法的 AppResult 契约）。
+      return AppFailure('加载统计条目失败：$e');
+    }
+    if (rangeEntries.isEmpty) {
+      return const AppSuccess((slices: [], hasRunningEntry: false));
+    }
     final activityResult = await activities.activities();
     if (activityResult case AppFailure<List<Activity>> failure) {
       return AppFailure('加载统计活动失败：${failure.message}');
@@ -102,15 +115,10 @@ class StatsRepository {
 
     final slices = <StatsEntrySlice>[];
     var hasRunningEntry = false;
-    final List<TimeEntry> rangeEntries;
-    try {
-      rangeEntries = await entries.entriesForRange(start, end);
-    } catch (e) {
-      // 与其余查询一致收敛为 AppResult（entriesForRange 无内部 try/catch，
-      // DB 异常会直接抛出——不得穿透本方法的 AppResult 契约）。
-      return AppFailure('加载统计条目失败：$e');
-    }
     for (final entry in rangeEntries) {
+      if (entry.isAuto) {
+        continue; // 自动记录不计入统计（TimeEntry.isAuto 文档约定）
+      }
       if (entry.endAt == null) {
         hasRunningEntry = true;
       }
@@ -128,10 +136,9 @@ class StatsRepository {
       slices.add(
         StatsEntrySlice(
           activityId: entry.activityId,
-          activityLabel: activity?.name ??
-              (entry.activityNameSnapshot.trim().isEmpty
-                  ? entry.activityNameSnapshot
-                  : entry.activityNameSnapshot.trim()),
+          // 空白快照兜底统一交给 _groupKeys（unknownActivityLabel），
+          // 此处不做二次 trim 策略。
+          activityLabel: activity?.name ?? entry.activityNameSnapshot.trim(),
           activityColor: activity?.color ??
               entry.activityColorSnapshot ??
               AppConstants.defaultActivityColor,
@@ -182,7 +189,7 @@ class StatsRepository {
         accum.count += 1;
       }
     }
-    return [
+    final rows = [
       for (final entry in byKey.entries)
         StatsGroupRow(
           id: entry.key,
@@ -194,6 +201,14 @@ class StatsRepository {
           ancestorIds: entry.value.ancestorIds,
         ),
     ];
+    // 稳定排序（不依赖切片输入/插入序）：时长降序 + label 升序——相同数据
+    // 无论输入顺序如何行序确定（UI 列表 diff/测试可复现）。
+    rows.sort((a, b) {
+      final byDuration = b.totalDuration.compareTo(a.totalDuration);
+      if (byDuration != 0) return byDuration;
+      return a.label.compareTo(b.label);
+    });
+    return rows;
   }
 
   /// 切片 → 一个或多个聚合 key（categoryTree 每个祖先节点一个 key）。

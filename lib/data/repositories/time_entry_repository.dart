@@ -474,8 +474,9 @@ class TimeEntryRepository with RepositoryMappings {
   /// （同记录组合操作原子性，防 undo 半恢复）。
   ///
   /// [ops] 每项：`entry` 为恢复目标状态（softDelete=false 时写入该状态并推进
-  /// updatedAt；true 时软删该行——entry 提供 id 与快照）；更新推进时刻统一取
-  /// 单个 [at]（默认 now）。
+  /// updatedAt——**显式清空 deletedAt 保证恢复为存活态**，不依赖调用方快照
+  /// 是否携带软删时间戳；true 时软删该行——entry 提供 id 与快照）；更新推进
+  /// 时刻统一取单个 [at]（默认 now）。
   Future<AppResult<void>> restoreEntriesForUndo(
     List<({TimeEntry entry, bool softDelete})> ops, {
     DateTime? at,
@@ -486,7 +487,11 @@ class TimeEntryRepository with RepositoryMappings {
         for (final op in ops) {
           final target = op.softDelete
               ? op.entry.copyWith(deletedAt: now, updatedAt: now)
-              : op.entry.copyWith(updatedAt: now);
+              : op.entry.copyWith(
+                  deletedAt: null,
+                  clearDeletedAt: true,
+                  updatedAt: now,
+                );
           await _saveEntryRows(database, target);
         }
       });

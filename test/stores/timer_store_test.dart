@@ -378,13 +378,12 @@ void main() {
           isTrue);
     });
 
-    test('switch undo：旧运行恢复未结束态；redo 保持现状', () async {
+    test('switch undo：旧运行恢复未结束态；redo 恢复切换后状态', () async {
       final a = (await h.activities.createActivity(name: 'A', color: 0))
           .requireValue();
       final b = (await h.activities.createActivity(name: 'B', color: 0))
           .requireValue();
       await h.timer.switchToActivity(a.id);
-      final aEntry = await h.entries.runningEntry();
       await h.timer.switchToActivity(b.id);
       expect((await h.entries.runningEntry())!.activityId, b.id);
 
@@ -393,9 +392,10 @@ void main() {
       expect(restored!.activityId, a.id);
       expect(restored.isRunning, isTrue);
 
-      await h.undo.redo(); // redo 无动作：保持 A 运行
-      expect((await h.entries.runningEntry())!.activityId, a.id);
-      expect(aEntry, isNotNull);
+      await h.undo.redo(); // redo 恢复切换后状态：B 重新运行、A 结束
+      final afterRedo = await h.entries.runningEntry();
+      expect(afterRedo!.activityId, b.id);
+      expect(afterRedo.isRunning, isTrue);
     });
 
     test('split undo：恢复原条目完整时段；redo 保持切分后状态', () async {
@@ -425,10 +425,15 @@ void main() {
       expect(surviving, hasLength(1)); // 仅恢复的原条目，无残留段
       expect(surviving.single.id, added.id);
 
-      await h.undo.redo(); // redo 无动作：保持恢复后的完整时段
+      await h.undo.redo(); // redo 恢复切分后状态：原条目切分态 + 第二段
       final afterRedo = await h.entries.entryByIdIncludingDeleted(added.id);
       expect(afterRedo!.isDeleted, isFalse);
-      expect(afterRedo.endAt, DateTime(2026, 8, 14, 11));
+      expect(afterRedo.endAt, DateTime(2026, 8, 14, 10, 30)); // 首段切分态
+      final secondSegments = (await h.entries.allEntries())
+          .where((e) => !e.isDeleted && e.activityId == a.id && e.id != added.id)
+          .toList();
+      expect(secondSegments, hasLength(1)); // 第二段恢复存活
+      expect(secondSegments.single.startAt, DateTime(2026, 8, 14, 10, 30));
     });
 
     test('merge undo：恢复原条目与邻居；redo 保持合并后状态', () async {
@@ -458,11 +463,12 @@ void main() {
       expect(firstBack.endAt, DateTime(2026, 8, 14, 11));
       expect(secondBack!.isDeleted, isFalse);
 
-      await h.undo.redo(); // redo 无动作：保持恢复后的两条独立条目
-      expect((await h.entries.entryByIdIncludingDeleted(first.id))!.isDeleted,
-          isFalse);
-      expect((await h.entries.entryByIdIncludingDeleted(second.id))!.isDeleted,
-          isFalse);
+      await h.undo.redo(); // redo 恢复合并后状态：first 合并态 + 邻居软删
+      final firstAfter = await h.entries.entryByIdIncludingDeleted(first.id);
+      expect(firstAfter!.isDeleted, isFalse);
+      expect(firstAfter.endAt, DateTime(2026, 8, 14, 12)); // 合并后 endAt
+      final secondAfter = await h.entries.entryByIdIncludingDeleted(second.id);
+      expect(secondAfter!.isDeleted, isTrue); // 邻居软删
     });
 
     test('undo 冲突校验：目标行已删时 redo 拒绝', () async {

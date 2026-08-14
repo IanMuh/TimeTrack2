@@ -79,6 +79,10 @@ class StatsStore extends ChangeNotifier {
   /// 并发请求序号：仅最新请求的结果写入快照（防旧请求覆盖新请求）。
   int _computeSeq = 0;
 
+  /// 已 dispose：compute 的 await 恢复可能晚于 dispose，须守卫
+  ///（不写状态/不通知，与同模块其他 store 一致）。
+  bool _disposed = false;
+
   /// 最近一次计算失败原因（供 UI/日志展示）；失效时一并清空。
   String? _lastError;
 
@@ -153,10 +157,10 @@ class StatsStore extends ChangeNotifier {
       total += slice.duration;
     }
 
-    // 结果提交守卫：仅当数据未变（revision 同基线）且本请求仍是最新
-    //（seq 未被更新的请求超过）时写入——否则丢弃（返回当前有效快照，
-    // 若参数匹配）或 null（无有效快照），由下次 compute 重算。
-    if (_dataRevision.value != revisionAtStart || seq != _computeSeq) {
+    // 结果提交守卫：仅当数据未变（revision 同基线）、本请求仍是最新
+    //（seq 未被更新的请求超过）且未 dispose 时写入——否则丢弃（返回当前
+    // 有效快照，若参数匹配）或 null（无有效快照），由下次 compute 重算。
+    if (_disposed || _dataRevision.value != revisionAtStart || seq != _computeSeq) {
       return _cachedMatching(start, end, dimension);
     }
     _lastError = null;
@@ -186,7 +190,7 @@ class StatsStore extends ChangeNotifier {
     required DateTime end,
     required StatsDimension dimension,
   }) {
-    if (_dataRevision.value != revisionAtStart || seq != _computeSeq) {
+    if (_disposed || _dataRevision.value != revisionAtStart || seq != _computeSeq) {
       return _cachedMatching(start, end, dimension);
     }
     _lastError = message;
@@ -234,6 +238,7 @@ class StatsStore extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     _dataRevision.removeListener(_invalidate);
     super.dispose();
   }

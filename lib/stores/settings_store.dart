@@ -42,15 +42,17 @@ class SettingsChangeApplier implements UndoApplier {
     if (target case SettingsChange change) {
       final result = await _settings.save(change.settings);
       if (result.isSuccess) {
-        onApplied?.call();
+        // 回调携带恢复后的实体：store 同步 _current（避免 fire-and-forget
+        // reload 的竞态——reload 失败/dispose 时 _current 与库不一致）。
+        onApplied?.call(result.requireValue());
       }
       return result;
     }
     return const AppFailure('未知恢复目标类型');
   }
 
-  /// 恢复写库成功后的回调（store 注入：bump dataRevision）。
-  void Function()? onApplied;
+  /// 恢复写库成功后的回调（store 注入：bump dataRevision + 同步 _current）。
+  void Function(ProfileSettings saved)? onApplied;
 }
 
 /// 设置 store。
@@ -60,10 +62,11 @@ class SettingsStore extends ChangeNotifier {
     required this.undo,
     required this.dataRevision,
   }) : _applier = SettingsChangeApplier(settings) {
-    _applier.onApplied = () {
+    _applier.onApplied = (saved) {
       if (_disposed) return;
+      _current = saved; // 恢复写库后同步内存配置（与库一致）
       dataRevision.bump();
-      reload(); // undo 恢复写库后刷新当前配置（_current 同步）
+      notifyListeners();
     };
   }
 
@@ -74,6 +77,7 @@ class SettingsStore extends ChangeNotifier {
   final SettingsChangeApplier _applier;
 
   bool _disposed = false;
+  int _reloadSeq = 0; // reload 请求序号（并发乱序防护）
 
   ProfileSettings? _current;
 
@@ -83,11 +87,12 @@ class SettingsStore extends ChangeNotifier {
   /// 加载配置（默认值回退）。
   Future<void> reload() async {
     if (_disposed) return;
+    final seq = ++_reloadSeq;
     final result = await settings.settings();
     if (result case AppFailure<ProfileSettings> _) {
       return; // 加载失败保持旧值（默认值由仓储兜底）
     }
-    if (_disposed) return; // await 期间可能已 dispose
+    if (_disposed || seq != _reloadSeq) return; // await 期间 dispose/更新的 reload
     _current = result.requireValue();
     notifyListeners();
   }
@@ -105,7 +110,9 @@ class SettingsStore extends ChangeNotifier {
     if (_disposed) return result; // await 期间可能已 dispose：不写缓存/不通知
     final saved = result.requireValue();
     _current = saved;
-    if (before != null && before != saved) {
+    // 业务字段有变化才记 undo（saved.updatedAt 恒推进为 now，直接 `!=`
+    // 会使 no-op 保存也入栈——仅回滚时间戳，污染 undo/redo 栈）。
+    if (before != null && !_sameBusinessFields(before, saved)) {
       undo.record(
         label: '修改设置',
         changes: [
@@ -120,6 +127,17 @@ class SettingsStore extends ChangeNotifier {
     dataRevision.bump();
     notifyListeners();
     return result;
+  }
+
+  /// 业务字段相等判定（排除 updatedAt/userId——恢复写库推进时间戳不代表
+  /// 配置内容变化）。
+  static bool _sameBusinessFields(ProfileSettings a, ProfileSettings b) {
+    return a.reminderMinutes == b.reminderMinutes &&
+        a.reminderIntervalMinutes == b.reminderIntervalMinutes &&
+        a.reminderMethod == b.reminderMethod &&
+        a.reminderTimeOfDayMinutes == b.reminderTimeOfDayMinutes &&
+        a.mergeNeighborThresholdMinutes == b.mergeNeighborThresholdMinutes &&
+        a.timezone == b.timezone;
   }
 
   @override

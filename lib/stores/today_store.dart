@@ -75,7 +75,9 @@ class TodayStore extends ChangeNotifier {
     final seq = ++_requestSeq;
     final now = _now();
     final todayStart = now.startOfDay;
-    final tomorrowStart = todayStart.add(const Duration(days: 1));
+    // DST 安全的下一天本地零点（固定 24h add 在切换日偏移一小时——
+    // 与 rolloverRunningEntriesIfNeeded 的 DateTime(year, month, day+1) 一致）。
+    final tomorrowStart = DateTime(todayStart.year, todayStart.month, todayStart.day + 1);
     try {
       final loaded = await entries.entriesForRange(todayStart, tomorrowStart);
       if (_disposed || seq != _requestSeq) return;
@@ -97,11 +99,16 @@ class TodayStore extends ChangeNotifier {
   /// 今日总时长（运行中条目截至 now）。
   Duration totalDuration({DateTime? effectiveNow}) {
     final now = effectiveNow ?? _now();
+    final todayStart = now.startOfDay;
     var total = Duration.zero;
     for (final entry in _today) {
+      // 起点钳制到今日零点：跨日运行条目（如昨日 23:00 起未滚转）只计
+      // 今日时段，防昨日时段高估进今日总时长。
+      final start =
+          entry.startAt.isBefore(todayStart) ? todayStart : entry.startAt;
       final end = entry.endAt ?? now;
-      if (end.isAfter(entry.startAt)) {
-        total += end.difference(entry.startAt);
+      if (end.isAfter(start)) {
+        total += end.difference(start);
       }
     }
     return total;
