@@ -364,7 +364,14 @@ void main() {
       expect(store.snapshot, same(resultB));
     });
 
-    test('过期失败不触碰 store 状态（不清快照/不覆盖错误/不通知）', () async {
+    test('并发同参但快照含运行中条目：旧请求返回 null（时间敏感不复用）', () async {
+      final a = (await h.activities.createActivity(name: 'A', color: 0))
+          .requireValue();
+      final running = (await h.entries.switchToActivity(a.id)).requireValue();
+      // 范围覆盖运行条目起点（startAt = 真实 now），快照将含运行中条目。
+      final start = running.startAt.subtract(const Duration(hours: 1));
+      final end = running.startAt.add(const Duration(hours: 1));
+
       final gated = _GatedStatsRepository(
         activities: h.activities,
         categories: h.categories,
@@ -377,15 +384,61 @@ void main() {
         revision.dispose();
       });
 
-      // 先成功计算一次，写入快照。
+      final gateA = Completer<void>();
+      final gateB = Completer<void>();
+      gated.gates.add(gateA);
+      gated.gates.add(gateB);
+      final futureA = store.compute(
+        start: start,
+        end: end,
+        dimension: StatsDimension.activity,
+      );
+      await pumpEventQueue();
+      final futureB = store.compute(
+        start: start,
+        end: end,
+        dimension: StatsDimension.activity,
+      );
+      await pumpEventQueue();
+
+      gateB.complete(); // 新请求 B 先完成 → 提交含运行中条目的快照
+      final resultB = await futureB;
+      expect(resultB!.containsRunningEntry, isTrue);
+
+      // 旧请求 A 晚完成：_cachedMatching 因 !containsRunningEntry 不匹配
+      // → 返回 null（不得复用时间敏感快照）。
+      gateA.complete();
+      final resultA = await futureA;
+      expect(resultA, isNull);
+      expect(store.snapshot, same(resultB));
+    });
+
+    test('过期失败不触碰 store 状态（不清快照/不覆盖错误/不额外通知）', () async {
+      final gated = _GatedStatsRepository(
+        activities: h.activities,
+        categories: h.categories,
+        entries: h.entries,
+      );
+      final revision = DataRevision();
+      final store = StatsStore(repository: gated, dataRevision: revision);
+      addTearDown(() {
+        store.dispose();
+        revision.dispose();
+      });
+
+      var notified = 0;
+      store.addListener(() => notified++);
+      // 先成功计算一次，写入快照（提交通知 +1）。
       final ok = await store.compute(
         start: DateTime(2026, 8, 14, 10),
         end: DateTime(2026, 8, 14, 12),
         dimension: StatsDimension.activity,
       );
       expect(ok, isNotNull);
+      expect(notified, 1);
 
-      // 第二次 compute 挂起，期间 bump revision（清缓存），随后失败放行。
+      // 第二次 compute 挂起，期间 bump revision（清缓存 + 通知 +1），随后
+      // 失败放行——过期失败路径不得额外通知/写错误。
       final gate = Completer<void>();
       gated.gates.add(gate);
       gated.failOnNext = true;
@@ -396,6 +449,7 @@ void main() {
       );
       await pumpEventQueue();
       revision.bump();
+      expect(notified, 2); // bump 触发 invalidate 通知
       gate.complete();
       final result = await failingFuture;
 
@@ -403,6 +457,34 @@ void main() {
       expect(result, isNull);
       expect(store.snapshot, isNull); // 快照已被 bump 清空，未被失败覆盖
       expect(store.lastError, isNull); // 错误未被写入
+      expect(notified, 2); // 失败路径不额外通知
+    });
+
+    test('未过期失败：写入 lastError、清快照并通知', () async {
+      final gated = _GatedStatsRepository(
+        activities: h.activities,
+        categories: h.categories,
+        entries: h.entries,
+      );
+      final revision = DataRevision();
+      final store = StatsStore(repository: gated, dataRevision: revision);
+      addTearDown(() {
+        store.dispose();
+        revision.dispose();
+      });
+
+      var notified = 0;
+      store.addListener(() => notified++);
+      gated.failOnNext = true;
+      final result = await store.compute(
+        start: DateTime(2026, 8, 14, 10),
+        end: DateTime(2026, 8, 14, 12),
+        dimension: StatsDimension.activity,
+      );
+      expect(result, isNull);
+      expect(store.lastError, '注入失败'); // 失败原因写入
+      expect(store.snapshot, isNull); // 快照清空
+      expect(notified, 1); // 失败提交通知一次
     });
 
     test('dispose 后不再响应 dataRevision（不再清缓存）', () async {
