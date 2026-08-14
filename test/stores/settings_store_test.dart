@@ -103,9 +103,11 @@ void main() {
       );
       await store.reload();
       store.dispose();
+      final currentBeforeSave = store.current;
       // dispose 后 save 仍完成写库但不触碰已释放 store（await 后查 _disposed）。
-      final result = await store.save(store.current!.copyWith(reminderMinutes: 60));
+      final result = await store.save(currentBeforeSave!.copyWith(reminderMinutes: 60));
       expect(result.isSuccess, isTrue); // 写库本身成功
+      expect(store.current, currentBeforeSave); // 不写缓存：_current 保持 dispose 前快照
       await store.reload(); // dispose 后静默返回（不崩）
     });
   });

@@ -226,6 +226,9 @@ void main() {
         primaryCategoryId: c1.id,
       )).requireValue();
       expect(saved, hasLength(1));
+      expect(saved.single.categoryId, c1.id); // 字段级断言（数量恰为 1 但内容错也拦截）
+      expect(saved.single.isPrimary, isTrue);
+      expect(saved.single.isDeleted, isFalse);
 
       await h.undo.undo();
       final afterUndo = (await h.categories.links(includeDeleted: true))
@@ -275,13 +278,35 @@ void main() {
 
     test('缓存集合不可变（外部篡改抛错）', () async {
       await h.store.createCategory(name: 'X', color: 0);
+      await h.store.createCategory(name: 'Y', color: 0, parentId: null);
       await h.settleCache();
+      final topId = h.store.all.first.id;
       expect(
         () => h.store.all.add(h.store.all.first),
         throwsUnsupportedError,
       );
       expect(
         () => h.store.categoryById['missing'] = h.store.categoryById.values.first,
+        throwsUnsupportedError,
+      );
+      expect(
+        () => h.store.links.removeAt(0),
+        throwsUnsupportedError,
+      );
+      expect(
+        () => h.store.childrenByParent[null]!.add(h.store.childrenByParent[null]!.first),
+        throwsUnsupportedError,
+      );
+      expect(
+        () => h.store.childrenByParent['x'] = const [],
+        throwsUnsupportedError,
+      );
+      expect(
+        () => h.store.descendantsOf[topId]!.add('x'),
+        throwsUnsupportedError,
+      );
+      expect(
+        () => h.store.ancestorChains[topId]!.add('x'),
         throwsUnsupportedError,
       );
     });

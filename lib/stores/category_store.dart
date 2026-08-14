@@ -149,11 +149,11 @@ class CategoryStore extends ChangeNotifier {
   Map<String, List<String>> get ancestorChains => _ancestorChains;
   Map<String, List<String>> _ancestorChains = const {};
 
-  /// 全量未删分类（缓存视图，不可变——防外部绕过写路径篡改缓存）。
-  List<ActivityCategory> get all => List.unmodifiable(_all);
+  /// 全量未删分类（缓存视图；赋值时不可变，getter 零拷贝）。
+  List<ActivityCategory> get all => _all;
 
-  /// 全量未删链接（缓存视图，不可变）。
-  List<ActivityCategoryLink> get links => List.unmodifiable(_links);
+  /// 全量未删链接（缓存视图；赋值时不可变，getter 零拷贝）。
+  List<ActivityCategoryLink> get links => _links;
 
   /// 加载分类/链接并重建树索引（启动、数据变更后调用）。
   Future<void> reload() async {
@@ -169,8 +169,8 @@ class CategoryStore extends ChangeNotifier {
       return;
     }
     if (_disposed || seq != _reloadSeq) return;
-    _all = categoriesResult.requireValue();
-    _links = linksResult.requireValue();
+    _all = List<ActivityCategory>.unmodifiable(categoriesResult.requireValue());
+    _links = List<ActivityCategoryLink>.unmodifiable(linksResult.requireValue());
     _rebuildIndexes();
     notifyListeners();
   }
