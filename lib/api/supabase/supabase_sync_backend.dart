@@ -300,8 +300,16 @@ class SupabaseSyncBackend implements SyncBackend {
       }
       return result;
     } on TimeoutException {
-      // 登出网络段挂起：返回可读失败，不清会话（下次可重试）。
-      return const AppFailure('登出超时，请稍后重试');
+      // **登出网络段挂起（r 复审修正）**：`Future.timeout` 不取消底层 gotrue
+      // signOut，且 gotrue `_signOut` 先同步 `_removeSession()`（清本地持久化
+      // 会话并广播 SIGNED_OUT）再发 /logout 网络请求——超时触发时本地会话
+      // **已被提前清空**、authStateStream 已发出登出事件（"超时不清本地会话"
+      // 的前提不成立）。故超时分支也须 reset（释放懒加载引用；此时本地会话
+      // 已清除，reset 安全且必要），否则 UI 已登出而旧 client/gotrue 订阅
+      // 残留（与 signOut 成功路径的行为对齐）。返回失败提示"可能已登出"
+      //（调用方按失败处理，但状态已清理，不会双重登出）。
+      reset();
+      return const AppFailure('登出超时，本地会话已清除，请重试');
     }
   }
 

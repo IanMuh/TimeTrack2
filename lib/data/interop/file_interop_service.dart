@@ -60,19 +60,25 @@ class FileInteropService {
         if (picked == null) return const AppFailure('未选择保存位置');
         targetPath = picked;
       }
-      // **原子写入（r 修复）**：先写同目录临时文件 + flush，成功后再改名覆盖
-      // 目标——写入中途崩溃/断电不会留下截断的 .timetrack.json；直接
-      // `writeAsString` 到目标会因写入中断产生损坏文件且无法区分新旧。
-      // Windows 上 rename 到已存在目标会失败（FileSystemException）——先删
-      // 目标再 rename（覆盖语义；删除与 rename 之间的小窗口属可接受边界，
-      // 相比"写入中断留下截断文件"已显著改善）。
+      // **原子写入（r 修复 + 复审修正）**：先写同目录临时文件 + flush，再
+      // rename 覆盖目标——写入中途崩溃/断电不会留下截断的 .timetrack.json。
+      // **POSIX 优先直接 rename（r 复审修正）**：macOS/Linux 上 `rename` 本身
+      // 即可原子覆盖已存在文件；无条件先 delete 会在"删除后、rename 前"引入
+      // 崩溃/权限失败导致原文件永久丢失的窗口。先直接 rename，仅当目标已存在
+      // 抛 FileSystemException（Windows 语义：rename 不覆盖）时再 delete+rename。
       final tmpPath = '$targetPath.tmp';
       final tmpFile = File(tmpPath);
       await tmpFile.writeAsString(text, encoding: utf8, flush: true);
-      if (await File(targetPath).exists()) {
-        await File(targetPath).delete();
+      try {
+        await tmpFile.rename(targetPath);
+      } on FileSystemException {
+        // Windows：rename 到已存在目标失败——先删目标再 rename（覆盖语义；
+        // 删除与 rename 之间的小窗口属 Windows 特有边界，POSIX 路径已避免）。
+        if (await File(targetPath).exists()) {
+          await File(targetPath).delete();
+        }
+        await tmpFile.rename(targetPath);
       }
-      await tmpFile.rename(targetPath);
       return AppSuccess(targetPath);
     } catch (e) {
       return AppFailure('导出失败：$e');
@@ -141,7 +147,9 @@ class FileInteropService {
 
   /// 导入路径解析：符号链接解析 + 常规文件校验，返回**最终读取路径**。
   ///
-  /// 约束：目标存在且为**常规文件**（解析符号链接后；目录/FIFO/缺失拒绝）。
+  /// 约束：目标存在且为**常规文件**（解析符号链接后；目录/FIFO/缺失拒绝）
+  /// + **解析后仍以 `.json` 结尾**（符号链接可指向任意常规文件，绕过外层
+  /// `path.endsWith('.json')` 检查——与导出 `_resolvedExportPath` 对称）。
   /// 读取用解析后路径消除 TOCTOU（校验路径 == 实际读取路径）。
   static AppResult<String> _resolvedImportPath(String path) {
     try {
@@ -150,6 +158,9 @@ class FileInteropService {
         return AppFailure('导入文件不存在：$path');
       }
       final resolved = File(path).resolveSymbolicLinksSync();
+      if (!resolved.endsWith('.json')) {
+        return const AppFailure('导入路径解析后不是 .json 文件');
+      }
       if (FileSystemEntity.typeSync(resolved, followLinks: false) !=
           FileSystemEntityType.file) {
         return AppFailure('导入路径不是常规文件：$path');

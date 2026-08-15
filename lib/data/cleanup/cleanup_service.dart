@@ -637,12 +637,39 @@ class CleanupService with RepositoryMappings {
     }
     final deletable = expired.where((id) => !blocked.contains(id)).toList();
     if (deletable.isEmpty) return 0;
+    // **跨用户子引用排除（r 复审修正）**：同用户 UPDATE 会把同用户存活子的
+    // parentId 置空（下方先置空后删除），不阻塞删除；**跨用户**存活子（parentId
+    // 指向将删分类但 userId 不同）不会被同用户 UPDATE 处理，其引用仍指向将删
+    // 行——`PRAGMA foreign_keys=ON` 下 parentId 自引用 FK（NO ACTION）会使
+    // 物理删除父行抛 FOREIGN KEY constraint failed、整个清理事务回滚且每次
+    // 清理重复失败。删除前排除仍被跨用户子引用的父分类（本地全未归属
+    // userId==null 时无跨用户引用，跳过检查）。
+    final crossUserBlocked = <String>{};
+    if (userId != null) {
+      for (final chunk in _chunks(deletable)) {
+        final rows =
+            await (database.selectOnly(database.activityCategories)
+                  ..addColumns([database.activityCategories.parentId])
+                  ..where(
+                    database.activityCategories.parentId.isIn(chunk) &
+                        database.activityCategories.deletedAt.isNull() &
+                        database.activityCategories.userId.isNotValue(userId),
+                  ))
+                .get();
+        crossUserBlocked.addAll(
+          rows.map((r) => r.read(database.activityCategories.parentId)!),
+        );
+      }
+    }
+    final finalDeletable =
+        deletable.where((id) => !crossUserBlocked.contains(id)).toList();
+    if (finalDeletable.isEmpty) return 0;
     // parentId 置空：引用将删分类的所有行（含软删——置空无害且防 FK）。
     // **拆两个 UPDATE（r12）**：软删未传播子（deleted_at >= cutoff）本轮不删、
     // 留待下一轮——刷新其 updatedAt 会伪造同步增量（墓碑以 update 形式先于
     // delete 传播/已传播墓碑重复推送，增加远端合并歧义）。仅存活子刷新
     // updatedAt（清理造成真实变更），墓碑子只置 parentId 不动 updatedAt。
-    for (final chunk in _chunks(deletable)) {
+    for (final chunk in _chunks(finalDeletable)) {
       // 1) 存活子（deletedAt IS NULL）：置空 + 刷新 updatedAt。
       // **userId 分区（r9）**：两条 UPDATE 均须限定同用户行——防共享设备上
       // 跨用户子分类（parentId 指向本用户将删分类）被本用户清理误改
@@ -672,7 +699,7 @@ class CleanupService with RepositoryMappings {
           .write(ActivityCategoriesCompanion(parentId: const Value(null)));
     }
     var count = 0;
-    for (final chunk in _chunks(deletable)) {
+    for (final chunk in _chunks(finalDeletable)) {
       count += await (database.delete(
         database.activityCategories,
       )..where((t) => t.id.isIn(chunk))).go();

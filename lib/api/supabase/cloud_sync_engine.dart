@@ -451,29 +451,20 @@ class CloudSyncEngine {
         // 比较恒不等、**所有**远端行被静默跳过且无报错（表变更永久漏拉）。
         // 与网关 fetchRemoteUpdatedAt 的 fail-stop 语义对齐：非 String 直接抛错。
         final rowUser = row['user_id'];
-        // **类型 fail-fast（r 修复）**：`rowUser` 为 Object?——若网关/实现把
-        // user_id 解码为非 String（数字/UUID 对象/mock），与 String 的 userId
-        // 比较恒不等、**所有**远端行被静默跳过且无报错（表变更永久漏拉）。
-        // 与网关 fetchRemoteUpdatedAt 的 fail-stop 语义对齐：非 String 直接抛错。
         if (rowUser != null && rowUser is! String) {
           throw StateError('拉取表 $table 的 user_id 类型异常：$rowUser');
         }
         if (rowUser != null && rowUser != userId) {
           continue;
         }
-        if (skipWhen != null && await skipWhen(row)) {
-          continue; // 跳过：不计 count，也不推进 maxSeen。
-        }
-        final applied = await apply(row);
-        if (applied case AppFailure<void> failure) {
-          throw StateError('拉取表 $table 失败：${failure.message}');
-        }
-        // **单行脏数据隔离（r 修复）**：updated_at 缺失/非 String/格式非法时
-        // 跳过该行（记日志）而非抛错——否则一条远端脏数据会让整轮同步永久
+        // **单行脏数据隔离（r 修复）前置**：updated_at 缺失/非 String/格式非法
+        // 时跳过该行（记日志）而非抛错——否则一条远端脏数据会让整轮同步永久
         // 失败（外层 catch 只 markFailure 不清游标，下轮重拉同一行再抛错，
         // 全部 7 张表被阻塞且只能手动 reset 恢复）。跳过不计 count/maxSeen
         //（游标不越过脏行，下轮重试）。
-        count += 1;
+        // **必须先于 apply（r 复审修正）**：apply 回调在 fromMap(row) 内用
+        // readDateTime 严格解析 updated_at——非法值会在 apply 阶段抛
+        // FormatException，走不到下方跳过分支，须在 apply 前完成校验。
         final rawUpdatedAt = row['updated_at'];
         final rowUpdatedAt = rawUpdatedAt is String
             ? DateTime.tryParse(rawUpdatedAt)
@@ -485,6 +476,14 @@ class CloudSyncEngine {
           );
           continue;
         }
+        if (skipWhen != null && await skipWhen(row)) {
+          continue; // 跳过：不计 count，也不推进 maxSeen。
+        }
+        final applied = await apply(row);
+        if (applied case AppFailure<void> failure) {
+          throw StateError('拉取表 $table 失败：${failure.message}');
+        }
+        count += 1;
         maxSeen = _laterOf(maxSeen, rowUpdatedAt);
       }
       if (!result.hasMore) break;

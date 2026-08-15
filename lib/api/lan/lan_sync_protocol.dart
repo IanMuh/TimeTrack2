@@ -230,13 +230,16 @@ bool _isPrivateIpv4(int a, int b, int c, int d) {
     // `http:` 前缀，使其与 `http://` 形态走同一归一化路径。
     text = text.substring('http:'.length);
   } else if (_schemePrefixRe.hasMatch(text) &&
+      ':'.allMatches(text).length >= 2 &&
       !_isIpv6Like(text) &&
       !_schemePrefixHasDot(text)) {
     // 其它 scheme 前缀（https:/ftp:/ws: 等）明确拒绝（防明文静默降级）。
-    // **两类排除**：
+    // **仅多冒号形态（r 复审修正）**：单冒号 `localhost:9000` 的 `localhost`
+    // 同样匹配 scheme 正则，但属合法 host:port（走下方 colonCount==1 分支）——
+    // 只有 ≥2 冒号（`https:192.168.1.5:9000`）才可能被误判为裸 IPv6 放行，
+    // 须拒绝。**两类排除**：
     // - **裸 IPv6**（`fe80::1` 的 `fe80:` 匹配 scheme 正则但属合法主机）；
-    // - **含点前缀**（`mypc.local.:9000` 的 `mypc.local` 是 FQDN 尾点主机
-    //   名，不是 scheme——scheme 为无点的单 label）。
+    // - **含点前缀**（`mypc.local:9000` 的 `mypc.local` 是 FQDN 主机名）。
     return null;
   }
   // 截断到路径/query/fragment 中最早出现的位置（`/`、`?`、`#` 任一即停）。
@@ -286,10 +289,18 @@ final _schemePrefixRe = RegExp(r'^[a-z][a-z0-9+.-]*:');
 
 /// 是否为**裸 IPv6 形态**（非方括号、含多个冒号，如 `fe80::1`）——scheme
 /// 前缀判定须排除（`fe80:` 匹配 scheme 正则但属合法 IPv6 主机）。
+/// **收紧判定（r 复审修正）**：IPv6 字面量只含十六进制数字与冒号——`https:
+/// 192.168.1.5:9000` 虽含 2 冒号但含 `s/t/p` 与点号，不是 IPv6，须按 scheme
+/// 前缀拒绝。
 bool _isIpv6Like(String text) {
   final colonCount = ':'.allMatches(text).length;
-  return colonCount >= 2 && !text.startsWith('[');
+  return colonCount >= 2 &&
+      !text.startsWith('[') &&
+      _ipv6CharsRe.hasMatch(text);
 }
+
+/// 裸 IPv6 字符合法集（十六进制数字 + 冒号 + 可能的 IPv4 尾段点）。
+final _ipv6CharsRe = RegExp(r'^[0-9a-f:.]+$');
 
 /// scheme 前缀是否含点（`mypc.local.` 的 `mypc.local` 是 FQDN 尾点主机名而非
 /// scheme——RFC 3986 scheme 为无点的单 label）。

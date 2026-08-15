@@ -418,13 +418,16 @@ class WindowsInstaller {
     }
 
     // ---- 安装阶段（备份已确认完整，失败才走回滚）----
-    // **数据/程序目录分离校验（r 修复）**：`_clearProgramDir` 会递归清空
-    // programDir 下除 staging/备份外的一切——若 dataDir 配置在程序目录内部，
-    // 清空会把用户数据目录（含待安装标记/本地数据）连带删除。规范化绝对路径
-    // 按前缀判定包含关系（反斜杠→正斜杠、尾部裁剪后比较），含包含关系直接
+    // **数据/程序目录分离校验（r 修复 + 复审修正）**：`_clearProgramDir` 会
+    // 递归清空 programDir 下除 staging/备份外的一切——若 dataDir 配置在程序
+    // 目录内部，清空会把用户数据目录（含待安装标记/本地数据）连带删除。
+    // 规范化绝对路径按前缀判定包含关系（反斜杠→正斜杠、尾部裁剪），
+    // **大小写不敏感**（Windows 路径语义，与上方 staging 校验的 toLowerCase
+    // 一致——`C:\Program Files\App` 与 `c:\program files\app` 同一目录，
+    // 仅大小写不同的 dataDir 同样属"位于程序目录内部"），含包含关系直接
     // 失败（未改动程序目录）。
-    final programNorm = _normalizedAbsolutePath(programDir);
-    final dataNorm = _normalizedAbsolutePath(dataDir);
+    final programNorm = _normalizedAbsolutePath(programDir).toLowerCase();
+    final dataNorm = _normalizedAbsolutePath(dataDir).toLowerCase();
     if (dataNorm == programNorm ||
         dataNorm.startsWith('$programNorm/')) {
       return const AppFailure(
