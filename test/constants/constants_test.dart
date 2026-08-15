@@ -75,7 +75,8 @@ void main() {
       expect(AppConstants.defaultReminderTimeOfDayMinutes, 540);
       expect(AppConstants.defaultMergeNeighborThresholdMinutes, 1);
       expect(AppConstants.lanDefaultPort, 8787);
-      expect(AppConstants.farFutureDate, DateTime(2100));
+      // UTC 构造（防哨兵瞬时随时区漂移，见 app_constants 注释）。
+      expect(AppConstants.farFutureDate, DateTime.utc(2100));
     });
 
     test('maxDateTime 哨兵：晚于任何实际业务时间', () {
@@ -133,13 +134,13 @@ void main() {
   });
 
   group('AppBuildConfig', () {
-    test('dart-define 读取与默认值', () {
-      expect(
-        AppBuildConfig.getString('SOME_UNSET_KEY', defaultValue: 'fallback'),
-        'fallback',
-      );
-      expect(AppBuildConfig.getBool('SOME_UNSET_BOOL', defaultValue: true),
-          isTrue);
+    test('const 配置字段：未注入时为空（默认离线/默认清单地址）', () {
+      // String.fromEnvironment 仅在 const 上下文解析 dart-define——未定义
+      // 时默认值为空串；isSupabaseConfigured 据此为 false（离线兜底）。
+      expect(AppBuildConfig.supabaseUrl, '');
+      expect(AppBuildConfig.supabaseAnonKey, '');
+      expect(AppBuildConfig.updateManifestUrl, '');
+      expect(AppBuildConfig.isSupabaseConfigured(), isFalse);
     });
 
     test('parseBool：大小写归一化/显式 true·false/无法识别回退默认（纯函数单测）', () {

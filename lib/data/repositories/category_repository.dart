@@ -181,9 +181,14 @@ class CategoryRepository with RepositoryMappings {
       if (trimmedName != null && trimmedName.isEmpty) {
         return const AppFailure('分类名不能为空');
       }
-      final updated = category.copyWith(
-        name: trimmedName ?? category.name,
-        color: color ?? category.color,
+      // **基于库内最新行构造更新（r 修复）**：基于调用方传入的陈旧 `category`
+      // 模型（列表未刷新）会把陈旧 name/color/parentId 原样写回并推进
+      // updatedAt（LWW 下覆盖更新的值），且 newParent==null 时环检测/父存在
+      // 校验整体被跳过、陈旧 parentId 被静默保留——基于刚查到的 `existing`
+      // 构造，未显式传入的字段保持库内最新值。
+      final updated = existing.copyWith(
+        name: trimmedName ?? existing.name,
+        color: color ?? existing.color,
         parentId: newParent,
         clearParentId: clearParentId && newParent == null,
         updatedAt: DateTime.now(),
@@ -358,6 +363,22 @@ class CategoryRepository with RepositoryMappings {
       final now = at ?? DateTime.now();
       await database.transaction(() async {
         for (final op in categories) {
+          // **事务内行存在校验（模块门禁 high 处置）**：validate（外部预检
+          // 已确认当前态 == expected）与事务之间窗口极小（异步交错），此处
+          // 二次校验"恢复目标行仍存在"（防 validate 后行被物理删除导致写
+          // 入孤儿行）；软删态断言归 validate（不同 op 的 expected 态各异——
+          // 删除 undo 当前软删、修改 undo 当前存活——统一断言会误拒）。
+          // 并发字段改动窗口由覆盖写推进 updatedAt 的 LWW 语义兜底。
+          // **softDelete 分支同样校验（r 修复）**：validate 后行被物理删除时，
+          // 无校验的 insertOnConflictUpdate 会退化为 INSERT 把物理删除的行
+          // "复活"成软删僵尸行——行已不存在则跳过（物理删除即终态，无需再
+          // 落软删墓碑）。
+          final current = await _categoryRowById(op.entry.id,
+              executor: database);
+          if (current == null) {
+            if (op.softDelete) continue; // 行已物理删除：终态，无需软删
+            throw StateError('分类已被物理删除，无法恢复');
+          }
           final target = op.softDelete
               ? op.entry.copyWith(deletedAt: now, updatedAt: now)
               : op.entry.copyWith(
@@ -370,6 +391,13 @@ class CategoryRepository with RepositoryMappings {
               );
         }
         for (final op in links) {
+          final query = database.select(database.activityCategoryLinks)
+            ..where((t) => t.id.equals(op.entry.id));
+          final current = await query.getSingleOrNull();
+          if (current == null) {
+            if (op.softDelete) continue; // 行已物理删除：终态，无需软删
+            throw StateError('分类关联已被物理删除，无法恢复');
+          }
           final target = op.softDelete
               ? op.entry.copyWith(deletedAt: now, updatedAt: now)
               : op.entry.copyWith(

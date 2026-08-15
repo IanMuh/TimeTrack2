@@ -459,6 +459,18 @@ void main() {
       await pushOnce(gateway);
     });
 
+    test('PostgrestException（瞬态 4xx 408/425，r 修复）：纳入退避重试', () async {
+      // 408（Request Timeout）/425（Too Early）为瞬态错误（尤其经代理/CDN
+      // 返回）——与 429 同列可重试。
+      for (final code in ['408', '425']) {
+        final gateway = buildGateway(
+          error: () => PostgrestException(message: 'transient', code: code),
+          failures: 1,
+        );
+        await pushOnce(gateway);
+      }
+    });
+
     test('PostgrestException（可重试 code）耗尽：上抛原异常（r49 补覆盖）', () async {
       // 429 分支的耗尽路径：连续 429 耗尽 maxAttempts 后必须上抛原
       // PostgrestException（防该分支误吞异常/耗尽后改写类型导致同步静默失败
@@ -518,14 +530,13 @@ void main() {
   });
 
   group('_isNonRetryableCode 判定矩阵（r14 锁定，防重试策略回归）', () {
-    test('不可重试：缺失 code / HTTP 4xx（除 429）/ PGRST* / 永久 SQLSTATE', () {
+    test('不可重试：缺失 code / HTTP 4xx（除 429/408/425）/ PGRST* / 永久 SQLSTATE', () {
       for (final code in [
         null, // 协议/解析失败
         '400', // 权限/校验
         '401', // 鉴权失效
         '403',
         '404',
-        '408', // Request Timeout（语义偏瞬时，但当前实现按 4xx 判不可重试）
         '409', // 冲突
         '422', // 语义错误
         'PGRST116', // 无数据
@@ -542,9 +553,11 @@ void main() {
       }
     });
 
-    test('可重试：429 / HTTP 5xx / 瞬时 SQLSTATE / 40 类豁免 / 未知格式', () {
+    test('可重试：429/408/425 / HTTP 5xx / 瞬时 SQLSTATE / 40 类豁免 / 未知格式', () {
       for (final code in [
         '429', // 限流
+        '408', // Request Timeout（瞬态，经代理/CDN 常见）
+        '425', // Too Early（瞬态）
         // HTTP 5xx（网关超时/上游不可用/限流）是云同步最典型的瞬时故障——
         // 当前实现落入"未知格式→保守可重试"分支；显式列出锁定该语义（防
         // 未来实现误将 5xx 归为不可重试而回归）。

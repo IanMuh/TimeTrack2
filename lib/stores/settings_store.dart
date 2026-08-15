@@ -77,6 +77,7 @@ class SettingsStore extends ChangeNotifier {
   final SettingsChangeApplier _applier;
 
   bool _disposed = false;
+  bool _saving = false; // save 防重入（并发保存以同一基准入栈冲突）
   int _reloadSeq = 0; // reload 请求序号（并发乱序防护）
 
   ProfileSettings? _current;
@@ -99,43 +100,47 @@ class SettingsStore extends ChangeNotifier {
 
   /// 保存配置（updatedAt 显式推进到 now——LWW 不丢修改）。
   Future<AppResult<ProfileSettings>> save(ProfileSettings next) async {
-    // _current 未加载（首次 reload 前/失败后）时读取库内现状作为 undo 基准
-    // ——防旧库配置被覆盖而丢失且无法撤销。
-    var before = _current;
-    if (before == null) {
+    // 防重入（模块门禁 medium）：连续 save（双击按钮）并发会以同一旧
+    // _current 为 undo 基准入栈，undo/redo 历史与真实变更序列不一致。
+    if (_saving) return const AppFailure('保存进行中，请稍后再试');
+    _saving = true;
+    try {
+      // **undo 基准从库重读（模块门禁 medium）**：云同步经 applyIfRemoteNewer
+      // 直写库不刷新 _current——用缓存基准会把远端更新回退丢失（与 LWW
+      // 冲突）。始终从库读当前值作为基准。
       final existing = await settings.settings();
-      if (existing.isSuccess) {
-        before = existing.requireValue();
+      final before = existing.isSuccess ? existing.requireValue() : _current;
+      // copyWith 不自动推进 updatedAt：显式推进到 now（LWW 传播必需）。
+      final now = DateTime.now();
+      final withNow = next.copyWith(updatedAt: now);
+      final result = await settings.save(withNow);
+      if (result case AppFailure<ProfileSettings> failure) {
+        return failure;
       }
+      if (_disposed) return result; // await 期间可能已 dispose：不写缓存/不通知
+      _reloadSeq++; // 使在途 reload 过期：其快照先于本次写，不能覆盖新值
+      final saved = result.requireValue();
+      _current = saved;
+      // 业务字段有变化才记 undo（saved.updatedAt 恒推进为 now，直接 `!=`
+      // 会使 no-op 保存也入栈——仅回滚时间戳，污染 undo/redo 栈）。
+      if (before != null && !_sameBusinessFields(before, saved)) {
+        undo.record(
+          label: '修改设置',
+          changes: [
+            UndoChange(
+              before: SettingsChange(before),
+              after: SettingsChange(saved),
+              applier: _applier,
+            ),
+          ],
+        );
+      }
+      dataRevision.bump();
+      notifyListeners();
+      return result;
+    } finally {
+      _saving = false;
     }
-    // copyWith 不自动推进 updatedAt：显式推进到 now（LWW 传播必需）。
-    final now = DateTime.now();
-    final withNow = next.copyWith(updatedAt: now);
-    final result = await settings.save(withNow);
-    if (result case AppFailure<ProfileSettings> failure) {
-      return failure;
-    }
-    if (_disposed) return result; // await 期间可能已 dispose：不写缓存/不通知
-    _reloadSeq++; // 使在途 reload 过期：其快照先于本次写，不能覆盖新值
-    final saved = result.requireValue();
-    _current = saved;
-    // 业务字段有变化才记 undo（saved.updatedAt 恒推进为 now，直接 `!=`
-    // 会使 no-op 保存也入栈——仅回滚时间戳，污染 undo/redo 栈）。
-    if (before != null && !_sameBusinessFields(before, saved)) {
-      undo.record(
-        label: '修改设置',
-        changes: [
-          UndoChange(
-            before: SettingsChange(before),
-            after: SettingsChange(saved),
-            applier: _applier,
-          ),
-        ],
-      );
-    }
-    dataRevision.bump();
-    notifyListeners();
-    return result;
   }
 
   /// 业务字段相等判定（排除 updatedAt/userId——恢复写库推进时间戳不代表

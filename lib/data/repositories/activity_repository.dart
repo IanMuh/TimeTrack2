@@ -112,6 +112,11 @@ class ActivityRepository with RepositoryMappings {
         if (current == null || current.isDeleted) {
           return AppFailure('活动不存在或已删除：${activity.id}');
         }
+        // 事务内复查未分配：预判通过后、事务提交前，并发 LWW 同步可能已把该行
+        // 升级为未分配单例——改写会破坏单例语义，回退单例查询。
+        if (current.isUnassigned) {
+          return AppSuccess(await ensureUnassignedActivity());
+        }
         final trimmedName = name.trim();
         if (trimmedName.isEmpty) {
           return const AppFailure('活动名不能为空');
@@ -138,8 +143,10 @@ class ActivityRepository with RepositoryMappings {
       // 重读-判-写同一事务：仅当库内仍存活才落墓碑（陈旧对象不复活已删/不覆盖远端删除）。
       return await database.transaction(() async {
         final current = await _activityById(activity.id);
-        if (current == null || current.isDeleted) {
-          return const AppSuccess(null); // 不存在/已删除：幂等
+        // 事务内复查未分配：预判通过后、事务提交前，并发 LWW 同步可能已把该行
+        // 升级为未分配单例——写墓碑会软删单例（后续 ensure 只能重建，造成抖动）。
+        if (current == null || current.isDeleted || current.isUnassigned) {
+          return const AppSuccess(null); // 不存在/已删除/未分配：幂等
         }
         final now = _monotonicNow(current.updatedAt);
         await _upsert(current.copyWith(deletedAt: now, updatedAt: now));
@@ -300,16 +307,21 @@ class ActivityRepository with RepositoryMappings {
     String activityId, {
     required DateTime updatedAt,
   }) async {
-    final activity = await _activityById(activityId);
-    if (activity == null || !activity.isOneOff || activity.isDeleted) return;
-    // 时间不倒退：回填的旧时刻不得早于活动当前 updatedAt（防生成时间倒退的
-    // 删除记录干扰 LWW 时间序）。
-    final effective = updatedAt.isAfter(activity.updatedAt)
-        ? updatedAt
-        : activity.updatedAt.add(const Duration(milliseconds: 1));
-    await _upsert(
-      activity.copyWith(deletedAt: effective, updatedAt: effective),
-    );
+    // 读-判-写包同一事务：防读取后、写入前并发 LWW 同步更新该行，陈旧快照整行
+    // 覆盖新数据（时间倒退、已删 one-off 被复活）。调用方已在外层事务内时，
+    // drift 复用当前事务（不嵌套开启）。
+    await database.transaction(() async {
+      final activity = await _activityById(activityId);
+      if (activity == null || !activity.isOneOff || activity.isDeleted) return;
+      // 时间不倒退：回填的旧时刻不得早于活动当前 updatedAt（防生成时间倒退的
+      // 删除记录干扰 LWW 时间序）。
+      final effective = updatedAt.isAfter(activity.updatedAt)
+          ? updatedAt
+          : activity.updatedAt.add(const Duration(milliseconds: 1));
+      await _upsert(
+        activity.copyWith(deletedAt: effective, updatedAt: effective),
+      );
+    });
   }
 
   /// 时间条目补全活动名/色快照（活动缺失/已删时保持条目原样）。

@@ -141,6 +141,13 @@ class TimerStore extends ChangeNotifier {
   /// 需防护"used after disposed"（回调由 undo 异步链驱动，时序不受控）。
   bool _disposed = false;
 
+  /// 写路径互斥（模块门禁 high）：全部写方法为多次 await 的异步流程，并发
+  /// 触发（后台 tracking 命中 switch 与用户手动切换同时、指令连发）会读到
+  /// 同一 beforeRunning、各自构造 undo 快照——undo 一次恢复旧运行未结束态
+  /// 而新切换仍存在，破坏"单运行条目"不变式。进行中拒绝后续写（与
+  /// SyncStore 同步互斥一致）。
+  bool _writing = false;
+
   TimeEntry? _runningEntry;
   TimeEntry? _lastAction;
 
@@ -173,47 +180,57 @@ class TimerStore extends ChangeNotifier {
     DateTime? at,
     bool isAuto = false,
   }) async {
-    final beforeRunning = await entries.runningEntry();
-    final result = await entries.switchToActivity(
-      activityId,
-      at: at,
-      isAuto: isAuto,
-    );
-    if (result case AppFailure<TimeEntry> failure) {
-      return failure;
+    if (!_tryBeginWrite()) return const AppFailure('操作进行中，请稍后再试');
+    try {
+      final beforeRunning = await entries.runningEntry();
+      final result = await entries.switchToActivity(
+        activityId,
+        at: at,
+        isAuto: isAuto,
+      );
+      if (result case AppFailure<TimeEntry> failure) {
+        return failure;
+      }
+      final after = result.requireValue();
+      // 采集操作后旧运行实际状态（已结束 endAt）——undo after 快照需可校验。
+      TimeEntry? oldRunningAfter;
+      if (beforeRunning != null) {
+        oldRunningAfter =
+            await entries.entryByIdIncludingDeleted(beforeRunning.id);
+      }
+      _lastAction = after;
+      _runningEntry = after; // 写路径同步刷新运行条目缓存（时钟 tick 不触发 refresh）
+      _recordSwitchOrStop('切换', beforeRunning, after, oldRunningAfter);
+      _afterWrite();
+      return result;
+    } finally {
+      _endWrite();
     }
-    final after = result.requireValue();
-    // 采集操作后旧运行实际状态（已结束 endAt）——undo after 快照需可校验。
-    TimeEntry? oldRunningAfter;
-    if (beforeRunning != null) {
-      oldRunningAfter =
-          await entries.entryByIdIncludingDeleted(beforeRunning.id);
-    }
-    _lastAction = after;
-    _runningEntry = after; // 写路径同步刷新运行条目缓存（时钟 tick 不触发 refresh）
-    _recordSwitchOrStop('切换', beforeRunning, after, oldRunningAfter);
-    _afterWrite();
-    return result;
   }
 
   /// 停止当前活动（切到未分配）。
   Future<AppResult<TimeEntry>> stopRunning({DateTime? at}) async {
-    final beforeRunning = await entries.runningEntry();
-    final result = await entries.stopRunning(at: at);
-    if (result case AppFailure<TimeEntry> failure) {
-      return failure;
+    if (!_tryBeginWrite()) return const AppFailure('操作进行中，请稍后再试');
+    try {
+      final beforeRunning = await entries.runningEntry();
+      final result = await entries.stopRunning(at: at);
+      if (result case AppFailure<TimeEntry> failure) {
+        return failure;
+      }
+      // 采集操作后旧运行实际状态（已结束 endAt）——undo after 快照需可校验。
+      TimeEntry? oldRunningAfter;
+      if (beforeRunning != null) {
+        oldRunningAfter =
+            await entries.entryByIdIncludingDeleted(beforeRunning.id);
+      }
+      _lastAction = result.requireValue();
+      _runningEntry = result.requireValue(); // stop 后新运行（未分配）条目
+      _recordSwitchOrStop('停止', beforeRunning, result.requireValue(), oldRunningAfter);
+      _afterWrite();
+      return result;
+    } finally {
+      _endWrite();
     }
-    // 采集操作后旧运行实际状态（已结束 endAt）——undo after 快照需可校验。
-    TimeEntry? oldRunningAfter;
-    if (beforeRunning != null) {
-      oldRunningAfter =
-          await entries.entryByIdIncludingDeleted(beforeRunning.id);
-    }
-    _lastAction = result.requireValue();
-    _runningEntry = result.requireValue(); // stop 后新运行（未分配）条目
-    _recordSwitchOrStop('停止', beforeRunning, result.requireValue(), oldRunningAfter);
-    _afterWrite();
-    return result;
   }
 
   /// 补记时间段。
@@ -224,32 +241,37 @@ class TimerStore extends ChangeNotifier {
     required String note,
     bool isAuto = false,
   }) async {
-    final result = await entries.createManualEntry(
-      activityId: activityId,
-      startAt: startAt,
-      endAt: endAt,
-      note: note,
-      isAuto: isAuto,
-    );
-    if (result case AppFailure<TimeEntry> failure) {
-      return failure;
+    if (!_tryBeginWrite()) return const AppFailure('操作进行中，请稍后再试');
+    try {
+      final result = await entries.createManualEntry(
+        activityId: activityId,
+        startAt: startAt,
+        endAt: endAt,
+        note: note,
+        isAuto: isAuto,
+      );
+      if (result case AppFailure<TimeEntry> failure) {
+        return failure;
+      }
+      final after = result.requireValue();
+      _lastAction = after;
+      undo.record(
+        label: '补记',
+        changes: [
+          UndoChange(
+            // before 自包含"软删该行"指令（非字面 null）：undo 软删新条目、
+            // redo 恢复——change 的恢复目标完整承载在 change 内（3a 契约）。
+            before: TimerEntryChange([(entry: after, softDelete: true)]),
+            after: TimerEntryChange([(entry: after, softDelete: false)]),
+            applier: _applier,
+          ),
+        ],
+      );
+      _afterWrite();
+      return result;
+    } finally {
+      _endWrite();
     }
-    final after = result.requireValue();
-    _lastAction = after;
-    undo.record(
-      label: '补记',
-      changes: [
-        UndoChange(
-          // before 自包含"软删该行"指令（非字面 null）：undo 软删新条目、
-          // redo 恢复——change 的恢复目标完整承载在 change 内（3a 契约）。
-          before: TimerEntryChange([(entry: after, softDelete: true)]),
-          after: TimerEntryChange([(entry: after, softDelete: false)]),
-          applier: _applier,
-        ),
-      ],
-    );
-    _afterWrite();
-    return result;
   }
 
   /// 切割时间段。
@@ -257,37 +279,42 @@ class TimerStore extends ChangeNotifier {
     required String entryId,
     required DateTime splitAt,
   }) async {
-    final before = await entries.entryByIdIncludingDeleted(entryId);
-    final result = await entries.splitEntry(entryId: entryId, splitAt: splitAt);
-    if (result case AppFailure<List<TimeEntry>> failure) {
-      return failure;
+    if (!_tryBeginWrite()) return const AppFailure('操作进行中，请稍后再试');
+    try {
+      final before = await entries.entryByIdIncludingDeleted(entryId);
+      final result = await entries.splitEntry(entryId: entryId, splitAt: splitAt);
+      if (result case AppFailure<List<TimeEntry>> failure) {
+        return failure;
+      }
+      _lastAction = result.requireValue().first;
+      final parts = result.requireValue();
+      if (before != null) {
+        undo.record(
+          label: '切割',
+          changes: [
+            UndoChange(
+              // before=原条目完整时段（undo 恢复覆盖首段）+ 切分第二段软删
+              //（新 id 段残留会与恢复的完整条目重叠，须一并清除）；
+              // after=操作后状态（原条目切分态 + 第二段）——redo 恢复切分后
+              // 状态，且 validate 可校验（非空 after 防冲突预检绕过）。
+              before: TimerEntryChange([
+                (entry: before, softDelete: false),
+                for (final part in parts)
+                  if (part.id != before.id) (entry: part, softDelete: true),
+              ]),
+              after: TimerEntryChange([
+                for (final part in parts) (entry: part, softDelete: false),
+              ]),
+              applier: _applier,
+            ),
+          ],
+        );
+      }
+      _afterWrite();
+      return result;
+    } finally {
+      _endWrite();
     }
-    _lastAction = result.requireValue().first;
-    final parts = result.requireValue();
-    if (before != null) {
-      undo.record(
-        label: '切割',
-        changes: [
-          UndoChange(
-            // before=原条目完整时段（undo 恢复覆盖首段）+ 切分第二段软删
-            //（新 id 段残留会与恢复的完整条目重叠，须一并清除）；
-            // after=操作后状态（原条目切分态 + 第二段）——redo 恢复切分后
-            // 状态，且 validate 可校验（非空 after 防冲突预检绕过）。
-            before: TimerEntryChange([
-              (entry: before, softDelete: false),
-              for (final part in parts)
-                if (part.id != before.id) (entry: part, softDelete: true),
-            ]),
-            after: TimerEntryChange([
-              for (final part in parts) (entry: part, softDelete: false),
-            ]),
-            applier: _applier,
-          ),
-        ],
-      );
-    }
-    _afterWrite();
-    return result;
   }
 
   /// 与相邻条目合并（[mergePrevious] = true 向左、false 向右合并）。
@@ -295,81 +322,96 @@ class TimerStore extends ChangeNotifier {
     required String entryId,
     required bool mergePrevious,
   }) async {
-    final before = await entries.entryByIdIncludingDeleted(entryId);
-    final neighbor = await entries.neighborForMerge(
-      entryId: entryId,
-      mergePrevious: mergePrevious,
-    );
-    if (neighbor case AppFailure<TimeEntry?> failure) {
-      return failure;
-    }
-    final result = await entries.mergeEntryWithNeighbor(
-      entryId: entryId,
-      mergePrevious: mergePrevious,
-    );
-    if (result case AppFailure failure) {
-      return AppFailure<TimeEntry?>(failure.message);
-    }
-    final merged = result.requireValue();
-    if (merged == null || before == null) {
+    if (!_tryBeginWrite()) return const AppFailure('操作进行中，请稍后再试');
+    try {
+      final before = await entries.entryByIdIncludingDeleted(entryId);
+      final neighbor = await entries.neighborForMerge(
+        entryId: entryId,
+        mergePrevious: mergePrevious,
+      );
+      if (neighbor case AppFailure<TimeEntry?> failure) {
+        return failure;
+      }
+      final result = await entries.mergeEntryWithNeighbor(
+        entryId: entryId,
+        mergePrevious: mergePrevious,
+      );
+      if (result case AppFailure failure) {
+        return AppFailure<TimeEntry?>(failure.message);
+      }
+      final merged = result.requireValue();
+      if (merged == null || before == null) {
+        _afterWrite();
+        return const AppSuccess(null); // 无合并对象/原条目缺失：无 undo 记录
+      }
+      _lastAction = merged.entry;
+      // 合并不涉及运行条目（merge 仅已结束条目，仓储已拒绝运行中）——
+      // 运行态缓存保持不变（若有运行计时，不得因合并其他条目被清空）。
+      final neighborValue = neighbor.requireValue();
+      undo.record(
+        label: '合并',
+        changes: [
+          UndoChange(
+            // before=原条目+邻居（undo 恢复二者，覆盖 merged）+ 合并产物
+            // 跨日派生段软删（新 id 段残留会与恢复条目重叠，须一并清除）；
+            // after=操作后状态（**合并产物全部入库行**——首段+跨日派生段，
+            // 与 before 清理逻辑对称；只含首段会致 redo 恢复截断/数据丢失）
+            // + 邻居软删。
+            before: TimerEntryChange([
+              (entry: before, softDelete: false),
+              if (neighborValue != null) (entry: neighborValue, softDelete: false),
+              for (final row in merged.savedRows)
+                if (row.id != before.id && row.id != neighborValue?.id)
+                  (entry: row, softDelete: true),
+            ]),
+            after: TimerEntryChange([
+              for (final row in merged.savedRows) (entry: row, softDelete: false),
+              if (neighborValue != null) (entry: neighborValue, softDelete: true),
+            ]),
+            applier: _applier,
+          ),
+        ],
+      );
       _afterWrite();
-      return const AppSuccess(null); // 无合并对象/原条目缺失：无 undo 记录
+      return AppSuccess(merged.entry);
+    } finally {
+      _endWrite();
     }
-    _lastAction = merged.entry;
-    // 合并不涉及运行条目（merge 仅已结束条目，仓储已拒绝运行中）——
-    // 运行态缓存保持不变（若有运行计时，不得因合并其他条目被清空）。
-    final neighborValue = neighbor.requireValue();
-    undo.record(
-      label: '合并',
-      changes: [
-        UndoChange(
-          // before=原条目+邻居（undo 恢复二者，覆盖 merged）+ 合并产物
-          // 跨日派生段软删（新 id 段残留会与恢复条目重叠，须一并清除）；
-          // after=操作后状态（**合并产物全部入库行**——首段+跨日派生段，
-          // 与 before 清理逻辑对称；只含首段会致 redo 恢复截断/数据丢失）
-          // + 邻居软删。
-          before: TimerEntryChange([
-            (entry: before, softDelete: false),
-            if (neighborValue != null) (entry: neighborValue, softDelete: false),
-            for (final row in merged.savedRows)
-              if (row.id != before.id && row.id != neighborValue?.id)
-                (entry: row, softDelete: true),
-          ]),
-          after: TimerEntryChange([
-            for (final row in merged.savedRows) (entry: row, softDelete: false),
-            if (neighborValue != null) (entry: neighborValue, softDelete: true),
-          ]),
-          applier: _applier,
-        ),
-      ],
-    );
-    _afterWrite();
-    return AppSuccess(merged.entry);
   }
 
   /// 删除时间段。
   Future<AppResult<void>> deleteEntry(String entryId) async {
-    final before = await entries.entryByIdIncludingDeleted(entryId);
-    if (before == null) {
-      return const AppFailure('条目不存在，无法删除');
+    if (!_tryBeginWrite()) return const AppFailure('操作进行中，请稍后再试');
+    try {
+      final before = await entries.entryByIdIncludingDeleted(entryId);
+      if (before == null) {
+        return const AppFailure('条目不存在，无法删除');
+      }
+      // 已软删条目再次删除：与 split/merge 校验语义一致拒绝（防误删后撤销
+      // 复活早已删除条目——模块门禁 medium）。
+      if (before.isDeleted) {
+        return const AppFailure('条目已删除，无法重复删除');
+      }
+      final result = await entries.deleteEntry(before);
+      if (result case AppFailure<void> failure) {
+        return failure;
+      }
+      _lastAction = null; // 删除：lastAction 置空（契约：删除为 null）
+      undo.record(
+        label: '删除',
+        changes: [
+          UndoChange(
+            before: TimerEntryChange([(entry: before, softDelete: false)]),
+            after: TimerEntryChange([(entry: before, softDelete: true)]),
+            applier: _applier,
+          ),
+        ],
+      );
+      _afterWrite();
+      return result;
+    } finally {
+      _endWrite();
     }
-    final result = await entries.deleteEntry(before);
-    if (result case AppFailure<void> failure) {
-      return failure;
-    }
-    _lastAction = null; // 删除：lastAction 置空（契约：删除为 null）
-    undo.record(
-      label: '删除',
-      changes: [
-        UndoChange(
-          before: TimerEntryChange([(entry: before, softDelete: false)]),
-          after: TimerEntryChange([(entry: before, softDelete: true)]),
-          applier: _applier,
-        ),
-      ],
-    );
-    _afterWrite();
-    return result;
   }
 
   // ---------------------------------------------------------------------------
@@ -413,6 +455,18 @@ class TimerStore extends ChangeNotifier {
         ),
       ],
     );
+  }
+
+  /// 写互斥抢占（await 前同步置位——防并发写读同一 beforeRunning 构造
+  /// 冲突 undo 快照、破坏单运行不变式）。失败 = 已有写在进行中。
+  bool _tryBeginWrite() {
+    if (_writing || _disposed) return false;
+    _writing = true;
+    return true;
+  }
+
+  void _endWrite() {
+    _writing = false;
   }
 
   void _afterWrite() {

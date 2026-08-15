@@ -542,6 +542,76 @@ void main() {
       )..where((t) => t.id.equals('child2'))).get()).single;
       expect(child.parentId, 'parent2', reason: '父未超期 → 子引用保留');
     });
+
+    test('跨用户子分类（存活或软删）阻塞父物理删除（r 复审：FK 不跨用户置空）', () async {
+      // 跨用户子分类（parentId 指向本用户将删父，但 userId 不同）既不会被
+      // 同用户 UPDATE 置空、也会阻塞物理删除（PRAGMA foreign_keys=ON 下
+      // parentId 自引用 FK）——父须保留，防清理事务回滚恒失败。
+      await putMeta(AppMetadataKeys.lastSyncAt, nowStr());
+      final parentDeletedAt = mapping.utcString(
+        DateTime.now().subtract(const Duration(days: 400)),
+      );
+      // 本用户超期软删父分类。
+      await db
+          .into(db.activityCategories)
+          .insert(
+            ActivityCategoriesCompanion.insert(
+              id: 'p-user-a',
+              name: 'p-user-a',
+              color: 1,
+              updatedAt: parentDeletedAt,
+              deletedAt: Value(parentDeletedAt),
+              parentId: const Value(null),
+              userId: const Value('user-a'),
+            ),
+          );
+      // 跨用户存活子（B 用户）。
+      await db
+          .into(db.activityCategories)
+          .insert(
+            ActivityCategoriesCompanion.insert(
+              id: 'c-user-b',
+              name: 'c-user-b',
+              color: 1,
+              updatedAt: nowStr(),
+              parentId: const Value('p-user-a'),
+              userId: const Value('user-b'),
+            ),
+          );
+      // 跨用户软删子（C 用户，超期软删）。
+      await db
+          .into(db.activityCategories)
+          .insert(
+            ActivityCategoriesCompanion.insert(
+              id: 'c-user-c',
+              name: 'c-user-c',
+              color: 1,
+              updatedAt: parentDeletedAt,
+              deletedAt: Value(parentDeletedAt),
+              parentId: const Value('p-user-a'),
+              userId: const Value('user-c'),
+            ),
+          );
+
+      // 以 user-a 身份清理：父（user-a 超期软删）进入 deletable，但被跨用户
+      // 子（user-b/user-c）引用阻塞。**游标键须按 userId 分区写（r 复审）**：
+      // run(userId:) 读 `last_sync_at:user-a`，写全局键 `last_sync_at` 会让
+      // 同步守卫把清理当作"未同步"跳过（清理逻辑不执行、断言假阳性）。
+      await putMeta(
+        '${AppMetadataKeys.lastSyncAt}:user-a',
+        nowStr(),
+      );
+      final report = (await service.run(userId: 'user-a')).requireValue();
+      // 父被跨用户子引用阻塞：不删除（FK 违约会回滚整个清理事务）。**键恒被
+      // 写入（值为 0 而非 null，r 复审）**——断言 0 而非 isNull。
+      expect(report.deletedByTable['activityCategories'], 0,
+          reason: '跨用户子引用阻塞父物理删除');
+      // 父仍存活（软删态保留）。
+      final parent = (await (db.select(
+        db.activityCategories,
+      )..where((t) => t.id.equals('p-user-a'))).get()).single;
+      expect(parent.deletedAt, isNotNull, reason: '父保留为软删态');
+    });
   });
 
   group('VACUUM 阈值', () {

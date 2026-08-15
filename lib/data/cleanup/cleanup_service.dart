@@ -637,16 +637,53 @@ class CleanupService with RepositoryMappings {
     }
     final deletable = expired.where((id) => !blocked.contains(id)).toList();
     if (deletable.isEmpty) return 0;
+    // **跨用户子引用排除（r 复审修正 + 二轮修正）**：同用户 UPDATE 会把同用户
+    // 存活子的 parentId 置空（下方先置空后删除），不阻塞删除；**跨用户**子
+    //（parentId 指向将删分类但 userId 不同）不会被同用户 UPDATE 处理，其引用
+    // 仍指向将删行——`PRAGMA foreign_keys=ON` 下 parentId 自引用 FK（NO
+    // ACTION）会使物理删除父行抛 FOREIGN KEY constraint failed、整个清理
+    // 事务回滚且每次清理重复失败。**不限 deletedAt（二轮修正）**：跨用户
+    // 软删子同样携带 parentId 引用、同样阻塞删除（r12 的"软删子置空"UPDATE
+    // 仅限同用户行，跨用户软删子不会被置空）——凡被跨用户子引用的父分类
+    //（无论子存活/软删）一律排除。
+    final crossUserBlocked = <String>{};
+    if (userId != null) {
+      for (final chunk in _chunks(deletable)) {
+        final rows =
+            await (database.selectOnly(database.activityCategories)
+                  ..addColumns([database.activityCategories.parentId])
+                  ..where(
+                    database.activityCategories.parentId.isIn(chunk) &
+                        database.activityCategories.userId.isNotValue(userId),
+                  ))
+                .get();
+        crossUserBlocked.addAll(
+          rows.map((r) => r.read(database.activityCategories.parentId)!),
+        );
+      }
+    }
+    final finalDeletable =
+        deletable.where((id) => !crossUserBlocked.contains(id)).toList();
+    if (finalDeletable.isEmpty) return 0;
     // parentId 置空：引用将删分类的所有行（含软删——置空无害且防 FK）。
     // **拆两个 UPDATE（r12）**：软删未传播子（deleted_at >= cutoff）本轮不删、
     // 留待下一轮——刷新其 updatedAt 会伪造同步增量（墓碑以 update 形式先于
     // delete 传播/已传播墓碑重复推送，增加远端合并歧义）。仅存活子刷新
     // updatedAt（清理造成真实变更），墓碑子只置 parentId 不动 updatedAt。
-    for (final chunk in _chunks(deletable)) {
+    for (final chunk in _chunks(finalDeletable)) {
       // 1) 存活子（deletedAt IS NULL）：置空 + 刷新 updatedAt。
+      // **userId 分区（r9）**：两条 UPDATE 均须限定同用户行——防共享设备上
+      // 跨用户子分类（parentId 指向本用户将删分类）被本用户清理误改
+      //（置空/刷新 updatedAt 会伪造 B 用户的同步增量，r11 写入层同用户
+      // 引用不变式被违反时此处是最后防线）。
       await (database.update(
         database.activityCategories,
-      )..where((t) => t.parentId.isIn(chunk) & t.deletedAt.isNull())).write(
+      )..where(
+        (t) =>
+            _userIdMatches(t.userId, userId) &
+            t.parentId.isIn(chunk) &
+            t.deletedAt.isNull(),
+      )).write(
         ActivityCategoriesCompanion(
           parentId: const Value(null),
           updatedAt: Value(utcString(now)),
@@ -654,11 +691,16 @@ class CleanupService with RepositoryMappings {
       );
       // 2) 软删子（deletedAt IS NOT NULL）：仅置空，不动 updatedAt。
       await (database.update(database.activityCategories)
-            ..where((t) => t.parentId.isIn(chunk) & t.deletedAt.isNotNull()))
+            ..where(
+              (t) =>
+                  _userIdMatches(t.userId, userId) &
+                  t.parentId.isIn(chunk) &
+                  t.deletedAt.isNotNull(),
+            ))
           .write(ActivityCategoriesCompanion(parentId: const Value(null)));
     }
     var count = 0;
-    for (final chunk in _chunks(deletable)) {
+    for (final chunk in _chunks(finalDeletable)) {
       count += await (database.delete(
         database.activityCategories,
       )..where((t) => t.id.isIn(chunk))).go();

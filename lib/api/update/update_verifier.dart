@@ -31,7 +31,13 @@ class UpdateVerifier {
     UpdatePlatformArtifact artifact, {
     void Function(int receivedBytes, int? totalBytes)? onProgress,
   }) async {
+    // **残留路径收集（r 修复）**：校验失败且删除损坏文件被占用（如杀毒扫描
+    // 短暂锁定）时，残留文件若只在当轮记日志，多轮失败会累积占用磁盘（单文件
+    // 最大 200MB）；每轮新下载前 best-effort 再清一次上轮残留，循环结束后
+    // （含成功路径）统一再清一遍。
+    final residuePaths = <String>[];
     for (var attempt = 0; ; attempt++) {
+      await _clearResidues(residuePaths);
       final downloaded = await downloader.download(
         artifact.url,
         onProgress: onProgress,
@@ -44,6 +50,7 @@ class UpdateVerifier {
       // I/O）。文件读取类异常在下载器已归为写盘失败；此处只比字符串。
       final actual = result.sha256;
       if (actual == artifact.sha256.toLowerCase()) {
+        await _clearResidues(residuePaths);
         return AppSuccess(
           UpdateVerifierResult(
             filePath: result.filePath,
@@ -53,21 +60,37 @@ class UpdateVerifier {
       }
       // 校验失败：删除损坏文件，重下（防残留）。
       try {
-        File(result.filePath).deleteSync();
+        await File(result.filePath).delete();
       } on FileSystemException {
-        // 删除失败不阻塞重下；记录残留路径（防多次失败累积损坏文件且无从排查）。
-        // **stderr 写自身保护（r14）**：stderr 已关闭/管道断开时 writeln 会再抛
-        // ——包一层防从 downloadAndVerify 逃逸（与下载器一致，保"恒返回 AppResult"）。
+        // 删除失败不阻塞重下；记录残留路径（防多次失败累积损坏文件且无从排查），
+        // 下一轮下载前与结束时统一再清。
+        residuePaths.add(result.filePath);
+      }
+      if (attempt >= UpdateConfig.redownloadAfterVerificationFailure) {
+        await _clearResidues(residuePaths);
+        return const AppFailure('更新文件校验失败（SHA-256 不匹配），请稍后重试');
+      }
+    }
+  }
+
+  /// best-effort 清理残留的损坏文件（删除失败静默忽略——不改变主流程结论）。
+  ///
+  /// **stderr 写自身保护（r14）**：stderr 已关闭/管道断开时 writeln 会再抛
+  /// ——包一层防从 downloadAndVerify 逃逸（与下载器一致，保"恒返回 AppResult"）。
+  Future<void> _clearResidues(List<String> paths) async {
+    if (paths.isEmpty) return;
+    for (final path in paths) {
+      try {
+        await File(path).delete();
+      } on FileSystemException {
         try {
-          stderr.writeln('[update] 校验失败且删除损坏文件失败（残留）：${result.filePath}');
+          stderr.writeln('[update] 清理残留损坏文件失败（仍残留）：$path');
         } catch (_) {
           // 日志写入失败不影响失败结论。
         }
       }
-      if (attempt >= UpdateConfig.redownloadAfterVerificationFailure) {
-        return const AppFailure('更新文件校验失败（SHA-256 不匹配），请稍后重试');
-      }
     }
+    paths.clear();
   }
 }
 

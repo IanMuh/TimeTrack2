@@ -1,0 +1,372 @@
+/// 指令分发器（模块 3d①，铁律 7 统一通道落位）：UI/快捷键/深链/AI 收敛
+/// 到同一分发入口——`[CommandInvocation]` → 各 store 既有写路径。
+///
+/// 设计：
+/// - **路由表**：按指令名分发到各 store handler（扩展新操作 = 注册指令 +
+///   加一个分支，不改核心）；
+/// - **领域映射**：解析器产出文本 args/options——`switch 学习` 的 args 是
+///   活动名，须经 [ActivityRepository] 查名→id（重名歧义返回明确失败）；
+///   时间类选项已被 parser 归一化为 `HH:MM`，此处还原为今日该时刻；
+/// - **统一返回 [CommandResult]**（Success/Failure 带明确原因）；未知指令名
+///   返回"未注册指令"失败（铁律 7 扩展点）。
+library;
+
+import 'package:uuid/uuid.dart';
+
+import '../data/database/app_database.dart' hide ProfileSettings;
+import '../data/interop/file_interop_service.dart';
+import '../data/repositories/activity_repository.dart';
+import '../viewmodels/activity.dart';
+import '../utils/result.dart';
+import '../viewmodels/commands/command_invocation.dart';
+import '../viewmodels/tracking_rule.dart';
+import 'category_store.dart';
+import 'command_contracts.dart';
+import 'data_revision.dart';
+import 'timer_store.dart';
+import 'tracking_store.dart';
+import 'undo_store.dart';
+
+/// 指令分发器。
+class CommandDispatcher {
+  CommandDispatcher({
+    required this.undo,
+    required this.timer,
+    required this.sync,
+    required this.update,
+    required this.category,
+    required this.tracking,
+    required this.activities,
+    required this.fileInterop,
+    required this.database,
+    DataRevision? dataRevision,
+  }) : _dataRevision = dataRevision ?? DataRevision();
+
+  final UndoStore undo;
+  final TimerStore timer;
+  final SyncNowProvider sync;
+  final UpdateActions update;
+  final CategoryStore category;
+  final TrackingStore tracking;
+  final ActivityRepository activities;
+  final FileInteropService fileInterop;
+  final AppDatabase database;
+
+  /// dataRevision（模块 3d③：import 成功后 bump——数据变更使派生缓存失效）。
+  final DataRevision _dataRevision;
+
+  /// 分发一条指令到对应 store 写路径；统一返回 [CommandResult]。
+  ///
+  /// 任何 handler 契约外异常被收敛为失败（不逃逸）；时间类选项（parser 已
+  /// 归一化为 HH:MM）还原为今日该时刻。
+  Future<CommandResult> dispatch(CommandInvocation invocation) async {
+    try {
+      return await _route(invocation);
+    } catch (e) {
+      // 契约外异常收敛（防 AI/深链等调用方被未处理异步异常打断）。
+      return CommandFailure('指令执行异常：${e.runtimeType}');
+    }
+  }
+
+  Future<CommandResult> _route(CommandInvocation invocation) async {
+    switch (invocation.name) {
+      // ---- 计时核心 ----
+      case 'switch':
+        final resolved = await _resolveActivityId(invocation.args.first);
+        if (resolved.id == null) {
+          return CommandFailure(resolved.error ?? '活动名解析失败');
+        }
+        // **--at 非法格式显式失败（r 修复）**：`_todayAt` 对非法格式返回 null，
+        // 与"未提供"无法区分——静默以当前时间切换会让用户误以为切换发生在
+        // 指定时刻（与 add/split 的显式报错行为对齐：区分"未提供"与"非法格式"）。
+        final atRaw = invocation.options['at'];
+        final at = _todayAt(atRaw);
+        if (atRaw != null && at == null) {
+          return const CommandFailure('非法时间值：--at=HH:MM');
+        }
+        final result = await timer.switchToActivity(
+          resolved.id!,
+          at: at,
+        );
+        return _fromAppResult(result, successMessage: '已切换到活动');
+      case 'stop':
+        final result = await timer.stopRunning();
+        return _fromAppResult(result, successMessage: '已停止当前活动');
+      case 'add':
+        final resolvedAdd = await _resolveActivityId(invocation.args.first);
+        if (resolvedAdd.id == null) {
+          return CommandFailure(resolvedAdd.error ?? '活动名解析失败');
+        }
+        final start = _todayAt(invocation.options['start']);
+        final end = _todayAt(invocation.options['end']);
+        if (start == null || end == null) {
+          return const CommandFailure('补记需要 --start 与 --end（HH:MM）');
+        }
+        final result = await timer.addEntry(
+          activityId: resolvedAdd.id!,
+          startAt: start,
+          endAt: end,
+          note: invocation.options['note'] ?? '',
+        );
+        return _fromAppResult(result, successMessage: '已补记时间段');
+      case 'split':
+        final at = _todayAt(invocation.options['at']);
+        if (at == null) return const CommandFailure('切割需要 --at（HH:MM）');
+        final result = await timer.splitEntry(
+          entryId: invocation.args.first,
+          splitAt: at,
+        );
+        return _fromAppResult(result, successMessage: '已切割时间段');
+      case 'merge':
+        final direction = invocation.options['direction'];
+        if (direction != 'previous' && direction != 'next') {
+          return const CommandFailure('合并需要 --direction=previous|next');
+        }
+        final result = await timer.mergeWithNeighbor(
+          entryId: invocation.args.first,
+          mergePrevious: direction == 'previous',
+        );
+        return _fromAppResult(result, successMessage: '已合并时间段');
+      case 'delete':
+        final result = await timer.deleteEntry(invocation.args.first);
+        return _fromAppResult(result, successMessage: '已删除时间段');
+
+      // ---- 撤销/重做 ----
+      case 'undo':
+        final result = await undo.undo();
+        return _fromAppResult(result, successMessage: '已撤销');
+      case 'redo':
+        final result = await undo.redo();
+        return _fromAppResult(result, successMessage: '已重做');
+
+      // ---- 同步与互通 ----
+      case 'sync':
+        final result = await sync.syncNow();
+        return _fromAppResult(result, successMessage: '同步完成');
+      case 'export':
+        final deviceId = await _deviceId();
+        if (deviceId == null) return const CommandFailure('读取设备标识失败');
+        // 契约：位置参数与 --path 二选一，同时给出报错（指令定义约定）。
+        if (invocation.args.isNotEmpty && invocation.options.containsKey('path')) {
+          return const CommandFailure('导出路径二选一：位置参数或 --path，不可同时给出');
+        }
+        final path = invocation.options['path'] ??
+            (invocation.args.isEmpty ? null : invocation.args.first);
+        final result = await fileInterop.export(
+          sourceDeviceId: deviceId,
+          path: path,
+        );
+        return _fromAppResult(result, successMessage: '导出完成');
+      case 'import':
+        final path = invocation.options['path'] ??
+            (invocation.args.isEmpty ? null : invocation.args.first);
+        if (path == null) {
+          return const CommandFailure('导入需要 <路径> 或 --path=<路径>');
+        }
+        final result = await fileInterop.import(path: path);
+        if (result.isSuccess) {
+          // **dataRevision 三类来源收口（模块 3d③）**：import 合并改动本地
+          // 数据——bump 使派生缓存失效刷新（不变式 9）。
+          _dataRevision.bump();
+        }
+        return _fromAppResult(result, successMessage: '导入完成');
+
+      // ---- 更新 ----
+      case 'update_check':
+        final result = await update.check();
+        return _fromAppResult(result, successMessage: '更新检查完成');
+      case 'update_install':
+        final result = await update.install();
+        return _fromAppResult(result, successMessage: '更新安装完成');
+
+      // ---- 分类 ----
+      case 'category_create':
+        final parent = invocation.options['parent'];
+        final colorRaw = invocation.options['color'];
+        if (colorRaw != null && int.tryParse(colorRaw) == null) {
+          return CommandFailure('非法颜色值：--color=<整数>');
+        }
+        final result = await category.createCategory(
+          name: invocation.args.first,
+          color: int.tryParse(colorRaw ?? '') ?? 0xff0f766e,
+          parentId: parent,
+        );
+        return _fromAppResult(result, successMessage: '已新建分类');
+      case 'category_delete':
+        final result = await category.deleteCategory(invocation.args.first);
+        return _fromAppResult(result, successMessage: '已删除分类');
+      case 'category_update':
+        final existingCategory = category.categoryById[invocation.args.first];
+        if (existingCategory == null) {
+          return const CommandFailure('分类不存在或已删除');
+        }
+        final colorRaw = invocation.options['color'];
+        if (colorRaw != null && int.tryParse(colorRaw) == null) {
+          return CommandFailure('非法颜色值：--color=<整数>');
+        }
+        final rootRaw = invocation.options['root'];
+        if (rootRaw != null && rootRaw != 'true' && rootRaw != 'false') {
+          return const CommandFailure('非法值：--root=true|false');
+        }
+        final updatedResult = await category.updateCategory(
+          category: existingCategory,
+          name: invocation.options['name'],
+          color: int.tryParse(colorRaw ?? ''),
+          parentId: invocation.options['parent'],
+          clearParentId: rootRaw == 'true',
+        );
+        return _fromAppResult(updatedResult, successMessage: '已修改分类');
+
+      // ---- 后台自动记录 ----
+      case 'tracking_rule_create':
+        final activityName = invocation.options['activity'];
+        if (activityName == null) {
+          return const CommandFailure('新建映射规则需要 --activity=<活动名>');
+        }
+        final resolvedRule = await _resolveActivityId(activityName);
+        if (resolvedRule.id == null) {
+          return CommandFailure(resolvedRule.error ?? '活动名解析失败');
+        }
+        final kind = _matchKind(invocation.options['kind']);
+        if (kind == TrackingRuleMatchKind.unknown) {
+          return const CommandFailure('非法匹配类型：--kind=process|title');
+        }
+        final rule = TrackingRule(
+          id: const Uuid().v4(),
+          pattern: invocation.args.first,
+          matchKind: kind,
+          activityId: resolvedRule.id!,
+          updatedAt: DateTime.now(),
+        );
+        final result = await tracking.saveRule(rule);
+        return _fromAppResult(result, successMessage: '已新建映射规则');
+      case 'tracking_rule_update':
+        final existing = await tracking.rules.ruleById(invocation.args.first);
+        if (existing == null) return const CommandFailure('映射规则不存在');
+        // --kind 可选（r 修复）：未提供时沿用现有规则的类型——仅修改
+        // pattern/activity/sync 的部分更新不应强制重复传 kind；提供时才校验
+        // 取值合法（与其它字段"部分更新"语义一致）。
+        String? kindRaw;
+        if (invocation.options.containsKey('kind')) {
+          final parsedKind = _matchKind(invocation.options['kind']);
+          if (parsedKind == TrackingRuleMatchKind.unknown) {
+            return const CommandFailure('非法匹配类型：--kind=process|title');
+          }
+          kindRaw = parsedKind.storageValue;
+        }
+        // --sync 布尔取值校验（与 --direction 取值校验一致）：非法值明确
+        // 报错，不静默回退（静默回退会让用户"看似成功实则未生效"）。
+        final syncRaw = invocation.options['sync'];
+        if (syncRaw != null && syncRaw != 'true' && syncRaw != 'false') {
+          return const CommandFailure('非法同步开关值：--sync=true|false');
+        }
+        String? activityId;
+        final activityName = invocation.options['activity'];
+        if (activityName != null) {
+          final resolved = await _resolveActivityId(activityName);
+          if (resolved.id == null) {
+            return CommandFailure(resolved.error ?? '活动名解析失败');
+          }
+          activityId = resolved.id;
+        }
+        final updated = existing.copyWith(
+          pattern: invocation.options['pattern'] ?? existing.pattern,
+          matchKind: kindRaw == null
+              ? existing.matchKind
+              : TrackingRuleMatchKind.fromStorageValue(kindRaw),
+          activityId: activityId ?? existing.activityId,
+          syncEnabled: syncRaw == null
+              ? existing.syncEnabled
+              : syncRaw == 'true',
+          updatedAt: DateTime.now(),
+        );
+        final result = await tracking.saveRule(updated);
+        return _fromAppResult(result, successMessage: '已修改映射规则');
+      case 'tracking_rule_delete':
+        final rule = await tracking.rules.ruleById(invocation.args.first);
+        if (rule == null) return const CommandFailure('映射规则不存在');
+        final result = await tracking.deleteRule(rule);
+        return _fromAppResult(result, successMessage: '已删除映射规则');
+
+      default:
+        return CommandFailure('未注册指令：${invocation.name}');
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // 内部
+  // ---------------------------------------------------------------------------
+
+  /// 解析活动名→id（全量未删活动按名精确匹配；重名歧义/不存在明确失败）。
+  ///
+  /// 返回 `(id, error)` record：id 非 null 时 error 为 null（成功）；失败时
+  /// id 为 null、error 携带可读原因。**错误随结果返回**（不落共享字段）——
+  /// 并发 dispatch 交错 await 时各指令的错误归因不会互相覆盖。
+  Future<({String? id, String? error})> _resolveActivityId(String name) async {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) {
+      return (id: null, error: '活动名不能为空');
+    }
+    final result = await activities.activities();
+    if (result case AppFailure<List<Activity>> failure) {
+      return (id: null, error: failure.message);
+    }
+    final matches = result.requireValue().where((a) => a.name == trimmed);
+    final list = matches.toList();
+    if (list.isEmpty) {
+      return (id: null, error: '活动不存在：$name');
+    }
+    if (list.length > 1) {
+      return (id: null, error: '活动名重名歧义（${list.length} 个）');
+    }
+    return (id: list.first.id, error: null);
+  }
+
+  /// `HH:MM`（parser 已归一化）→ 今日该时刻；null = 缺失/非法。
+  DateTime? _todayAt(String? hhmm) {
+    if (hhmm == null) return null;
+    final parts = hhmm.split(':');
+    if (parts.length != 2) return null;
+    final hour = int.tryParse(parts[0]);
+    final minute = int.tryParse(parts[1]);
+    if (hour == null || minute == null || hour < 0 || hour > 23 ||
+        minute < 0 || minute > 59) {
+      return null;
+    }
+    final now = DateTime.now();
+    return DateTime(now.year, now.month, now.day, hour, minute);
+  }
+
+  TrackingRuleMatchKind _matchKind(String? value) {
+    return switch (value) {
+      'process' => TrackingRuleMatchKind.process,
+      'title' => TrackingRuleMatchKind.title,
+      _ => TrackingRuleMatchKind.unknown, // 非法值显式标记（调用方校验拒绝）
+    };
+  }
+
+  /// 读取设备标识（app_metadata `device_id` 键；缺失时生成并持久化——
+  /// 与 TimeEntryRepository 语义一致）。用 upsert 防并发 export 唯一约束冲突。
+  Future<String?> _deviceId() async {
+    final row = await (database.select(database.appMetadata)
+          ..where((t) => t.key.equals('device_id')))
+        .getSingleOrNull();
+    if (row != null) return row.value;
+    final id = const Uuid().v4();
+    await (database.into(database.appMetadata).insertOnConflictUpdate(
+      AppMetadataCompanion.insert(key: 'device_id', value: id),
+    ));
+    return id;
+  }
+
+  /// 通用 AppResult → CommandResult（成功带 message，失败带原因）。
+  CommandResult _fromAppResult(
+    AppResult<dynamic> result, {
+    required String successMessage,
+  }) {
+    return result.fold(
+      onSuccess: (_) => CommandSuccess(message: successMessage),
+      onFailure: (f) => CommandFailure(f.message),
+    );
+  }
+}

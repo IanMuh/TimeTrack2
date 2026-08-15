@@ -279,6 +279,12 @@ class UpdateManifestService {
     final ignored = manifest.required
         ? null
         : await _readString(AppMetadataKeys.ignoredUpdateVersion);
+    // **close 复查（r 修复）**：`_readString` 的 DB await 窗口内 close() 可能
+    // 被并发调用——命中"已忽略"分支直接返回"无更新"会违背"close 后立即失败"
+    // 语义（调用方拿到"无更新"而非"服务已关闭"）。与写库前复查对齐。
+    if (_closed) {
+      return const AppFailure(_closedMessage);
+    }
     if (ignored != null) {
       try {
         if (!(AppVersion.parse(ignored) < remote)) {

@@ -8,6 +8,7 @@ import 'package:timetrack2/constants/app_constants.dart';
 import 'package:timetrack2/constants/storage_keys.dart' show AppMetadataKeys;
 import 'package:timetrack2/data/cleanup/cleanup_service.dart';
 import 'package:timetrack2/data/database/app_database.dart' hide ProfileSettings;
+import 'package:timetrack2/stores/data_revision.dart';
 import 'package:timetrack2/stores/sync_store.dart';
 import 'package:timetrack2/utils/result.dart';
 
@@ -76,10 +77,12 @@ class _TestHarness {
     syncStatus = SyncStatusStore(database: db);
     cleanup = CleanupService(database: db);
     backend = _MockBackend();
+    revision = DataRevision();
     store = SyncStore(
       backend: backend,
       syncStatus: syncStatus,
       cleanup: cleanup,
+      dataRevision: revision,
     );
   }
 
@@ -87,10 +90,12 @@ class _TestHarness {
   late final SyncStatusStore syncStatus;
   late final CleanupService cleanup;
   late final _MockBackend backend;
+  late final DataRevision revision;
   late final SyncStore store;
 
   Future<void> close() async {
     store.dispose();
+    revision.dispose();
     backend._authController.close();
     await db.close();
   }
@@ -135,6 +140,23 @@ void main() {
       expect(h.backend.syncCalls, 1);
       expect(h.store.lastError, '网络错误');
       expect(h.store.lastSyncAt, isNull); // 失败不推进
+    });
+
+    test('同步成功后 dataRevision 递增（三类来源收口）', () async {
+      final before = h.revision.value;
+      h.backend.emitLogin('user-1');
+      await pumpEventQueue();
+      expect(h.backend.syncCalls, 1);
+      expect(h.revision.value, before + 1); // 同步成功 bump（派生缓存失效）
+    });
+
+    test('同步失败：dataRevision 不递增', () async {
+      h.backend.syncFails = true;
+      h.backend.emitLogin('user-1');
+      await pumpEventQueue();
+      final revision = h.revision.value;
+      expect(h.backend.syncCalls, 1);
+      expect(h.revision.value, revision); // 失败不 bump
     });
 
     test('登出：清用户与同步状态', () async {
@@ -229,7 +251,7 @@ void main() {
       expect(row!.key, AppMetadataKeys.lastCleanupAt);
     });
 
-    test('限频：同步触发未到期跳过，手动触发不限频', () async {
+    test('限频：同步触发未到期跳过，手动触发受限频跳过', () async {
       // 预置 last_cleanup_at = now（未到期）。
       final now = DateTime.now().toUtc().toIso8601String();
       await (h.db.into(h.db.appMetadata).insert(
@@ -248,9 +270,14 @@ void main() {
             ..where((t) => t.key.equals(AppMetadataKeys.lastCleanupAt)))
           .getSingle();
       expect(afterSync.value, now);
-      // 手动触发（cursorOverride null）：不限频 → 执行清理（无游标 → skippedNoSync）。
+      // 手动触发（cursorOverride null）：**同样受限频** → 未到期跳过
+      //（AppStore 启动路径防每次启动全量清理）。
       final manual = await h.store.runCleanupIfDue();
       expect(manual, isA<AppSuccess<void>>());
+      final afterManual = await (h.db.select(h.db.appMetadata)
+            ..where((t) => t.key.equals(AppMetadataKeys.lastCleanupAt)))
+          .getSingle();
+      expect(afterManual.value, now); // 手动触发未到期也跳过
     });
 
     test('cleanupIntervalHours 常量存在', () {

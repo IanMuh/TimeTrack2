@@ -14,6 +14,30 @@ List<int> buildZip(Map<String, String> files) {
   return ZipEncoder().encode(archive);
 }
 
+/// 动态探测文件系统是否**大小写敏感**（Windows/macOS 默认 APFS 为大小写
+/// 不敏感）：创建 `CaseProbe` 目录后查 `caseprobe`（不同大小写）——不可见 =
+/// 大小写敏感。**探测与清理分离（r 复审修正）**：清理失败不影响探测结论
+///（探测结果先落变量，清理包独立 try，外层只兜探测阶段的真实 IO 异常——
+/// 防"探测已判定敏感、清理抛错被外层 catch 吞掉返回 null 使用例照常运行"）。
+bool filesystemIsCaseSensitive() {
+  try {
+    final probe = Directory.systemTemp.createTempSync('case_probe');
+    try {
+      Directory('${probe.path}/CaseProbe').createSync();
+      final lowerVisible = Directory('${probe.path}/caseprobe').existsSync();
+      return !lowerVisible;
+    } finally {
+      try {
+        probe.deleteSync(recursive: true);
+      } on FileSystemException {
+        // 清理失败不影响探测结论（临时目录残留由系统回收）。
+      }
+    }
+  } on FileSystemException {
+    return false; // 探测失败按大小写不敏感处理（Windows/macOS 主目标平台）
+  }
+}
+
 void main() {
   group('WindowsInstaller', () {
     test('programDir 合理性校验（r23/r24）：危险路径构造抛 ArgumentError', () {
@@ -95,6 +119,9 @@ void main() {
         '... . ..', // → '..'
         'staging/x',
         r'staging\x',
+        'staging ', // 尾部空格（Win32 规范化后目录名失配）
+        'staging.', // 尾部点号（同上）
+        ' update-staging ', // 前后空格（规范化后名不一致）
       ]) {
         expect(
           WindowsInstaller.stagingNameError(evil),
@@ -102,7 +129,7 @@ void main() {
           reason: 'staging 目录名非法（灾难性路径）拒绝：$evil',
         );
       }
-      for (final ok in ['staging', '.update-staging', ' update-staging ']) {
+      for (final ok in ['staging', '.update-staging']) {
         expect(
           WindowsInstaller.stagingNameError(ok),
           isNull,
@@ -638,6 +665,49 @@ void main() {
         await root.delete(recursive: true);
       }
     });
+
+    test(
+      'applyStaging：数据目录位于程序目录内部（仅大小写不同）→ 拒绝（r 复审）',
+      () async {
+        // **动态跳过在测试体内（r 复审修正）**：`skip:` 参数在 collection 阶段
+        // 求值——同步文件系统 I/O 探测一旦抛非 FileSystemException（平台差异）
+        // 会中断整个测试文件收集；且每次收集都产生临时目录写删副作用。改为
+        // 测试体内探测 + markTestSkipped（运行时跳过，不中断收集）。大小写
+        // 敏感文件系统（Linux/大小写敏感卷）上 `Program` 与 `program` 是不同
+        // 目录，无法构造"仅大小写不同的同一目录"场景。
+        if (filesystemIsCaseSensitive()) {
+          // markTestSkipped 抛 SkipException 终止本测试（后续代码不可达）。
+          markTestSkipped('文件系统大小写敏感，无法构造大小写变体同一目录');
+        }
+        // 大小写不敏感文件系统（Windows/macOS 默认 APFS）上：dataDir 与
+        // programDir 仅大小写不同仍属"数据目录在程序目录内部"——
+        // `_clearProgramDir` 会连带清空数据目录，大小写敏感比较会漏判放行。
+        final root = await Directory.systemTemp.createTemp('win_case');
+        final program = Directory('${root.path}/Program')..createSync();
+        // 仅大小写不同的数据目录（大小写不敏感文件系统上指向同一目录）。
+        final data = Directory('${root.path}/program/data')
+          ..createSync(recursive: true);
+        final staging = Directory('${program.path}/staging')..createSync();
+        File('${staging.path}/app.exe').writeAsStringSync('new');
+        try {
+          final installer = WindowsInstaller(
+            programDir: program.path,
+            dataDir: data.path,
+          );
+          final result = await installer.applyStaging(staging.path);
+          expect(result.isSuccess, isFalse, reason: '数据目录在程序目录内部（大小写不敏感）须拒绝');
+          // 程序目录未被改动（无备份残留、staging 未消费）。
+          expect(
+            program.listSync().where(
+              (e) => e.path.split(RegExp(r'[\\/]')).last.startsWith('.backup-'),
+            ),
+            isEmpty,
+          );
+        } finally {
+          await root.delete(recursive: true);
+        }
+      },
+    );
 
     test(
       'applyStaging 备份为空（backupOk=false，r5）：staging 被 exclude → 失败 + 备份清理',

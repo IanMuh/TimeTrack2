@@ -225,18 +225,31 @@ class LlmConfig {
       );
     }
     // 允许根路径下的单段路径（如自托管 `https://host:8080/v1`——OpenAI
-    // 兼容层常以 /v1 为前缀）。**深层路径/双斜杠拒绝**：
+    // 兼容层常以 /v1 为前缀）。**深层路径/双斜杠/反斜杠/点段编码拒绝**：
     // - `pathSegments` 会跳过前导/尾随空段（`//v1` → `['v1']`），须查原始
     //   path 是否含 `//`；
     // - `pathSegments` 是**解码后**分段（`a%2Fb` → `'a/b'`），段内含 `/`
-    //   即深层路径绕过（服务端解码后形成额外路径段，路由到非预期端点）。
+    //   即深层路径绕过（服务端解码后形成额外路径段，路由到非预期端点）；
+    // - `%5c`/裸反斜杠（`\`）在部分服务器上被当作路径分隔符——与深层路径
+    //   绕过同理，对原始 path 拒绝（大小写不敏感，`%5C` 同拒）；
+    // - **点段编码（`%2e`/`%2e%2e`）拒绝（r 修复）**：`Uri.parse` 在构造期
+    //   即对编码点段做路径归一化（`%2e%2e` → `/`），解析后的 uri.path 已不含
+    //   原始编码——须在**原始串**上检查（大小写不敏感），杜绝服务端解码点段
+    //   归一化后的路径塌缩歧义与 `..` 穿越。
+    final lowerTrimmed = trimmed.toLowerCase();
     if (uri.path.contains('//') ||
-        uri.pathSegments.any((seg) => seg.contains('/')) ||
-        uri.pathSegments.length > 1) {
+        uri.path.contains(r'\') ||
+        uri.pathSegments.any(
+          (seg) => seg.contains('/') || seg.contains(r'\'),
+        ) ||
+        uri.pathSegments.length > 1 ||
+        lowerTrimmed.contains('%2e') ||
+        lowerTrimmed.contains('%5c') ||
+        lowerTrimmed.contains(r'\')) {
       throw ArgumentError.value(
         value,
         'baseUrl',
-        'baseUrl 至多一个路径段（如 /v1），不支持深层路径/双斜杠/编码斜杠',
+        'baseUrl 至多一个路径段（如 /v1），不支持深层路径/双斜杠/反斜杠/点段/编码绕过',
       );
     }
     return trimmed.endsWith('/') ? trimmed.substring(0, trimmed.length - 1) : trimmed;

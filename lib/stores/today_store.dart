@@ -40,7 +40,19 @@ class TodayStore extends ChangeNotifier {
       final dayChanged = now.startOfDay != _lastLoadDay;
       final retryDue = _loadFailed &&
           now.difference(_lastFailTime) >= retryInterval;
-      if (hasRunning || dayChanged || retryDue) {
+      // 失败态隔离（模块门禁 medium）：_loadFailed 时 hasRunning 分支不得
+      // 触发 DB 查询（防 DB 故障持续时每秒重试风暴）——仅按 retryInterval
+      // 有界重试；运行条目时长仍每秒刷新（notifyListeners 不查库）。
+      if (_loadFailed) {
+        if (hasRunning) {
+          notifyListeners(); // 计时展示每秒刷新，DB 查询交给 retryDue
+        }
+        if (dayChanged || retryDue) {
+          loadToday();
+        }
+        return;
+      }
+      if (hasRunning || dayChanged) {
         loadToday();
       }
     };

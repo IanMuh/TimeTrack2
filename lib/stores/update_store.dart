@@ -24,6 +24,7 @@ import '../constants/storage_keys.dart';
 import '../data/database/app_database.dart' hide ProfileSettings;
 import '../data/update/windows_installer.dart';
 import '../utils/result.dart';
+import 'command_contracts.dart';
 import '../viewmodels/update/update_manifest.dart';
 
 /// 更新状态（显式枚举）。
@@ -93,7 +94,7 @@ class UpdateStatus {
 }
 
 /// 更新 store（状态机编排）。
-class UpdateStore extends ChangeNotifier {
+class UpdateStore extends ChangeNotifier implements UpdateActions {
   UpdateStore({
     required this.manifestService,
     required this.verifier,
@@ -159,6 +160,7 @@ class UpdateStore extends ChangeNotifier {
   // ---------------------------------------------------------------------------
 
   /// 检查更新（来自 idle/upToDate/available/failed 均可）。
+  @override
   Future<AppResult<UpdateCheckResult>> check() async {
     if (_closed) return const AppFailure('更新服务已关闭');
     // 重入保护（与 download() 幂等契约一致）：流程进行中重复检查返回
@@ -275,6 +277,7 @@ class UpdateStore extends ChangeNotifier {
 
   /// 安装更新（按平台分发：Windows staging 两阶段；Android 阶段 4 未支持；
   /// 其余平台业务失败）。
+  @override
   Future<AppResult<void>> install() async {
     if (_closed) return const AppFailure('更新服务已关闭');
     final verified = _verifiedResult;

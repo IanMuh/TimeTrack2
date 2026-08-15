@@ -34,9 +34,13 @@ class AppMetadataKeys {
 
   /// 软删行保留期覆盖值（天；阶段 4 设置页写入，`CleanupService.retentionDays`
   /// 读：无值/非法回退 [AppConstants.defaultDeletedRetentionDays]）。
+  /// **取值边界（r 修复）**：0/负数视为非法回退默认；超过
+  /// [AppConstants.maxDeletedRetentionDays] 钳制到上限；非整数/非数字回退
+  /// 默认（唯一权威契约见 CleanupService.retentionDays）。
   static const deletedRetentionDays = 'deleted_retention_days';
 
-  /// 全部键名（与定义同处维护；测试遍历做唯一性/非空校验，新增键自动纳入）。
+  /// 全部键名（与定义同处维护；测试遍历做唯一性/非空校验，**新增键常量
+  /// 必须同步加入本列表**——漏加会漏掉该键的校验覆盖）。
   static const all = <String>[
     deviceId,
     lastSyncAt,

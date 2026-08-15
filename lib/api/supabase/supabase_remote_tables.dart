@@ -266,6 +266,15 @@ class SupabaseRemoteTables with RepositoryMappings implements RemoteTableGateway
             '[$table] 行 $id 的 updated_at 无法解析：$updatedAt',
           );
         }
+        // **无偏移校验（r 修复）**：`DateTime.tryParse` 对无时区指示符的字符串
+        // 按本地时区解释，`toUtc()` 会按设备时区平移出整段偏差（UTC+8 设备
+        // 相差 8 小时）导致 LWW 比较失真。与 readUtc（repository_mappings）
+        // 的 `!parsed.isUtc` 判脏语义对齐：无偏移文本按脏数据处理 fail-stop。
+        if (!parsed.isUtc) {
+          throw FormatException(
+            '[$table] 行 $id 的 updated_at 无时区指示（非 UTC）：$updatedAt',
+          );
+        }
         // 返回 UTC（与网关其余路径 UTC 语义一致；toLocal 会让返回值随
         // 机器时区偏移，下游与 UTC 值比较时产生整段偏差）。
         result[id] = parsed.toUtc();
@@ -452,9 +461,13 @@ class SupabaseRemoteTables with RepositoryMappings implements RemoteTableGateway
         code.length == 3 &&
         statusCode >= 400 &&
         statusCode < 500) {
-      // 429（限流）是瞬时错误：在指数退避框架下应重试（遵循 Retry-After），
-      // 其余 4xx（权限/校验/无数据）不可重试。
-      if (statusCode == 429) return false;
+      // **瞬态 4xx 豁免（r 修复）**：429（限流）外，408（Request Timeout）
+      // 与 425（Too Early）同样属瞬态错误（尤其经代理/CDN 返回时），在指数
+      // 退避框架下应重试（遵循 Retry-After 语义）；其余 4xx（权限/校验/无
+      // 数据）不可重试。
+      if (statusCode == 429 || statusCode == 408 || statusCode == 425) {
+        return false;
+      }
       return true;
     }
     if (code.startsWith('PGRST')) return true;

@@ -1,4 +1,6 @@
 
+import 'dart:io' show stderr;
+
 import '../../utils/result.dart';
 import '../../viewmodels/profile_settings.dart';
 import '../database/app_database.dart' hide ProfileSettings;
@@ -57,12 +59,19 @@ class SettingsRepository with RepositoryMappings {
   }
 
   /// 当前合并阈值（相邻未分配条目合并判定用）；异常回退默认值。
+  ///
+  /// **错误可观测（r 修复）**：与 settings()/applyIfRemoteNewer 的显式
+  /// AppFailure 语义不同，本方法契约是 int（合并判定高频调用，失败回退默认
+  /// 值不阻塞流程）——但静默回退会掩盖真实健康问题（库损坏/连接故障），
+  /// 回退时记 stderr 供排障。
   Future<int> mergeNeighborThresholdMinutes() async {
     try {
       final row = await _settingsRow();
       return row?.mergeNeighborThresholdMinutes ??
           ProfileSettings.defaultMergeNeighborThresholdMinutes;
-    } catch (_) {
+    } catch (e) {
+      // ignore: avoid_print
+      stderr.writeln('[settings] 读取合并阈值失败（回退默认值）：$e');
       return ProfileSettings.defaultMergeNeighborThresholdMinutes;
     }
   }

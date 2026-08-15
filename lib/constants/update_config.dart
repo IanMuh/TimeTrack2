@@ -19,12 +19,7 @@ class UpdateConfig {
   /// 注入串非法（不可解析/非绝对/非 http·https/无主机名）时回退默认仓库地址，
   /// 不因构建配置失误击穿更新流程。
   static final Uri defaultManifestUrl =
-      resolveManifestUrl(
-        AppBuildConfig.getString(
-          AppBuildConfig.updateManifestUrlKey,
-          defaultValue: _defaultManifestUrl,
-        ),
-      ) ??
+      resolveManifestUrl(AppBuildConfig.updateManifestUrl) ??
       Uri.parse(_defaultManifestUrl);
 
   /// 校验清单 URL（纯函数，可独立单测）：合法返回 Uri，非法返回 null（调用方回退默认）。
@@ -58,9 +53,11 @@ class UpdateConfig {
   /// 首次重试等待基时；每次失败等待 `base * 2^n`。
   static const retryBaseDelay = Duration(seconds: 2);
 
-  /// **响应体流读取超时（r1）**：响应头已返回但流挂起/断流不报错会无限等待
-  /// ——给整个流消费过程设独立超时（与检查超时语义区分：检查是头超时、
-  /// 下载是体超时；慢网络下流式按块推进不会误触）。
+  /// **响应体流读取超时（r1）**：`Stream.timeout` 实现为**空闲超时**——相邻
+  /// 两个数据块之间无数据超过此时长即触发（响应头已返回但流挂起/断流不报错
+  /// 会无限等待）。慢网络下按块推进不会误触；**非**整个流消费过程的总时长
+  /// 上限（总时长兜底由下载器在循环内累计检查，见 update_downloader 的
+  /// 实现与注释）。
   static const downloadStreamTimeout = Duration(seconds: 60);
 
   /// 下载分块大小（流式写临时目录）。

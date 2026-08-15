@@ -147,6 +147,22 @@ void main() {
       expect(normalizeLanInput('ws://192.168.1.5'), isNull);
     });
 
+    test('scheme 前缀歧义（r 复审锁定）：host:port 放行 / 多冒号 scheme 前缀拒绝', () {
+      // 单 label 主机 + 端口：`localhost`/`myserver` 匹配 scheme 前缀正则但不
+      // 是 scheme——走 host:port 分支正常放行。
+      expect(normalizeLanInput('localhost:9000'), ('localhost', 9000));
+      expect(normalizeLanInput('myserver:9000'), ('myserver', 9000));
+      // 多冒号非 http scheme 前缀（缺 `//`）：可能被误判为裸 IPv6 放行——拒绝
+      //（防明文静默降级的核心场景）。
+      expect(normalizeLanInput('https:192.168.1.5:9000'), isNull);
+      // 单冒号 `https:9000` 与 `myserver:9000` 形态不可区分（同为"单 label+
+      // 端口"，归一化层不做私网校验）——按 host:port 放行，由调用方
+      // isPrivateNetworkHost('https')==false 拒绝（'https' 非私网主机）。
+      expect(normalizeLanInput('https:9000'), ('https', 9000));
+      // IPv6 形态不受 scheme 前缀拒绝影响。
+      expect(normalizeLanInput('fe80::1'), ('fe80::1', null));
+    });
+
     test('歧义输入：大写 scheme 放行 / userinfo 拒绝 / query·fragment 剥离', () {
       // 大写 scheme：实现先 toLowerCase，HTTP:// 等同 http://
       expect(

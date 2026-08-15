@@ -57,13 +57,25 @@ class SupabaseAuthService {
         return;
       }
       _authControllers.add(controller);
-      _authSub ??= _client.auth.onAuthStateChange
-          .map((data) => data.session?.user.id)
-          .listen(
-        _broadcastAuth,
-        onError: _broadcastAuthError,
-        onDone: _closeAllAuthControllers,
-      );
+      // **同步抛错防护（r 修复）**：`listen` 若同步抛错（底层流已关闭/client
+      // 异常），controller 已加入列表但 onCancel 尚未赋值——订阅者收不到错误、
+      // controller 永久残留使"最后一个取消时释放"永不触发。catch 后移除
+      // controller 并向订阅者转发错误。
+      try {
+        _authSub ??= _client.auth.onAuthStateChange
+            .map((data) => data.session?.user.id)
+            .listen(
+          _broadcastAuth,
+          onError: _broadcastAuthError,
+          onDone: _closeAllAuthControllers,
+        );
+      } catch (e, st) {
+        _authControllers.remove(controller);
+        stderr.writeln('[supabase-auth] 底层认证流订阅失败：$e\n$st');
+        controller.addError(e);
+        controller.close();
+        return;
+      }
       // 底层流 onDone 后 controller 已关闭：再 add 会抛 StateError。
       if (!controller.isClosed) {
         controller.add(currentUserId);
@@ -191,9 +203,11 @@ class SupabaseAuthService {
       // 会话的权威用户**——优先取之（防客户端已有旧会话时 response.user 与
       // 新建会话的 session.user 不一致，OTP 已被消费无法重试会锁死用户）。
       // 空安全说明：gotrue 的 Session.user 为非空类型（'user' 缺失时
-      // Session.fromJson 解析期即抛 FormatException，落入 on AuthException
-      // 分支），取值行 `session?.user.id` 安全；未来 SDK 若将 user 改为可空，
-      // 须同步改为 `session?.user?.id ?? response.user?.id`。
+      // Session.fromJson 解析期抛错）——解析发生在 SDK 网络层返回之后，
+      // **不一定**被包装成 AuthException（可能为 FormatException/类型转换
+      // 错误），下方 `on FormatException` 与兜底 catch 已显式收口：无论
+      // gotrue 是否包装，都不让解析异常逃逸成用户侧崩溃（OTP 已被消费、
+      // 无法重试，须给可读失败而非崩溃）。
       final userId = response.session?.user.id ?? response.user?.id;
       if (userId == null) {
         // 中性表述（失败结果不应自称"登录成功"）。
@@ -202,6 +216,11 @@ class SupabaseAuthService {
       return AppSuccess(userId);
     } on AuthException {
       return const AppFailure('验证失败，请检查验证码或稍后重试');
+    } on FormatException {
+      // 响应结构解析异常（session/user 字段缺失等）——OTP 已消费无法重试，
+      // 给可读失败而非逃逸成崩溃（Dart 流分析：此分支对网络类异常不可达，
+      // 仅兜解析异常）。
+      return const AppFailure('验证响应异常，请稍后重试');
     } on SocketException {
       return const AppFailure('网络不可用，请稍后重试');
     } on TimeoutException {

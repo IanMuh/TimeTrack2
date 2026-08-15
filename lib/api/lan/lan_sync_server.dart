@@ -162,9 +162,18 @@ class LanSyncServer {
   // ---------------------------------------------------------------------------
 
   /// 统一异常兜底：任何未捕获错误 → 500（防 unhandled async error 崩溃进程）。
+  /// **连接类异常静默（r 修复）**：客户端断连（响应写出失败/body 读取中断抛
+  /// SocketException/HttpException/OSError）是正常客户端行为而非服务器错误——
+  /// 直接静默返回（连接已断，无法响应 500），不写日志不污染排查。
   Future<void> _dispatch(HttpRequest request) async {
     try {
       await _route(request);
+    } on SocketException {
+      // 客户端断连：静默（连接已关闭，响应不可达）。
+    } on HttpException {
+      // 连接中断/协议错误：静默。
+    } on OSError {
+      // 平台 IO 错误（连接重置等）：静默。
     } catch (e, st) {
       // 统一兜底：不向客户端泄露内部细节（路径/堆栈），只回通用错误。
       // stderr 记录便于排障（平台日志可见）。
@@ -259,8 +268,10 @@ class LanSyncServer {
       return;
     }
 
-    // 取出即消耗（单次使用）；过期码在查找时才判定 codeExpired（区分 UX）。
-    final info = _pairingCodes.remove(pairingCode.trim());
+    // **先校验再消耗（r 修复）**：配对码查找不立即 remove——device_id 不匹配
+    // 时不得烧掉单次码（合法用户重试还需它）；校验全部通过后才取出即消耗。
+    // 过期码在查找时判定 codeExpired（区分 UX）。
+    final info = _pairingCodes[pairingCode.trim()];
     if (info == null) {
       await _respond(
         request,
@@ -286,6 +297,8 @@ class LanSyncServer {
       );
       return;
     }
+    // 校验全部通过：消耗配对码（单次使用）。
+    _pairingCodes.remove(pairingCode.trim());
 
     final token = '${_uuid.v4()}${_uuid.v4()}';
     final saved = await peerStore.upsertPeer(
@@ -367,6 +380,11 @@ class LanSyncServer {
     // 设备身份校验：bundle 的 source_device_id 必须与 token 对应的授权对端一致。
     // 防已配对客户端伪造任意 source_device_id、携带高 updatedAt 记录注入/覆盖
     // 其他设备的数据（LWW 合并按记录 id，不看 source_device_id）。
+    // **边界如实标注（r 修复）**：本校验只约束 bundle 顶层声明，不约束记录级
+    // 归属——已授权客户端可用任意记录 id + 未来 updatedAt 覆盖服务器数据
+    //（LWW 合并按 id + updatedAt，不校验记录来源）。属 LAN 对等交换语义的
+    // 接受边界（信任已配对设备为对等方）；记录级归属校验需引入记录创建者
+    // 追踪，超出本阶段范围。
     if (clientBundle.sourceDeviceId != authorized.id) {
       await _respond(
         request,

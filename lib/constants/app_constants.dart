@@ -16,11 +16,17 @@ class AppConstants {
 
   /// 开放结束条目（无 endAt）的哨兵日期：2100 足够覆盖任何实际记录，
   /// 仍在 Dart DateTime 范围内。
-  static final farFutureDate = DateTime(2100);
+  /// **UTC 构造（r 修复）**：本地时区 `DateTime(2100)` 对应瞬时随设备时区
+  /// 漂移（±14h），与 UTC 存储的业务时间比较会出现边界不一致——统一 UTC。
+  static final farFutureDate = DateTime.utc(2100);
 
   /// Dart 可表示的最大 DateTime，作为重叠计算中的"无限"哨兵。
+  /// **UTC 构造（r 修复）**：本地时区构造（isUtc: false）在正偏移时区把该
+  /// 边界瞬时转本地时间会越过可表示范围（部分平台抛异常/错误值）——
+  /// 显式 UTC 构造使哨兵在任何时区都稳定。
   static final maxDateTime = DateTime.fromMillisecondsSinceEpoch(
     8640000000000000,
+    isUtc: true,
   );
 
   /// 单条运行中条目超过此时长视为可疑。

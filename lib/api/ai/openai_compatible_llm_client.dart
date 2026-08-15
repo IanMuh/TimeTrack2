@@ -91,14 +91,29 @@ class OpenAiCompatibleLlmClient implements LlmClient {
       if (config.apiKey != null) 'authorization': 'Bearer ${config.apiKey}',
     };
     try {
+      // **jsonEncode 移出 try（r 修复）**：序列化失败抛 JsonUnsupportedObjectError
+      //（继承 Error 非 Exception），下方 on Exception 分支捕获不到——一旦未来
+      // body 出现不可序列化对象（二期工具定义绑定后），异常会逃逸出 chat()
+      // 破坏"一律返回 AppResult"契约。在 try 外序列化，失败直接返回可读失败。
+      final String encoded;
+      try {
+        encoded = jsonEncode(body);
+      } on JsonUnsupportedObjectError {
+        return const AppFailure('模型请求参数无法序列化');
+      }
       final response = await _http
-          .post(uri, headers: headers, body: jsonEncode(body))
+          .post(uri, headers: headers, body: encoded)
           .timeout(config.timeout);
       if (response.statusCode != 200) {
         // 不向用户透出响应体细节（可能含服务端内部错误信息）。
         return AppFailure('模型服务返回错误（${response.statusCode}），请稍后重试');
       }
-      return parseChatResponseBody(response.body);
+      // **显式按 UTF-8 解码**：`response.body` 在响应头缺 charset 时按
+      // ISO-8859-1（Latin-1）解码——OpenAI 兼容端点（DeepSeek/Kimi/Ollama 等）
+      // 的 content-type 通常不带 charset，中文等非 ASCII 字节会被解码成乱码
+      // 且 JSON 仍合法（jsonDecode 不报错，属静默损坏）。OpenAI 兼容端点一律
+      // 返回 UTF-8，直接解码 bodyBytes。
+      return parseChatResponseBody(utf8.decode(response.bodyBytes));
     } on TimeoutException {
       // 在途请求期间被 close（http.Client.close 会使在途 post 抛异常）——
       // 先判 _closed 再归因（防"已关闭"被误映射为网络故障）。
