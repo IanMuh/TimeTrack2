@@ -14,6 +14,12 @@ Future<void> main() async {
   try {
     // 组装数据层 + 全部 store（打开平台数据库、seed、启动编排）。
     final appStore = await AppStore.create(database: AppDatabase.open());
+    // **重复注册防护（r 修复）**：main 被重复执行（测试复用同一容器/多实例
+    // 启动）时，重复 registerSingleton 抛 StateError——已注册则替换（测试
+    // 场景可 reset 容器后重建；替换避免启动崩溃）。
+    if (getIt.isRegistered<AppStore>()) {
+      getIt.unregister<AppStore>();
+    }
     getIt.registerSingleton<AppStore>(appStore);
     runApp(const TimeTrack2App());
   } catch (e, st) {

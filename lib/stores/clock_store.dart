@@ -52,7 +52,22 @@ class ClockStore extends ChangeNotifier {
     if (_disposed || _timer != null) return;
     _timer = Timer.periodic(interval, (_) {
       // 绝对时间重算：不依赖 tick 累计，防漂移（见文件头）。
-      notifyListeners();
+      // **异常隔离（r 修复）**：任一 listener 抛异常都会沿回调向外传播——
+      // 按 Dart 语义，Timer.periodic 回调抛错会导致该周期 Timer 被取消，
+      // 全局时钟静默停止、其余订阅者不再收到任何 tick。捕获并上报而非
+      // 让异常冒泡取消定时器。
+      try {
+        notifyListeners();
+      } catch (e, st) {
+        FlutterError.reportError(
+          FlutterErrorDetails(
+            exception: e,
+            stack: st,
+            library: 'clock_store',
+            context: ErrorDescription('ClockStore tick 通知'),
+          ),
+        );
+      }
     });
   }
 

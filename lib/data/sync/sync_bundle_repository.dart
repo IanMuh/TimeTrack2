@@ -37,32 +37,39 @@ class SyncBundleRepository with RepositoryMappings {
   final SettingsRepository settings;
 
   /// 全量导出（含软删行；删除记录随包传播）。
+  ///
+  /// **快照一致性（r 修复）**：多表顺序读取包在只读事务内——并发写入（计时
+  /// 切换/删除）在读取间隙发生时，导出的"全量快照"会成为跨表矛盾引用（如
+  /// time_entry 引用了刚被并发删除的 activity，接收端 FK 校验失败/回退）。
+  /// 只读事务保证所有读取看到同一数据库快照。
   Future<SyncBundle> exportBundle({
     required String sourceDeviceId,
     DateTime? exportedAt,
-  }) async {
-    final now = exportedAt ?? DateTime.now();
-    final activityList = (await activities.activities(includeDeleted: true))
-        .requireValue();
-    final categoryList = (await categories.categories(includeDeleted: true))
-        .requireValue();
-    final categoryLinks = (await categories.links(includeDeleted: true))
-        .requireValue();
-    final entryList = await timeEntries.allEntries();
-    final logList = (await actionLogs.allLogs()).requireValue();
-    final settingValue = (await settings.settings()).requireValue();
+  }) {
+    return database.transaction(() async {
+      final now = exportedAt ?? DateTime.now();
+      final activityList = (await activities.activities(includeDeleted: true))
+          .requireValue();
+      final categoryList = (await categories.categories(includeDeleted: true))
+          .requireValue();
+      final categoryLinks = (await categories.links(includeDeleted: true))
+          .requireValue();
+      final entryList = await timeEntries.allEntries();
+      final logList = (await actionLogs.allLogs()).requireValue();
+      final settingValue = (await settings.settings()).requireValue();
 
-    return SyncBundle(
-      schemaVersion: SyncBundle.currentSchemaVersion,
-      exportedAt: now,
-      sourceDeviceId: sourceDeviceId,
-      activities: activityList,
-      categories: categoryList,
-      categoryLinks: categoryLinks,
-      timeEntries: entryList,
-      actionLogs: logList,
-      profileSettings: settingValue,
-    );
+      return SyncBundle(
+        schemaVersion: SyncBundle.currentSchemaVersion,
+        exportedAt: now,
+        sourceDeviceId: sourceDeviceId,
+        activities: activityList,
+        categories: categoryList,
+        categoryLinks: categoryLinks,
+        timeEntries: entryList,
+        actionLogs: logList,
+        profileSettings: settingValue,
+      );
+    });
   }
 
   /// 行级 LWW 合并（单事务）：按 id 查本地，`local.updatedAt < remote.updatedAt`
@@ -125,6 +132,13 @@ class SyncBundleRepository with RepositoryMappings {
   }
 
   Future<void> _mergeLink(ActivityCategoryLink remote) async {
+    // **父分类存在性兜底（r 修复）**：乱序同步（link 先于 category 到达）或
+    // 远端删分类而 link 未同步时，插入会触发 FK 约束使整个 mergeBundle 事务
+    // 回滚（'合并同步包失败' 无法定位坏包行）——与 time_entries 的缺失父
+    // 回退一致：分类缺失/已删时跳过该 link（其引用随后续 category 合并
+    // 或下轮同步自然修复；FK 悬挂与孤儿读取问题不阻塞整包）。
+    final category = await _categoryById(remote.categoryId);
+    if (category == null || category.isDeleted) return;
     final query = database.select(database.activityCategoryLinks)
       ..where((t) => t.id.equals(remote.id));
     final row = await query.getSingleOrNull();

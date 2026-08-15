@@ -154,13 +154,15 @@ mixin RepositoryMappings {
   /// ProfileSettingsRow -> ProfileSettings。
   ///
   /// 防御库内损坏数据：timezone 空白/缺失回退当前时区（模型构造函数对空白
-  /// 会抛错，读取路径不因一行脏数据崩溃）；数值沿用模型钳制（构造器在
-  /// release 下对越界值做兜底前，读取侧先归一）。
+  /// 会抛错，读取路径不因一行脏数据崩溃）；**数值经 copyWith 钳制归一**
+  ///（r 修复）——构造器对数值只有 assert（release 被移除），直接构造会让
+  /// release 下库内越界脏数据（如 reminderMinutes=100000）无兜底进入下游
+  /// 调度；copyWith 在 debug/release 均执行 clamp，与写入端同一钳制口径。
   ProfileSettings settingsFromRow(ProfileSettingsRow row) {
     final timezone = row.timezone.trim().isEmpty
         ? DateTime.now().timeZoneName
         : row.timezone;
-    return ProfileSettings(
+    return ProfileSettings.defaults().copyWith(
       userId: row.userId,
       reminderMinutes: row.reminderMinutes,
       reminderIntervalMinutes: row.reminderIntervalMinutes,
@@ -261,6 +263,12 @@ mixin RepositoryMappings {
   /// `2026-08-10T04:00:00`）会被 Dart 按本地时间解释，`toLocal()` 原样返回后
   /// 再经 `utcString` 写回会漂移一个时区差，破坏"字典序=时间序"的跨日拆分/
   /// 重叠裁剪/LWW 比较——库内混入无偏移值视为数据损坏直接抛错。
+  /// **偏移形态边界（已评估挂起）**：`+00:00`/`+08:00` 等非 Z 偏移文本解析后
+  /// isUtc=true 可过校验（绝对时刻正确）；其文本与 Z 形式字典序不同（`+`
+  /// 0x2B < `.` 0x2E < `Z` 0x5A），若与 Z 形式混存库内会破坏字典序=时间序。
+  /// 实际不可达：写入端恒用 [utcString]（Z 形式），外部导入在入库存前已归一
+  /// 为 Z；非 Z 文本仅来自第三方手工写库，测试锁定接受偏移输入为既有契约
+  ///（见 time_mappings_test "readUtc 接受非零时区偏移"），此处保持不收紧。
   DateTime readUtc(String value) {
     final parsed = DateTime.tryParse(value);
     if (parsed == null || !parsed.isUtc) {
@@ -290,11 +298,20 @@ mixin RepositoryMappings {
     final iso = utc.toIso8601String(); // 恒形如 ...T00:00:00.123Z / .123456Z / .000Z
     // 小数部分补到 6 位微秒：3 位（毫秒/整秒）补 3 个零，6 位原样。
     // 注：raw string 中 `$` 原样传给正则 = 结束锚点；写 `\$` 反而匹配字面 $（恒不命中）。
-    final match = RegExp(r'\.(\d{3})(\d{3})?Z$').firstMatch(iso);
-    if (match == null) return iso; // 理论不可达（Dart 恒输出毫秒段）
+    final match = _utcFractionRe.firstMatch(iso);
+    if (match == null) {
+      // **fail-fast（r 修复）**：Dart 的 toIso8601String 输出格式若变化（小数段
+      // 省略/位数异常），静默返回原串会无声破坏"字典序=时间序"不变式（LWW/
+      // 跨日拆分全错且无告警）——显式抛错让调用方（仓储 catch 转 AppResult）
+      // 感知。
+      throw StateError('utcString 无法识别 toIso8601String 输出格式：$iso');
+    }
     final micros = match.group(1)! + (match.group(2) ?? '000');
     return iso.replaceRange(match.start, match.end, '.${micros}Z');
   }
 }
+
+/// 匹配 ISO8601 小数秒段（复用，防每次写库新建 RegExp）。
+final _utcFractionRe = RegExp(r'\.(\d{3})(\d{3})?Z$');
 
 

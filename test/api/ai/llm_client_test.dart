@@ -200,7 +200,7 @@ void main() {
       expect(config('http://localhost:11434/v1').baseUrl, 'http://localhost:11434/v1');
     });
 
-    test('非法：非 http(s)/空主机/子路径/query/fragment/userInfo/深层路径/双斜杠拒绝', () {
+    test('非法：非 http(s)/空主机/子路径/query/fragment/userInfo/深层路径/双斜杠/反斜杠/点段编码拒绝', () {
       for (final bad in [
         'ftp://api.example.com',
         'not-a-url',
@@ -214,6 +214,10 @@ void main() {
         'https://api.example.com//v1', // 双斜杠路径
         'https://api.example.com//', // 裸双斜杠尾路径
         'https://api.example.com/a%2Fb', // 编码斜杠（解码后为深层路径）
+        'https://api.example.com/%2e', // 编码点段（解码后为 `.`）
+        'https://api.example.com/%2e%2e', // 编码上级段（解码后为 `..`）
+        'https://api.example.com/a%5c', // 编码反斜杠（部分服务器当路径分隔符）
+        'https://api.example.com/a\\b', // 裸反斜杠（同上）
       ]) {
         expect(() => config(bad), throwsArgumentError,
             reason: '非法 baseUrl 应拒绝：$bad');

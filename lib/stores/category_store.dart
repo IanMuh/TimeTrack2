@@ -18,6 +18,8 @@
 ///   CategoryDeletion 由仓储单事务原子恢复）。
 library;
 
+import 'dart:io' show stderr;
+
 import 'package:flutter/foundation.dart';
 
 import '../data/repositories/category_repository.dart';
@@ -173,31 +175,46 @@ class CategoryStore extends ChangeNotifier {
   List<ActivityCategoryLink> get links => _links;
 
   /// 加载分类/链接并重建树索引（启动、数据变更后调用）。
+  ///
+  /// **异常兜底（r 修复）**：由 dataRevision 监听器以 fire-and-forget 触发——
+  /// 仓储若未按契约返回 AppFailure 而是直接抛（mock/未来重构）、或
+  /// `_rebuildIndexes`/`notifyListeners` 内部抛错，会成为未处理的异步异常
+  ///（listener 调用链无 try/catch）——整体包 try/catch，失败置位不崩溃。
   Future<void> reload() async {
     if (_disposed) return; // dispose 后静默跳过（防 async 恢复执行崩溃）
     final seq = ++_reloadSeq;
-    final categoriesResult = await categories.categories();
-    if (categoriesResult case AppFailure<List<ActivityCategory>> _) {
+    try {
+      final categoriesResult = await categories.categories();
+      if (categoriesResult case AppFailure<List<ActivityCategory>> _) {
+        if (_disposed || seq != _reloadSeq) return;
+        // 失败置位供 UI 提示（缓存保持旧值）——防"写成功但缓存静默陈旧"。
+        _loadFailed = true;
+        notifyListeners();
+        return;
+      }
+      if (_disposed || seq != _reloadSeq) return; // await 期间 dispose/更新的 reload
+      final linksResult = await categories.links();
+      if (linksResult case AppFailure<List<ActivityCategoryLink>> _) {
+        if (_disposed || seq != _reloadSeq) return;
+        _loadFailed = true;
+        notifyListeners();
+        return;
+      }
       if (_disposed || seq != _reloadSeq) return;
-      // 失败置位供 UI 提示（缓存保持旧值）——防"写成功但缓存静默陈旧"。
+      _all = List<ActivityCategory>.unmodifiable(categoriesResult.requireValue());
+      _links = List<ActivityCategoryLink>.unmodifiable(linksResult.requireValue());
+      _loadFailed = false;
+      _rebuildIndexes();
+      notifyListeners();
+    } catch (e, st) {
+      // 契约外异常（仓储直接抛错等）：不崩溃、不静默——置失败位供 UI 提示，
+      // stderr 记录便于排障。
+      if (_disposed) return;
+      // ignore: avoid_print
+      stderr.writeln('[category] reload 未预期异常：$e\n$st');
       _loadFailed = true;
       notifyListeners();
-      return;
     }
-    if (_disposed || seq != _reloadSeq) return; // await 期间 dispose/更新的 reload
-    final linksResult = await categories.links();
-    if (linksResult case AppFailure<List<ActivityCategoryLink>> _) {
-      if (_disposed || seq != _reloadSeq) return;
-      _loadFailed = true;
-      notifyListeners();
-      return;
-    }
-    if (_disposed || seq != _reloadSeq) return;
-    _all = List<ActivityCategory>.unmodifiable(categoriesResult.requireValue());
-    _links = List<ActivityCategoryLink>.unmodifiable(linksResult.requireValue());
-    _loadFailed = false;
-    _rebuildIndexes();
-    notifyListeners();
   }
 
   /// 最近一次分类/链接加载失败（缓存保持旧值；UI 提示用）。
@@ -315,17 +332,23 @@ class CategoryStore extends ChangeNotifier {
   }
 
   /// 更新分类（名/色/parentId）。undo 恢复旧快照。
+  ///
+  /// [clearParentId] = true 时把分类移回顶级（清除父级）；传 [parentId] 非空
+  /// 则挂到指定父分类下。二者互斥（clearParentId 优先，防静默忽略——copyWith
+  /// 的 `parentId ?? this.parentId` 语义会让传 null 意图清空父级被吞掉）。
   Future<AppResult<ActivityCategory>> updateCategory({
     required ActivityCategory category,
     String? name,
     int? color,
     String? parentId,
+    bool clearParentId = false,
   }) async {
     final result = await categories.updateCategory(
       category: category,
       name: name,
       color: color,
       parentId: parentId,
+      clearParentId: clearParentId,
     );
     if (result case AppFailure<ActivityCategory> failure) {
       return failure;

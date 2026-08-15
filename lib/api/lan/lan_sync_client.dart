@@ -127,8 +127,11 @@ class LanSyncClient {
     if (saved case AppFailure<void> failure) {
       return AppFailure('保存 LAN 对端失败：${failure.message}');
     }
-    // 单主机语义（老项目）：清旧 lanClient 对端（保留刚插入的新对端），旧 token
-    // 随旧行一并作废——不残留带失效 token 的陈旧行。
+    // 单主机语义（老项目）：清旧 lanClient 对端（保留刚插入的新对端）。
+    // **边界如实标注（r 修复）**：这里只删除本地持久化的旧对端行，旧 token
+    // 在**服务器端**仍有效（本客户端无吊销通道；服务端按 token 鉴权、重新
+    // 配对会轮换新 token 使旧 token 失效）。若旧 token 曾泄露，泄露方在主机
+    // 重新配对前仍可调用 /sync——属 LAN 信任模型边界（服务端重新配对即吊销）。
     final cleared = await peerStore.clearLanClientPeersExcept(peer.id);
     if (cleared case AppFailure<void> clearFailure) {
       // 清理失败：旧行残留但新行已存（currentLanClientPeer 按 updatedAt 倒序取
@@ -144,11 +147,33 @@ class LanSyncClient {
     return AppSuccess(peer);
   }
 
+  /// 进行中的同步 Future（并发互斥）：pair 末尾的自动同步与手动 syncNow 之间、
+  /// 以及两个 syncNow 之间没有串行化时，exportBundle/mergeBundle/normalizeAfterMerge
+  /// 跨多个 await 点会交错执行——流程 A 导出本地快照后让出，流程 B 完成
+  /// merge+normalize，随后 A 用过期快照再次 merge/normalize，LWW 合并与归一化
+  /// 顺序错乱可能导致数据回退或脏状态。并发调用共享同一 in-flight Future
+  ///（结果语义一致：都完成同一轮同步）。
+  Future<AppResult<SyncBundle>>? _syncInFlight;
+
   /// 立即同步：发本机全量 bundle → 收主机全量 → LWW 合并 + 归一化。
   ///
   /// 返回**接收到的远端 bundle**（非本地合并后结果——LWW 合并后本地状态可能与
   /// 远端包不一致，调用方若需展示本地最终数据应重新查询，勿用返回值刷新）。
   Future<AppResult<SyncBundle>> syncNow() async {
+    final inFlight = _syncInFlight;
+    if (inFlight != null) return inFlight;
+    final future = _runSyncNow();
+    _syncInFlight = future;
+    try {
+      return await future;
+    } finally {
+      if (identical(_syncInFlight, future)) {
+        _syncInFlight = null;
+      }
+    }
+  }
+
+  Future<AppResult<SyncBundle>> _runSyncNow() async {
     final peerResult = await peerStore.currentLanClientPeer();
     if (peerResult case AppFailure<SyncPeer?> failure) {
       return AppFailure(failure.message);
@@ -274,12 +299,23 @@ class LanSyncClient {
         return AppFailure(failure.message);
       }
       final verifiedAddresses = resolved.requireValue();
-      client.connectionFactory = (Uri uri, String? _, int? port) {
-        // 直连校验通过的地址：不复解析，消除 TOCTOU。
-        return Socket.startConnect(
-          verifiedAddresses.first,
-          port ?? uri.port,
-        );
+      client.connectionFactory = (Uri uri, String? _, int? port) async {
+        // **多地址按序回退（r 修复）**：主机解析出多个地址（如同时含 A/AAAA
+        // 记录）时，首选地址族可能当前不可达（如无 IPv6 路由/端口不通）——
+        // 依次尝试全部已验证地址，全部失败抛最后异常（错误收敛到 _request
+        // 的 SocketException 分支）。
+        Object? lastError;
+        for (final address in verifiedAddresses) {
+          try {
+            return await Socket.startConnect(address, port ?? uri.port);
+          } catch (e) {
+            lastError = e;
+          }
+        }
+        if (lastError is Object) {
+          throw lastError;
+        }
+        throw const SocketException('无法连接任何已验证地址');
       };
       final request = await client.openUrl(method, uri).timeout(requestTimeout);
       request.headers.contentType = ContentType.json;
@@ -307,7 +343,16 @@ class LanSyncClient {
       final bytes = BytesBuilder(copy: false);
       var received = 0;
       var tooLarge = false;
+      // **累计超时（r 修复）**：`response.timeout(...)` 只在每个数据事件后重置
+      // 定时器，仅保证"相邻 chunk 间隔 ≤ 超时"——慢速/恶意主机可每 7 秒吐 1
+      // 字节无限拖长连接（slow-loris）。记录读体起始时刻，每 chunk 检查总
+      // 耗时是否超过 [requestTimeout]，超限抛 TimeoutException（走既有超时
+      // 分支）。
+      final readDeadline = DateTime.now().add(requestTimeout);
       await for (final chunk in response.timeout(requestTimeout)) {
+        if (DateTime.now().isAfter(readDeadline)) {
+          throw TimeoutException('LAN 主机响应读取超时', requestTimeout);
+        }
         received += chunk.length;
         if (received > maxPayloadBytes) {
           tooLarge = true;
@@ -350,7 +395,10 @@ class LanSyncClient {
       // 任何未预期异常统一收敛为 AppFailure。
       return AppFailure('LAN 请求异常：$e');
     } finally {
-      client.close();
+      // **显式断开（r 修复）**：未传 force 的 close() 会等待在途请求自然结束
+      //（超时/异常频繁时短暂积压 fd/端口资源）；`force: true` 立即断开连接。
+      // 注：dart:io HttpClient.close 返回 void（非 Future），直接调用。
+      client.close(force: true);
     }
   }
 }

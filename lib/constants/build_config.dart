@@ -9,20 +9,31 @@ library;
 class AppBuildConfig {
   AppBuildConfig._();
 
-  /// 读取 String 型 dart-define；未提供时返回 [defaultValue]。
-  static String getString(String key, {required String defaultValue}) {
-    // dart-define 在编译期注入，运行时读取（const 无法用运行时参数，故用 String.fromEnvironment 的非 const 形式）。
-    final fromEnv = String.fromEnvironment(key);
-    return fromEnv.isEmpty ? defaultValue : fromEnv;
-  }
+  // ---------------------------------------------------------------------------
+  // 已声明的 dart-define 键
+  // ---------------------------------------------------------------------------
 
-  /// 读取 bool 型 dart-define；未提供时返回 [defaultValue]。
+  /// 云同步配置（supabase）。未提供时应用完全离线运行（与老项目一致）。
+  static const supabaseUrlKey = 'SUPABASE_URL';
+  static const supabaseAnonKeyKey = 'SUPABASE_ANON_KEY';
+
+  /// 更新清单 URL 注入键（默认指向本仓库 raw.githubusercontent，可覆盖）。
+  static const updateManifestUrlKey = 'UPDATE_MANIFEST_URL';
+
+  /// 已注入的编译期配置值（**const 上下文**读取——`String.fromEnvironment`
+  /// 仅在 const 上下文（编译期）解析 dart-define；非 const 调用恒返回默认值，
+  /// 运行时动态 key 无法解析，故每个已知键声明为 const 字段后直接引用）。
+  static const supabaseUrl = String.fromEnvironment(supabaseUrlKey, defaultValue: '');
+  static const supabaseAnonKey = String.fromEnvironment(supabaseAnonKeyKey, defaultValue: '');
+  static const updateManifestUrl =
+      String.fromEnvironment(updateManifestUrlKey, defaultValue: '');
+
+  /// 是否已注入云同步配置（SUPABASE_URL + ANON_KEY 均非空）。
   ///
-  /// 识别 `true`/`1`/`yes`（忽略大小写与首尾空白）为真，`false`/`0`/`no` 为假；
-  /// 无法识别的非空值回退 [defaultValue]（避免 `TRUE`/`1.0` 等被静默误判）。
-  static bool getBool(String key, {required bool defaultValue}) {
-    return parseBool(String.fromEnvironment(key), defaultValue: defaultValue);
-  }
+  /// 未配置时应用完全离线运行（老项目语义）；由后端工厂决定用
+  /// NoopSyncBackend（api/supabase/sync_backend.dart）。
+  static bool isSupabaseConfigured() =>
+      supabaseUrl.isNotEmpty && supabaseAnonKey.isNotEmpty;
 
   /// 解析布尔字符串（纯函数，可独立单测）。
   ///
@@ -41,25 +52,4 @@ class AppBuildConfig {
     }
     return defaultValue;
   }
-
-  // ---------------------------------------------------------------------------
-  // 已声明的 dart-define 键
-  // ---------------------------------------------------------------------------
-
-  /// 云同步配置（supabase）。未提供时应用完全离线运行（与老项目一致）。
-  static const supabaseUrlKey = 'SUPABASE_URL';
-  static const supabaseAnonKeyKey = 'SUPABASE_ANON_KEY';
-
-  /// 是否已注入云同步配置（SUPABASE_URL + ANON_KEY 均非空）。
-  ///
-  /// 未配置时应用完全离线运行（老项目语义）；由后端工厂决定用
-  /// NoopSyncBackend（api/supabase/sync_backend.dart）。
-  static bool isSupabaseConfigured() {
-    final url = getString(supabaseUrlKey, defaultValue: '');
-    final key = getString(supabaseAnonKeyKey, defaultValue: '');
-    return url.isNotEmpty && key.isNotEmpty;
-  }
-
-  /// 更新清单 URL（默认指向本仓库 raw.githubusercontent，可覆盖）。
-  static const updateManifestUrlKey = 'UPDATE_MANIFEST_URL';
 }

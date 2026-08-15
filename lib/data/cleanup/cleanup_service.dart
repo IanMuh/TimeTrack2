@@ -644,9 +644,18 @@ class CleanupService with RepositoryMappings {
     // updatedAt（清理造成真实变更），墓碑子只置 parentId 不动 updatedAt。
     for (final chunk in _chunks(deletable)) {
       // 1) 存活子（deletedAt IS NULL）：置空 + 刷新 updatedAt。
+      // **userId 分区（r9）**：两条 UPDATE 均须限定同用户行——防共享设备上
+      // 跨用户子分类（parentId 指向本用户将删分类）被本用户清理误改
+      //（置空/刷新 updatedAt 会伪造 B 用户的同步增量，r11 写入层同用户
+      // 引用不变式被违反时此处是最后防线）。
       await (database.update(
         database.activityCategories,
-      )..where((t) => t.parentId.isIn(chunk) & t.deletedAt.isNull())).write(
+      )..where(
+        (t) =>
+            _userIdMatches(t.userId, userId) &
+            t.parentId.isIn(chunk) &
+            t.deletedAt.isNull(),
+      )).write(
         ActivityCategoriesCompanion(
           parentId: const Value(null),
           updatedAt: Value(utcString(now)),
@@ -654,7 +663,12 @@ class CleanupService with RepositoryMappings {
       );
       // 2) 软删子（deletedAt IS NOT NULL）：仅置空，不动 updatedAt。
       await (database.update(database.activityCategories)
-            ..where((t) => t.parentId.isIn(chunk) & t.deletedAt.isNotNull()))
+            ..where(
+              (t) =>
+                  _userIdMatches(t.userId, userId) &
+                  t.parentId.isIn(chunk) &
+                  t.deletedAt.isNotNull(),
+            ))
           .write(ActivityCategoriesCompanion(parentId: const Value(null)));
     }
     var count = 0;

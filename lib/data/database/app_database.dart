@@ -1,10 +1,13 @@
-/// drift 单一 schema（阶段 1 建齐全部 8 表）。
+/// drift 单一 schema（阶段 1 建齐业务表 + 阶段 2 追加配置/同步元数据表）。
 ///
 /// 设计要点（计划与不变式）：
 /// - 时间一律 **UTC ISO8601 字符串**存储（`text()` 列；Dart 侧由仓储层
 ///   `viewmodels` 的 readDateTime + `toUtc().toIso8601String()` 转换），
 ///   字典序 = 时间序，与同步协议/文件互通格式一致；
-/// - 软删统一 `deleted_at`（可空）替代布尔位，删除永远赢；
+/// - 软删统一 `deleted_at`（可空）替代布尔位，删除永远赢——**软删不变式
+///   仅适用于业务表**（activities/activity_categories/activity_category_links/
+///   time_entries/action_logs/tracking_rules）；app_metadata/sync_peers/
+///   profile_settings 为配置/同步元数据表，无 deleted_at、不参与软删同步；
 /// - 部分索引只索引未删行（`deleted_at is null`）；
 /// - FK 不设 ON DELETE CASCADE：删除是 UPDATE（软删），物理级联会破坏
 ///   "删除永远赢"——递归级联在仓储层事务内手动完成（含分类层级）。

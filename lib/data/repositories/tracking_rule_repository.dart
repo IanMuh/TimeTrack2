@@ -159,7 +159,12 @@ class TrackingRuleRepository with RepositoryMappings {
         // **unknown 匹配类型防御短路**：match_kind=unknown 是反序列化兜底值
         //（未知值不落库）——远端行若为 unknown（未来版本新匹配类型被当前
         // 版本降级），落地会覆盖本地有效规则造成跨版本数据退化——跳过。
-        if (remote.matchKind == TrackingRuleMatchKind.unknown) {
+        // **仅对存活行跳过（r 修复）**：墓碑行（isDeleted）仍须参与 LWW——
+        // 未来版本引入新类型后删除的规则，当前版本反序列化为 unknown 墓碑，
+        // 若在此短路则删除不落地、本地旧规则永久存活（甚至被 rulesSince
+        // 推回远端反向覆盖墓碑造成多端复活），破坏"LWW 删除永远赢"不变量。
+        if (remote.matchKind == TrackingRuleMatchKind.unknown &&
+            !remote.isDeleted) {
           return;
         }
         // **平局决胜分支**：updated_at 相等时远端删除墓碑仍应用（删除永远赢）——

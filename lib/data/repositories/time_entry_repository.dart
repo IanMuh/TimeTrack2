@@ -70,10 +70,12 @@ class TimeEntryRepository with RepositoryMappings {
     return rows.map(timeEntryFromRow).toList();
   }
 
-  /// 按 id 查询。
+  /// 按 id 查询（**仅活行**；软删行返回 null——与命名/文档契约一致）。
+  /// LWW（[replaceIfRemoteNewer]）等需比较软删行时用
+  /// [entryByIdIncludingDeleted]。
   Future<TimeEntry?> entryById(String entryId) async {
     final query = database.select(database.timeEntries)
-      ..where((t) => t.id.equals(entryId));
+      ..where((t) => t.id.equals(entryId) & t.deletedAt.isNull());
     final row = await query.getSingleOrNull();
     return row == null ? null : timeEntryFromRow(row);
   }
@@ -205,8 +207,9 @@ class TimeEntryRepository with RepositoryMappings {
         // 合并可能把更早的未分配条目并入运行段（运行行被软删）——重读最新运行条目。
         return AppSuccess(await runningEntry() ?? running);
       }
-      if (running.startAt.isAfter(now)) {
-        // 未来条目：软删后开始未分配。
+      if (!running.startAt.isBefore(now)) {
+        // 未来条目或零时长（startAt == now，与 switch 的零长软删语义一致）：
+        // 软删后开始未分配——防写入 endAt==startAt 的零长脏数据。
         final removed = running.copyWith(deletedAt: now, updatedAt: now);
         await _saveEntry(removed);
         await _activityRepo.softDeleteOneOffActivityIfNeeded(
@@ -285,17 +288,20 @@ class TimeEntryRepository with RepositoryMappings {
     required DateTime splitAt,
   }) async {
     try {
-      final current = await entryById(entryId);
-      if (current == null || current.isDeleted || current.isRunning) {
-        return const AppFailure('条目不存在、已删除或运行中，无法切割');
-      }
-      final endAt = current.endAt!;
-      if (!current.startAt.isBefore(splitAt) || !splitAt.isBefore(endAt)) {
-        return const AppFailure('切割时间必须严格位于条目起止之间');
-      }
+      // **读-判-写包同一事务（r 修复）**：事务外读取的快照在事务提交前被
+      // 并发修改/软删时，陈旧快照会覆盖新状态甚至复活已删行——事务内重读
+      // 并校验后再写。
       final now = _now();
       final saved = <TimeEntry>[];
       await database.transaction(() async {
+        final current = await entryById(entryId);
+        if (current == null || current.isDeleted || current.isRunning) {
+          throw const _SplitEntryAborted('条目不存在、已删除或运行中，无法切割');
+        }
+        final endAt = current.endAt!;
+        if (!current.startAt.isBefore(splitAt) || !splitAt.isBefore(endAt)) {
+          throw const _SplitEntryAborted('切割时间必须严格位于条目起止之间');
+        }
         final first = await _activityRepo.entryWithActivitySnapshot(
           current.copyWith(endAt: splitAt, updatedAt: now),
           executor: database,
@@ -314,12 +320,14 @@ class TimeEntryRepository with RepositoryMappings {
       });
       await _insertActionLog(
         actionType: ActionType.split,
-        activityId: current.activityId,
-        entryId: current.id,
+        activityId: (await entryByIdIncludingDeleted(entryId))?.activityId,
+        entryId: entryId,
         occurredAt: now,
         message: '切割时间段',
       );
       return AppSuccess(saved);
+    } on _SplitEntryAborted catch (e) {
+      return AppFailure(e.message);
     } catch (e) {
       return AppFailure('切割时间段失败：$e');
     }
@@ -908,18 +916,25 @@ class TimeEntryRepository with RepositoryMappings {
     }
 
     final pieces = <TimeEntry>[];
-    var first = true;
-    for (final interval in remaining) {
+    // **运行段保留原 id**：候选为运行中条目（endAt null）且被切出多段时，
+    // 右运行段必须保留原 id——LWW 同步按 id 匹配，改 id 会与他端运行段并存
+    // 产生双运行，或原 id 被已结束首段占用后远端运行段被 LWW 覆盖而丢失运行
+    // 状态（与 rollover 的运行段保 id 约定一致）。候选已结束时无运行段，首段
+    // 保留原 id（历史切段行为不变）。
+    final runningIndex = remaining.indexWhere((interval) => interval.end == null);
+    for (var i = 0; i < remaining.length; i++) {
+      final interval = remaining[i];
       pieces.add(
         entry.copyWith(
-          id: first ? entry.id : _uuid.v4(),
+          id: (runningIndex >= 0 ? i == runningIndex : i == 0)
+              ? entry.id
+              : _uuid.v4(),
           startAt: interval.start,
           endAt: interval.end,
           clearEndAt: interval.end == null,
           updatedAt: updatedAt,
         ),
       );
-      first = false;
     }
     return pieces;
   }
@@ -933,7 +948,10 @@ class TimeEntryRepository with RepositoryMappings {
     try {
       // LWW 比较与写入同一事务：防比较后写入前本地新写入被旧远端覆盖。
       await database.transaction(() async {
-        final local = await entryById(remote.id);
+        // **用含软删行版本（r 修复）**：本地软删墓碑须参与 LWW——若用活行版
+        // entryById，本地墓碑会被判"不存在"而让更旧的远端活行复活（删除永远
+        // 赢被破坏）。
+        final local = await entryByIdIncludingDeleted(remote.id);
         if (local == null || local.updatedAt.isBefore(remote.updatedAt)) {
           await _saveEntry(remote);
         }
@@ -957,17 +975,23 @@ class TimeEntryRepository with RepositoryMappings {
   }
 
   Future<String> _ensureDeviceId() async {
-    // 阶段 3 起由 AppStore 统一注入稳定 device id（app_metadata）；
-    // 此处先取元数据，缺失则用随机 uuid 兜底（阶段 3 前仅作展示）。
-    final query = database.select(database.appMetadata)
-      ..where((t) => t.key.equals('device_id'));
-    final row = await query.getSingleOrNull();
-    if (row != null) return row.value;
-    final id = _uuid.v4();
-    await database.into(database.appMetadata).insertOnConflictUpdate(
-          AppMetadataCompanion.insert(key: 'device_id', value: id),
-        );
-    return id;
+    // **事务内读-生成-写（r 修复）**：阶段 3 编排注入稳定 device id 前此路径
+    // 是实际使用路径——无事务的读-生成-写并发（switch/stop 同时触发）会各自
+    // 生成不同 uuid、后写者覆盖先写者，导致同一设备多个 device_id 且调用方
+    // 各自返回不同 id（同步归属不一致）。事务串行化读-判-写。
+    // 阶段 3 起由 AppStore 统一注入稳定 device id（app_metadata）后此兜底
+    // 不再并发触发，保留防御。
+    return database.transaction(() async {
+      final query = database.select(database.appMetadata)
+        ..where((t) => t.key.equals('device_id'));
+      final row = await query.getSingleOrNull();
+      if (row != null) return row.value;
+      final id = _uuid.v4();
+      await database.into(database.appMetadata).insertOnConflictUpdate(
+            AppMetadataCompanion.insert(key: 'device_id', value: id),
+          );
+      return id;
+    });
   }
 
   /// 写操作日志（支持事务内）。
@@ -999,4 +1023,12 @@ class TimeEntryRepository with RepositoryMappings {
     return entry.isRunning &&
         entry.durationUntil(now) > const Duration(hours: AppConstants.suspiciousEntryHours);
   }
+}
+
+/// split 校验失败信号（事务内 abort）：携带可读原因，外层 catch 转 AppFailure。
+/// 与网络/IO 异常区分——校验失败不记通用"切割失败"归因。
+class _SplitEntryAborted implements Exception {
+  const _SplitEntryAborted(this.message);
+
+  final String message;
 }

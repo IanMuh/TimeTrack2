@@ -33,10 +33,7 @@ SyncBackend createSupabaseSyncBackend({
   //（决策逻辑可注入配置值单测，不依赖 String.fromEnvironment）。
   return SupabaseSyncBackend.buildBackend(
     isConfigured: AppBuildConfig.isSupabaseConfigured(),
-    url: AppBuildConfig.getString(
-      AppBuildConfig.supabaseUrlKey,
-      defaultValue: '',
-    ),
+    url: AppBuildConfig.supabaseUrl,
     engine: engine,
     syncTimeout: syncTimeout,
   );
@@ -179,10 +176,7 @@ class SupabaseSyncBackend implements SyncBackend {
   SupabaseClient get _lazyClient =>
       _client ??= SupabaseClient(
         _validatedUrl(),
-        AppBuildConfig.getString(
-          AppBuildConfig.supabaseAnonKeyKey,
-          defaultValue: '',
-        ),
+        AppBuildConfig.supabaseAnonKey,
       );
 
   /// 校验注入的 SUPABASE_URL（**[supabaseUrl] 实例字段**，buildBackend 决策时
@@ -289,17 +283,26 @@ class SupabaseSyncBackend implements SyncBackend {
   @override
   Future<AppResult<void>> signOut() async {
     if (!isConfigured) return const AppFailure(SyncBackend.unconfiguredError, code: SyncBackend.unconfiguredCode);
-    final result = await _lazyAuth.signOut();
-    if (result is AppSuccess<void>) {
-      // 仅成功时释放懒加载引用：失败时保留现有 client（其本地持久化会话仍
-      // 存在，reset 后重建会重新水合旧会话，造成"登出失败但状态被清空随后
-      // 又恢复登录"的不一致）。
-      reset();
-      // 在途同步不中断（无法安全取消）：epoch 已递增，旧同步返回后结果被
-      // 丢弃；_syncInFlight 保留——并发新 syncNow 复用旧 Future 拿到
-      // "会话已切换"结果，防新旧身份同步重叠。
+    try {
+      // **网络段超时（r 修复）**：登出含网络请求（/logout）——网络挂起时
+      // 若无限等待，`reset()`（释放旧 client/gotrue 订阅/持久化会话）永不
+      // 执行，资源持续占用。与引擎段共用 [syncTimeout]；超时按失败处理
+      //（不清本地会话——登出未成功，下次可重试；避免"登出失败但状态已清"）。
+      final result = await _lazyAuth.signOut().timeout(syncTimeout);
+      if (result is AppSuccess<void>) {
+        // 仅成功时释放懒加载引用：失败时保留现有 client（其本地持久化会话仍
+        // 存在，reset 后重建会重新水合旧会话，造成"登出失败但状态被清空随后
+        // 又恢复登录"的不一致）。
+        reset();
+        // 在途同步不中断（无法安全取消）：epoch 已递增，旧同步返回后结果被
+        // 丢弃；_syncInFlight 保留——并发新 syncNow 复用旧 Future 拿到
+        // "会话已切换"结果，防新旧身份同步重叠。
+      }
+      return result;
+    } on TimeoutException {
+      // 登出网络段挂起：返回可读失败，不清会话（下次可重试）。
+      return const AppFailure('登出超时，请稍后重试');
     }
-    return result;
   }
 
   @override
@@ -541,15 +544,19 @@ class SupabaseSyncBackend implements SyncBackend {
         }
         return const AppFailure('同步超时，请稍后重试');
       } catch (e) {
-        // 异常细节写日志，不向用户透出（防泄露 SQL/URL/堆栈等内部信息）。
+        // **脱敏日志（r 修复）**：`$e` 可能携带请求 URL/查询参数/响应片段
+        //（SupabaseException/http 异常），接入崩溃收集/远程上报后会随日志泄露
+        // 内部信息——只记异常类型（可区分错误族），细节不落日志。文案仍面向
+        // 用户脱敏（"同步失败，请稍后重试"）。
         // ignore: avoid_print
-        stderr.writeln('[supabase-sync] 同步异常：$e');
+        stderr.writeln('[supabase-sync] 同步异常：${e.runtimeType}');
         return const AppFailure('同步失败，请稍后重试');
       }
     } catch (e) {
       // 整段 _runSync 兜底（懒初始化/客户端构造/GoTrue 读取等异常也转 AppResult）。
+      // 同样只记异常类型（防 URL/路径等细节泄漏）。
       // ignore: avoid_print
-      stderr.writeln('[supabase-sync] 同步初始化异常：$e');
+      stderr.writeln('[supabase-sync] 同步初始化异常：${e.runtimeType}');
       return const AppFailure('同步失败，请稍后重试');
     }
   }
@@ -584,12 +591,16 @@ class SupabaseSyncBackend implements SyncBackend {
   /// - 当前会话与 [oldUserId]（刷新前的旧身份）相同 → 未切换账号，执行清理；
   /// - 当前会话已是新账号 → **跳过清理**（防误抹新会话；残留旧身份会话的
   ///   极端场景由 epoch/身份校验在下次同步时兜底——水合的旧身份无法通过
-  ///   `effectiveUserId == userId` 比对）。
+  ///   `effectiveUserId == userId` 比对）；
+  /// - **当前会话尚未水合（currentId 为 null，r 修复）**→ **保守跳过**：reset
+  ///   后新 client 已创建但 currentSession 异步恢复尚未完成时身份未知，此时
+  ///   清理可能抹掉新账号会话（窗口比微任务级更大）；未知身份不清除。
   void _guardClearPersistedSession(SupabaseClient oldClient, String oldUserId) {
     final current = _client;
     if (current != null) {
       final currentId = current.auth.currentSession?.user.id;
-      if (currentId != null && currentId != oldUserId) return;
+      if (currentId == null) return; // 身份未知（恢复窗口）：保守跳过
+      if (currentId != oldUserId) return;
     }
     _clearPersistedSession(oldClient);
   }

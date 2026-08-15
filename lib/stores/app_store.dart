@@ -248,13 +248,21 @@ class AppStore {
     //    自动云同步），无需额外动作。
   }
 
-  /// 默认 Windows 安装器（阶段 4 装配时 main 注入真实目录；此处用当前
-  /// 运行目录占位——仅保证组装可用，不承诺路径正确性）。
+  /// 默认 Windows 安装器（阶段 4 装配时 main 注入真实目录；此处仅保证组装
+  /// 可用，不承诺路径正确性）。
+  ///
+  /// **占位安全（r 修复）**：dataDir 必须位于 programDir **之外**——安装器
+  /// applyStaging 的 `_clearProgramDir` 会递归清空 programDir 下除 staging/
+  /// 备份外的一切（不排除 dataDir）；占位 dataDir 若仍在程序目录内，默认路径
+  /// 触发安装更新会连带清空用户数据。占位 dataDir 落到系统临时目录
+  /// （timetrack2/data），与程序目录天然分离。
   static WindowsInstaller _defaultWindowsInstaller() {
     final base = Directory.current.path;
     return WindowsInstaller(
       programDir: base,
-      dataDir: '$base${Platform.pathSeparator}data',
+      dataDir:
+          '${Directory.systemTemp.path}${Platform.pathSeparator}'
+          'timetrack2${Platform.pathSeparator}data',
     );
   }
 

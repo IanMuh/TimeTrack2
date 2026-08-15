@@ -41,6 +41,7 @@ final List<CommandDefinition> commandDefinitions = [
     minPositionalArgs: 1,
     maxPositionalArgs: 1,
     allowedOptions: {'start', 'end', 'note'},
+    requiredOptions: {'start', 'end'},
     timeOptions: {'start', 'end'},
     description: '补记时间段：add 活动 --start=15:00 --end=16:00 --note=...',
   ),
@@ -50,6 +51,7 @@ final List<CommandDefinition> commandDefinitions = [
     minPositionalArgs: 1,
     maxPositionalArgs: 1,
     allowedOptions: {'at'},
+    requiredOptions: {'at'},
     timeOptions: {'at'},
     description: '切割时间段：split <id> --at=15:30',
   ),
@@ -66,6 +68,7 @@ final List<CommandDefinition> commandDefinitions = [
     minPositionalArgs: 1,
     maxPositionalArgs: 1,
     allowedOptions: {'direction'},
+    requiredOptions: {'direction'},
     // 注意：--direction 取值白名单（previous|next）由阶段 3 分发器校验——
     // 解析器只做选项键/时间值校验，不做取值枚举校验。
     description: '与相邻条目合并：merge <id> --direction=previous|next',
@@ -101,9 +104,10 @@ final List<CommandDefinition> commandDefinitions = [
   CommandDefinition(
     name: 'import',
     aliases: ['导入'],
-    minPositionalArgs: 1,
+    minPositionalArgs: 0,
     maxPositionalArgs: 1,
-    description: '导入数据：import <path>',
+    allowedOptions: {'path'},
+    description: '导入数据：import <path> 或 import --path=<路径>',
   ),
 
   // ---- 更新 ----
@@ -132,8 +136,9 @@ final List<CommandDefinition> commandDefinitions = [
     aliases: ['修改分类'],
     minPositionalArgs: 1,
     maxPositionalArgs: 1,
-    allowedOptions: {'name', 'color', 'parent'},
-    description: '修改分类：category_update <id> [--name=...] [--color=...] [--parent=...]',
+    allowedOptions: {'name', 'color', 'parent', 'root'},
+    description:
+        '修改分类：category_update <id> [--name=...] [--color=...] [--parent=...] [--root=true 移回顶级]',
   ),
   CommandDefinition(
     name: 'category_delete',
@@ -150,6 +155,7 @@ final List<CommandDefinition> commandDefinitions = [
     minPositionalArgs: 1,
     maxPositionalArgs: 1,
     allowedOptions: {'kind', 'activity'},
+    requiredOptions: {'kind', 'activity'},
     description:
         '新建映射规则：tracking_rule_create <pattern> --kind=process|title --activity=<活动名>',
   ),

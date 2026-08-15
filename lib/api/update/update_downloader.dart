@@ -141,19 +141,23 @@ class UpdateDownloader {
       try {
         return AppSuccess(await _attemptDownload(url, onProgress: onProgress));
       } on SocketException {
+        if (_closed) return const AppFailure(downloadClosedMessage);
         // 网络瞬时失败：重试或耗尽后失败。
         if (!_shouldRetry(attempt)) {
           return const AppFailure('下载失败（网络不可用），请稍后重试');
         }
       } on http.ClientException {
+        if (_closed) return const AppFailure(downloadClosedMessage);
         if (!_shouldRetry(attempt)) {
           return const AppFailure('下载失败（网络不可用），请稍后重试');
         }
       } on TimeoutException {
+        if (_closed) return const AppFailure(downloadClosedMessage);
         if (!_shouldRetry(attempt)) {
           return const AppFailure('下载超时，请稍后重试');
         }
       } on HttpException {
+        if (_closed) return const AppFailure(downloadClosedMessage);
         // **瞬态 IO 异常（r9）**：dart:io 流式响应在连接中途被服务端关闭/
         // 协议错误时可能抛 HttpException/TlsException（http 包仅把 send 阶段
         // 与部分流中错误包装为 ClientException，其余透传）——纳入退避重试
@@ -162,6 +166,7 @@ class UpdateDownloader {
           return const AppFailure('下载失败（网络中断），请稍后重试');
         }
       } on TlsException {
+        if (_closed) return const AppFailure(downloadClosedMessage);
         if (!_shouldRetry(attempt)) {
           return const AppFailure('下载失败（TLS 中断），请稍后重试');
         }
@@ -333,6 +338,18 @@ class UpdateDownloader {
       }
       await sink.close();
       closed = true;
+      // **实收字节校验（r 修复）**：Content-Length 声明与实收不符时流结束可能
+      // 不抛错（连接过早 EOF 未被 dart:io 判异常、或自定义 client 实现差异）——
+      // 静默返回截断文件会让调用方拿到错误 totalBytes 与 SHA-256。声明值与实收
+      // 不一致即抛 HttpException（走既有清理/重试路径）；-1（自定义 client 未知
+      // 大小）跳过校验。
+      if (declaredTotal != null &&
+          declaredTotal >= 0 &&
+          received != declaredTotal) {
+        throw HttpException(
+          'Content-Length（$declaredTotal）与实际接收字节（$received）不一致',
+        );
+      }
     } catch (_) {
       // 写入失败/流中断：sink 只关一次（关闭自身抛错不掩盖原始错误），
       // 删除半成品，重试或失败由外层处理。

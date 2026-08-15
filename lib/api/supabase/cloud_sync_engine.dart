@@ -446,7 +446,18 @@ class CloudSyncEngine {
         // "删除永远赢"删掉本地行）；null=未归属遗留数据（本地登录前创建/网关
         // 历史宽松数据）可拉取，与未归属行的本地认领语义一致——不计 count/
         // maxSeen，防游标吞掉归属冲突增量窗口。
+        // **类型 fail-fast（r 修复）**：`rowUser` 为 Object?——若网关/实现把
+        // user_id 解码为非 String（数字/UUID 对象/mock），与 String 的 userId
+        // 比较恒不等、**所有**远端行被静默跳过且无报错（表变更永久漏拉）。
+        // 与网关 fetchRemoteUpdatedAt 的 fail-stop 语义对齐：非 String 直接抛错。
         final rowUser = row['user_id'];
+        // **类型 fail-fast（r 修复）**：`rowUser` 为 Object?——若网关/实现把
+        // user_id 解码为非 String（数字/UUID 对象/mock），与 String 的 userId
+        // 比较恒不等、**所有**远端行被静默跳过且无报错（表变更永久漏拉）。
+        // 与网关 fetchRemoteUpdatedAt 的 fail-stop 语义对齐：非 String 直接抛错。
+        if (rowUser != null && rowUser is! String) {
+          throw StateError('拉取表 $table 的 user_id 类型异常：$rowUser');
+        }
         if (rowUser != null && rowUser != userId) {
           continue;
         }
@@ -457,8 +468,23 @@ class CloudSyncEngine {
         if (applied case AppFailure<void> failure) {
           throw StateError('拉取表 $table 失败：${failure.message}');
         }
+        // **单行脏数据隔离（r 修复）**：updated_at 缺失/非 String/格式非法时
+        // 跳过该行（记日志）而非抛错——否则一条远端脏数据会让整轮同步永久
+        // 失败（外层 catch 只 markFailure 不清游标，下轮重拉同一行再抛错，
+        // 全部 7 张表被阻塞且只能手动 reset 恢复）。跳过不计 count/maxSeen
+        //（游标不越过脏行，下轮重试）。
         count += 1;
-        final rowUpdatedAt = DateTime.parse(row['updated_at']! as String);
+        final rawUpdatedAt = row['updated_at'];
+        final rowUpdatedAt = rawUpdatedAt is String
+            ? DateTime.tryParse(rawUpdatedAt)
+            : null;
+        if (rowUpdatedAt == null) {
+          stderr.writeln(
+            '[cloud-sync] 表 $table 行 updated_at 无法解析，跳过（下轮重试）：'
+            '$rawUpdatedAt',
+          );
+          continue;
+        }
         maxSeen = _laterOf(maxSeen, rowUpdatedAt);
       }
       if (!result.hasMore) break;

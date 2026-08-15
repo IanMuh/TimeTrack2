@@ -95,6 +95,9 @@ void main() {
         '... . ..', // → '..'
         'staging/x',
         r'staging\x',
+        'staging ', // 尾部空格（Win32 规范化后目录名失配）
+        'staging.', // 尾部点号（同上）
+        ' update-staging ', // 前后空格（规范化后名不一致）
       ]) {
         expect(
           WindowsInstaller.stagingNameError(evil),
@@ -102,7 +105,7 @@ void main() {
           reason: 'staging 目录名非法（灾难性路径）拒绝：$evil',
         );
       }
-      for (final ok in ['staging', '.update-staging', ' update-staging ']) {
+      for (final ok in ['staging', '.update-staging']) {
         expect(
           WindowsInstaller.stagingNameError(ok),
           isNull,

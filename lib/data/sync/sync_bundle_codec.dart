@@ -25,11 +25,10 @@ class SyncBundleCodec {
     if (rawVersion is! int) {
       throw const FormatException('同步包缺少合法的整数 schema_version');
     }
-    final schemaVersion = rawVersion;
-    if (schemaVersion < SyncBundle.minSchemaVersion ||
-        schemaVersion > SyncBundle.maxSchemaVersion) {
+    if (rawVersion < SyncBundle.minSchemaVersion ||
+        rawVersion > SyncBundle.maxSchemaVersion) {
       throw FormatException(
-        '同步包 schema 版本 $schemaVersion 不受支持'
+        '同步包 schema 版本 $rawVersion 不受支持'
         '（支持 ${SyncBundle.minSchemaVersion}..${SyncBundle.maxSchemaVersion}）',
       );
     }

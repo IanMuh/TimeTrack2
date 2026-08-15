@@ -72,22 +72,30 @@ class CommandDispatcher {
     switch (invocation.name) {
       // ---- 计时核心 ----
       case 'switch':
-        final activityId = await _resolveActivityId(invocation.args.first);
-        if (activityId == null) {
-          return CommandFailure(_lastIdError ?? '活动名解析失败');
+        final resolved = await _resolveActivityId(invocation.args.first);
+        if (resolved.id == null) {
+          return CommandFailure(resolved.error ?? '活动名解析失败');
+        }
+        // **--at 非法格式显式失败（r 修复）**：`_todayAt` 对非法格式返回 null，
+        // 与"未提供"无法区分——静默以当前时间切换会让用户误以为切换发生在
+        // 指定时刻（与 add/split 的显式报错行为对齐：区分"未提供"与"非法格式"）。
+        final atRaw = invocation.options['at'];
+        final at = _todayAt(atRaw);
+        if (atRaw != null && at == null) {
+          return const CommandFailure('非法时间值：--at=HH:MM');
         }
         final result = await timer.switchToActivity(
-          activityId,
-          at: _todayAt(invocation.options['at']), // --at=HH:MM 透传
+          resolved.id!,
+          at: at,
         );
         return _fromAppResult(result, successMessage: '已切换到活动');
       case 'stop':
         final result = await timer.stopRunning();
         return _fromAppResult(result, successMessage: '已停止当前活动');
       case 'add':
-        final addActivityId = await _resolveActivityId(invocation.args.first);
-        if (addActivityId == null) {
-          return CommandFailure(_lastIdError ?? '活动名解析失败');
+        final resolvedAdd = await _resolveActivityId(invocation.args.first);
+        if (resolvedAdd.id == null) {
+          return CommandFailure(resolvedAdd.error ?? '活动名解析失败');
         }
         final start = _todayAt(invocation.options['start']);
         final end = _todayAt(invocation.options['end']);
@@ -95,7 +103,7 @@ class CommandDispatcher {
           return const CommandFailure('补记需要 --start 与 --end（HH:MM）');
         }
         final result = await timer.addEntry(
-          activityId: addActivityId,
+          activityId: resolvedAdd.id!,
           startAt: start,
           endAt: end,
           note: invocation.options['note'] ?? '',
@@ -187,6 +195,27 @@ class CommandDispatcher {
       case 'category_delete':
         final result = await category.deleteCategory(invocation.args.first);
         return _fromAppResult(result, successMessage: '已删除分类');
+      case 'category_update':
+        final existingCategory = category.categoryById[invocation.args.first];
+        if (existingCategory == null) {
+          return const CommandFailure('分类不存在或已删除');
+        }
+        final colorRaw = invocation.options['color'];
+        if (colorRaw != null && int.tryParse(colorRaw) == null) {
+          return CommandFailure('非法颜色值：--color=<整数>');
+        }
+        final rootRaw = invocation.options['root'];
+        if (rootRaw != null && rootRaw != 'true' && rootRaw != 'false') {
+          return const CommandFailure('非法值：--root=true|false');
+        }
+        final updatedResult = await category.updateCategory(
+          category: existingCategory,
+          name: invocation.options['name'],
+          color: int.tryParse(colorRaw ?? ''),
+          parentId: invocation.options['parent'],
+          clearParentId: rootRaw == 'true',
+        );
+        return _fromAppResult(updatedResult, successMessage: '已修改分类');
 
       // ---- 后台自动记录 ----
       case 'tracking_rule_create':
@@ -194,9 +223,9 @@ class CommandDispatcher {
         if (activityName == null) {
           return const CommandFailure('新建映射规则需要 --activity=<活动名>');
         }
-        final ruleActivityId = await _resolveActivityId(activityName);
-        if (ruleActivityId == null) {
-          return CommandFailure(_lastIdError ?? '活动名解析失败');
+        final resolvedRule = await _resolveActivityId(activityName);
+        if (resolvedRule.id == null) {
+          return CommandFailure(resolvedRule.error ?? '活动名解析失败');
         }
         final kind = _matchKind(invocation.options['kind']);
         if (kind == TrackingRuleMatchKind.unknown) {
@@ -206,7 +235,7 @@ class CommandDispatcher {
           id: const Uuid().v4(),
           pattern: invocation.args.first,
           matchKind: kind,
-          activityId: ruleActivityId,
+          activityId: resolvedRule.id!,
           updatedAt: DateTime.now(),
         );
         final result = await tracking.saveRule(rule);
@@ -214,28 +243,41 @@ class CommandDispatcher {
       case 'tracking_rule_update':
         final existing = await tracking.rules.ruleById(invocation.args.first);
         if (existing == null) return const CommandFailure('映射规则不存在');
-        final kind = _matchKind(invocation.options['kind']);
-        if (kind == TrackingRuleMatchKind.unknown) {
-          return const CommandFailure('非法匹配类型：--kind=process|title');
+        // --kind 可选（r 修复）：未提供时沿用现有规则的类型——仅修改
+        // pattern/activity/sync 的部分更新不应强制重复传 kind；提供时才校验
+        // 取值合法（与其它字段"部分更新"语义一致）。
+        String? kindRaw;
+        if (invocation.options.containsKey('kind')) {
+          final parsedKind = _matchKind(invocation.options['kind']);
+          if (parsedKind == TrackingRuleMatchKind.unknown) {
+            return const CommandFailure('非法匹配类型：--kind=process|title');
+          }
+          kindRaw = parsedKind.storageValue;
+        }
+        // --sync 布尔取值校验（与 --direction 取值校验一致）：非法值明确
+        // 报错，不静默回退（静默回退会让用户"看似成功实则未生效"）。
+        final syncRaw = invocation.options['sync'];
+        if (syncRaw != null && syncRaw != 'true' && syncRaw != 'false') {
+          return const CommandFailure('非法同步开关值：--sync=true|false');
         }
         String? activityId;
         final activityName = invocation.options['activity'];
         if (activityName != null) {
           final resolved = await _resolveActivityId(activityName);
-          if (resolved == null) {
-            return CommandFailure(_lastIdError ?? '活动名解析失败');
+          if (resolved.id == null) {
+            return CommandFailure(resolved.error ?? '活动名解析失败');
           }
-          activityId = resolved;
+          activityId = resolved.id;
         }
         final updated = existing.copyWith(
           pattern: invocation.options['pattern'] ?? existing.pattern,
-          matchKind: kind,
+          matchKind: kindRaw == null
+              ? existing.matchKind
+              : TrackingRuleMatchKind.fromStorageValue(kindRaw),
           activityId: activityId ?? existing.activityId,
-          syncEnabled: invocation.options['sync'] == 'true'
-              ? true
-              : invocation.options['sync'] == 'false'
-                  ? false
-                  : existing.syncEnabled,
+          syncEnabled: syncRaw == null
+              ? existing.syncEnabled
+              : syncRaw == 'true',
           updatedAt: DateTime.now(),
         );
         final result = await tracking.saveRule(updated);
@@ -255,33 +297,29 @@ class CommandDispatcher {
   // 内部
   // ---------------------------------------------------------------------------
 
-  /// 最近一次活动名解析失败原因（[dispatch] 内判空时读取）。
-  String? _lastIdError;
-
-  /// 解析活动名→id（全量未删活动按名精确匹配；重名歧义/不存在明确失败，
-  /// 失败原因写 [_lastIdError] 并返回 null）。
-  Future<String?> _resolveActivityId(String name) async {
+  /// 解析活动名→id（全量未删活动按名精确匹配；重名歧义/不存在明确失败）。
+  ///
+  /// 返回 `(id, error)` record：id 非 null 时 error 为 null（成功）；失败时
+  /// id 为 null、error 携带可读原因。**错误随结果返回**（不落共享字段）——
+  /// 并发 dispatch 交错 await 时各指令的错误归因不会互相覆盖。
+  Future<({String? id, String? error})> _resolveActivityId(String name) async {
     final trimmed = name.trim();
     if (trimmed.isEmpty) {
-      _lastIdError = '活动名不能为空';
-      return null;
+      return (id: null, error: '活动名不能为空');
     }
     final result = await activities.activities();
     if (result case AppFailure<List<Activity>> failure) {
-      _lastIdError = failure.message;
-      return null;
+      return (id: null, error: failure.message);
     }
     final matches = result.requireValue().where((a) => a.name == trimmed);
     final list = matches.toList();
     if (list.isEmpty) {
-      _lastIdError = '活动不存在：$name';
-      return null;
+      return (id: null, error: '活动不存在：$name');
     }
     if (list.length > 1) {
-      _lastIdError = '活动名重名歧义（${list.length} 个）';
-      return null;
+      return (id: null, error: '活动名重名歧义（${list.length} 个）');
     }
-    return list.first.id;
+    return (id: list.first.id, error: null);
   }
 
   /// `HH:MM`（parser 已归一化）→ 今日该时刻；null = 缺失/非法。

@@ -170,14 +170,26 @@ class WindowsInstaller {
   final int maxEntryCount;
 
   /// 程序目录是否可写（安装前提）。
+  /// **唯一探测文件名（r 修复）**：固定名 `.write-probe` 会截断覆盖/删除
+  /// 同名的真实文件；用 pid+时间戳唯一名 + try/finally 保证清理（清理失败
+  /// 不影响结论）。
   bool checkWritable() {
+    final probe = File(
+      '$programDir/.write-probe-$pid-${DateTime.now().microsecondsSinceEpoch}',
+    );
     try {
-      final probe = File('$programDir/.write-probe');
       probe.writeAsStringSync('probe');
-      probe.deleteSync();
       return true;
     } on FileSystemException {
       return false;
+    } finally {
+      try {
+        if (probe.existsSync()) {
+          probe.deleteSync();
+        }
+      } on FileSystemException {
+        // 探测文件清理失败不影响结论（残留文件会被后续安装流程正常处理）。
+      }
     }
   }
 
@@ -210,6 +222,13 @@ class WindowsInstaller {
     if (normalized.isEmpty) return 'staging 目录名配置非法（裁剪后为空）';
     if (normalized == '.' || normalized == '..') {
       return 'staging 目录名配置非法（裁剪后为 `.`/`..`）';
+    }
+    // **尾部空格/点号拒绝（r 修复）**：`'foo '`/`'foo.'` 经 Win32 规范化
+    // 会在磁盘上创建 `foo`——配置名与磁盘实际名不一致，`_clearProgramDir`/
+    // 备份按配置名比较 `_basename` 会失配，把 staging 实际目录当普通文件
+    // 递归删除（灾难）。凡裁剪后名称与原名不同的一律拒绝。
+    if (normalized != name) {
+      return 'staging 目录名配置非法（尾部空格/点号会被 Windows 规范化）';
     }
     if (name.contains('/') || name.contains(r'\')) {
       return 'staging 目录名配置非法（含路径分隔符）';
@@ -329,12 +348,15 @@ class WindowsInstaller {
     // 阶段 3/4 启动逻辑误传 programDir 本身，前置守卫照样通过（其含普通文件），
     // 随后 _clearProgramDir 清空程序目录、staging.listSync 仅剩备份、renameSync
     // 到自身为 no-op、deleteSync(recursive) 连备份一并删除并返回成功——程序
-    // 目录被清空且备份销毁、不可恢复。按规范化绝对路径比较（防相对路径/尾斜杠
-    // 差异绕过），不符直接失败（未改动程序目录）。
-    final expectedStaging = Directory(
+    // 目录被清空且备份销毁、不可恢复。**规范化比较（r 修复）**：Windows 路径
+    // 不区分大小写，且 programDir 带尾分隔符会产生 `\/` 双分隔符——按规范化
+    // 绝对路径（反斜杠→正斜杠、折叠连续分隔符、去尾分隔符）比较，
+    // **大小写不敏感**（Windows 语义；`C:\Program Files` vs `c:\program files`
+    // 视为同一目录），否则语义相同的路径会被误拒绝阻断正常更新。
+    final expectedStaging = _normalizedAbsolutePath(
       '$programDir/${UpdateConfig.windowsStagingDirName}',
-    ).absolute.path;
-    if (Directory(stagingPath).absolute.path != expectedStaging) {
+    ).toLowerCase();
+    if (_normalizedAbsolutePath(stagingPath).toLowerCase() != expectedStaging) {
       return const AppFailure('安装暂存路径非法（须为程序目录下的 staging 目录），已中止（未改动程序目录）');
     }
     final staging = Directory(stagingPath);
@@ -396,6 +418,19 @@ class WindowsInstaller {
     }
 
     // ---- 安装阶段（备份已确认完整，失败才走回滚）----
+    // **数据/程序目录分离校验（r 修复）**：`_clearProgramDir` 会递归清空
+    // programDir 下除 staging/备份外的一切——若 dataDir 配置在程序目录内部，
+    // 清空会把用户数据目录（含待安装标记/本地数据）连带删除。规范化绝对路径
+    // 按前缀判定包含关系（反斜杠→正斜杠、尾部裁剪后比较），含包含关系直接
+    // 失败（未改动程序目录）。
+    final programNorm = _normalizedAbsolutePath(programDir);
+    final dataNorm = _normalizedAbsolutePath(dataDir);
+    if (dataNorm == programNorm ||
+        dataNorm.startsWith('$programNorm/')) {
+      return const AppFailure(
+        '数据目录不得位于程序目录内部，已中止（未改动程序目录）',
+      );
+    }
     try {
       _clearProgramDir();
       for (final entry in staging.listSync()) {
@@ -546,6 +581,22 @@ class WindowsInstaller {
   /// 会静默失效，导致 `_clearProgramDir` 误删 staging/备份）。按两种分隔符
   /// 切分取末段。
   static String _basename(String path) => path.split(RegExp(r'[\\/]')).last;
+
+  /// 规范化绝对路径（数据/程序目录包含关系判定用）：反斜杠→正斜杠、
+  /// 折叠连续分隔符、去尾分隔符——消除 `C:\foo` vs `C:\foo\` vs `C:/foo`
+  /// 的形态差异，使前缀包含判定稳定。
+  static String _normalizedAbsolutePath(String path) {
+    final absolute = Directory(path).absolute.path;
+    var norm = absolute.replaceAll(r'\', '/');
+    norm = norm.replaceAllMapped(
+      RegExp(r'([/])[/]+'),
+      (m) => m[1]!,
+    );
+    while (norm.length > 1 && norm.endsWith('/')) {
+      norm = norm.substring(0, norm.length - 1);
+    }
+    return norm;
+  }
 
   void _clearProgramDir() {
     for (final entry in Directory(programDir).listSync(followLinks: false)) {

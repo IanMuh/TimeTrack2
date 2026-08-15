@@ -108,6 +108,12 @@ class SyncStatusStore with RepositoryMappings {
 
   final AppDatabase database;
 
+  /// **未来游标容差（单一事实来源，r 修复）**：远端时钟偏差容忍窗口——read()
+  /// 的未来游标校验、markSuccess 入口 syncedAt 守卫、markSuccess 事务内
+  /// existingAt 校验（自愈分支）三处共用，防单点调整造成 read 接受而
+  /// markSuccess 拒绝（或反之）的语义分叉。
+  static const cursorTolerance = Duration(minutes: 5);
+
   /// 读取当前同步状态（按 userId 分区键点查，**单事务**保证快照一致——防
   /// 各次 await 之间被写入交错读到互相矛盾的快照）。
   Future<AppResult<SyncStatus>> read({String? userId}) async {
@@ -150,7 +156,7 @@ class SyncStatusStore with RepositoryMappings {
               // 提示需重置，防以其为增量起点导致同步永久停滞（与 markSuccess
               // 的守卫对称）。
               if (parsed.isAfter(
-                DateTime.now().toUtc().add(const Duration(minutes: 5)),
+                DateTime.now().toUtc().add(cursorTolerance),
               )) {
                 return AppFailure(
                   '${SyncStatusMessages.cursorUnreasonable}，需重置：$value',
@@ -204,9 +210,7 @@ class SyncStatusStore with RepositoryMappings {
     // 合理性校验：syncedAt 不得晚于当前时间 + 容差（5 分钟）——远端时钟偏差/
     // 脏数据产生未来时间戳会推高游标，使后续所有真实同步被判"未推进"而永久
     // 漏同步（read() 一直返回未来游标，且无恢复路径）。
-    if (syncedAt.toUtc().isAfter(DateTime.now().toUtc().add(
-          const Duration(minutes: 5),
-        ))) {
+    if (syncedAt.toUtc().isAfter(DateTime.now().toUtc().add(cursorTolerance))) {
       return AppFailure('${SyncStatusMessages.cursorUnreasonable}：$syncedAt');
     }
     try {
@@ -226,7 +230,7 @@ class SyncStatusStore with RepositoryMappings {
           // 库中已有游标为未来时间（旧版本写入/远端时钟偏差）：后续所有真实
           // syncedAt 都判"未推进"而永久停滞且无恢复路径——显式失败并提示重置。
           if (existingAt.isAfter(
-            DateTime.now().toUtc().add(const Duration(minutes: 5)),
+            DateTime.now().toUtc().add(cursorTolerance),
           )) {
             return AppFailure(
               '${SyncStatusMessages.cursorUnreasonable}，需重置：${existing.value}',
@@ -245,7 +249,24 @@ class SyncStatusStore with RepositoryMappings {
             if (!existingAt.isAfter(DateTime.now().toUtc())) {
               return const AppSuccess(null);
             }
-            // 未来游标：落回覆盖分支（覆盖游标/目标，清错误）。
+            // 未来游标（容差内偏快、时钟被校正）：允许真实 syncedAt **覆盖回退**
+            // ——把"read 接受未来游标 → 每轮空跑 → markSuccess no-op → 游标永不
+            // 回退 → 永久静默漏同步"的死锁转为自愈路径。**回退不视为推进
+            //（r 修复）**：游标实际在回退，不得走公共推进分支清 lastError——
+            // 未来游标写入后、时钟校正前可能已存在真实失败（markFailure 落库），
+            // 静默抹掉违背"错误反映最近一次失败"不变量。单独写入游标/目标，
+            // **保留 lastError**。
+            await database.batch((batch) {
+              batch.insert(database.appMetadata, AppMetadataCompanion.insert(
+                key: cursorKey,
+                value: utcString(syncedAt),
+              ), mode: InsertMode.insertOrReplace);
+              batch.insert(database.appMetadata, AppMetadataCompanion.insert(
+                key: _statusKey(AppMetadataKeys.lastSyncTarget, normalized),
+                value: trimmedTarget,
+              ), mode: InsertMode.insertOrReplace);
+            });
+            return const AppSuccess(null);
           } else if (syncedAt.toUtc().isAtSameMomentAs(existingAt)) {
             // **相等时间戳**（无新行空跑同步的确定性路径）：游标无需覆盖，
             // 但更新 lastTarget——"最近一次成功同步的目标"应反映本次成功
