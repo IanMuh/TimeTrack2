@@ -676,8 +676,8 @@ void main() {
         // 敏感文件系统（Linux/大小写敏感卷）上 `Program` 与 `program` 是不同
         // 目录，无法构造"仅大小写不同的同一目录"场景。
         if (filesystemIsCaseSensitive()) {
+          // markTestSkipped 抛 SkipException 终止本测试（后续代码不可达）。
           markTestSkipped('文件系统大小写敏感，无法构造大小写变体同一目录');
-          return;
         }
         // 大小写不敏感文件系统（Windows/macOS 默认 APFS）上：dataDir 与
         // programDir 仅大小写不同仍属"数据目录在程序目录内部"——
