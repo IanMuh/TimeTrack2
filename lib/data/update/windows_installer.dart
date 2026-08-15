@@ -359,6 +359,22 @@ class WindowsInstaller {
     if (_normalizedAbsolutePath(stagingPath).toLowerCase() != expectedStaging) {
       return const AppFailure('安装暂存路径非法（须为程序目录下的 staging 目录），已中止（未改动程序目录）');
     }
+    // **数据/程序目录分离校验（r 修复 + 复审修正）**：`_clearProgramDir` 会
+    // 递归清空 programDir 下除 staging/备份外的一切——若 dataDir 配置在程序
+    // 目录内部，清空会把用户数据目录（含待安装标记/本地数据）连带删除。
+    // 规范化绝对路径按前缀判定包含关系（反斜杠→正斜杠、尾部裁剪），
+    // **大小写不敏感**（Windows 路径语义，与上方 staging 校验一致——仅大小写
+    // 不同的 dataDir 同样属"位于程序目录内部"）。**置于备份之前（二轮复审
+    // 修正）**：校验失败须不产生任何副作用（备份残留/程序目录改动），
+    // 后置到安装阶段会让备份阶段先执行、失败时残留 .backup-*。
+    final programNorm = _normalizedAbsolutePath(programDir).toLowerCase();
+    final dataNorm = _normalizedAbsolutePath(dataDir).toLowerCase();
+    if (dataNorm == programNorm ||
+        dataNorm.startsWith('$programNorm/')) {
+      return const AppFailure(
+        '数据目录不得位于程序目录内部，已中止（未改动程序目录）',
+      );
+    }
     final staging = Directory(stagingPath);
     final backupDir = Directory(
       '$programDir/.backup-${DateTime.now().millisecondsSinceEpoch}',
@@ -418,22 +434,6 @@ class WindowsInstaller {
     }
 
     // ---- 安装阶段（备份已确认完整，失败才走回滚）----
-    // **数据/程序目录分离校验（r 修复 + 复审修正）**：`_clearProgramDir` 会
-    // 递归清空 programDir 下除 staging/备份外的一切——若 dataDir 配置在程序
-    // 目录内部，清空会把用户数据目录（含待安装标记/本地数据）连带删除。
-    // 规范化绝对路径按前缀判定包含关系（反斜杠→正斜杠、尾部裁剪），
-    // **大小写不敏感**（Windows 路径语义，与上方 staging 校验的 toLowerCase
-    // 一致——`C:\Program Files\App` 与 `c:\program files\app` 同一目录，
-    // 仅大小写不同的 dataDir 同样属"位于程序目录内部"），含包含关系直接
-    // 失败（未改动程序目录）。
-    final programNorm = _normalizedAbsolutePath(programDir).toLowerCase();
-    final dataNorm = _normalizedAbsolutePath(dataDir).toLowerCase();
-    if (dataNorm == programNorm ||
-        dataNorm.startsWith('$programNorm/')) {
-      return const AppFailure(
-        '数据目录不得位于程序目录内部，已中止（未改动程序目录）',
-      );
-    }
     try {
       _clearProgramDir();
       for (final entry in staging.listSync()) {
