@@ -14,6 +14,27 @@ List<int> buildZip(Map<String, String> files) {
   return ZipEncoder().encode(archive);
 }
 
+/// 动态探测文件系统是否**大小写不敏感**（Windows/macOS 默认 APFS）：
+/// 创建 `CaseProbe` 目录后查 `caseprobe`（不同大小写）——可见 = 大小写
+/// 不敏感，返回 null（用例运行）；不可见 = 大小写敏感（Linux/大小写敏感卷），
+/// 返回跳过原因（两个不同大小写的目录是不同目录，无法构造"仅大小写不同的
+/// 同一目录"场景）。
+String? skipReasonIfCaseSensitive() {
+  try {
+    final probe = Directory.systemTemp.createTempSync('case_probe');
+    try {
+      final upper = Directory('${probe.path}/CaseProbe')..createSync();
+      final lowerVisible = Directory('${probe.path}/caseprobe').existsSync();
+      upper.deleteSync();
+      return lowerVisible ? null : '文件系统大小写敏感，无法构造大小写变体同一目录';
+    } finally {
+      probe.deleteSync(recursive: true);
+    }
+  } on FileSystemException {
+    return null; // 探测失败按大小写不敏感处理（Windows/macOS 主目标平台）
+  }
+}
+
 void main() {
   group('WindowsInstaller', () {
     test('programDir 合理性校验（r23/r24）：危险路径构造抛 ArgumentError', () {
@@ -645,13 +666,14 @@ void main() {
     test(
       'applyStaging：数据目录位于程序目录内部（仅大小写不同）→ 拒绝（r 复审）',
       () async {
-        // Windows 路径大小写不敏感：dataDir 与 programDir 仅大小写不同仍属
-        // "数据目录在程序目录内部"——`_clearProgramDir` 会连带清空数据目录，
-        // 大小写敏感比较会漏判放行该危险配置。
+        // 大小写不敏感文件系统（Windows/macOS 默认 APFS）上：dataDir 与
+        // programDir 仅大小写不同仍属"数据目录在程序目录内部"——
+        // `_clearProgramDir` 会连带清空数据目录，大小写敏感比较会漏判放行。
         final root = await Directory.systemTemp.createTemp('win_case');
         final program = Directory('${root.path}/Program')..createSync();
-        // 仅大小写不同的数据目录（Windows 上指向同一目录）。
-        final data = Directory('${root.path}/program/data')..createSync(recursive: true);
+        // 仅大小写不同的数据目录（大小写不敏感文件系统上指向同一目录）。
+        final data = Directory('${root.path}/program/data')
+          ..createSync(recursive: true);
         final staging = Directory('${program.path}/staging')..createSync();
         File('${staging.path}/app.exe').writeAsStringSync('new');
         try {
@@ -660,16 +682,11 @@ void main() {
             dataDir: data.path,
           );
           final result = await installer.applyStaging(staging.path);
-          expect(
-            result.isSuccess,
-            isFalse,
-            reason: '数据目录在程序目录内部（大小写不敏感）须拒绝',
-          );
+          expect(result.isSuccess, isFalse, reason: '数据目录在程序目录内部（大小写不敏感）须拒绝');
           // 程序目录未被改动（无备份残留、staging 未消费）。
           expect(
             program.listSync().where(
-              (e) =>
-                  e.path.split(RegExp(r'[\\/]')).last.startsWith('.backup-'),
+              (e) => e.path.split(RegExp(r'[\\/]')).last.startsWith('.backup-'),
             ),
             isEmpty,
           );
@@ -677,10 +694,13 @@ void main() {
           await root.delete(recursive: true);
         }
       },
-      // **平台守卫（r 复审）**：大小写不敏感语义仅 Windows 成立——Linux/
-      // 大小写敏感 macOS 卷上 `Program` 与 `program` 是不同目录，无法构造
-      // "仅大小写不同的同一目录"，该用例在非 Windows 平台跳过。
-      skip: Platform.isWindows ? false : '大小写不敏感语义仅 Windows 成立',
+      // **平台守卫（r 复审修正）**：大小写不敏感语义非 Windows 独有（macOS
+      // 默认 APFS 同样大小写不敏感）——硬编码平台 skip 会把本可在 macOS 上
+      // 真实运行的用例误跳过。改为**动态探测**文件系统大小写敏感性：
+      // 创建 `Program` 后查 `program`（不同大小写）是否可见，可见 = 大小写
+      // 不敏感（Windows/macOS 默认卷）；不可见（Linux/大小写敏感卷）时两个
+      // 目录不同、无法构造"仅大小写不同的同一目录"，此时跳过。
+      skip: skipReasonIfCaseSensitive(),
     );
 
     test(
