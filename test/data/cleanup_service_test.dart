@@ -594,10 +594,17 @@ void main() {
           );
 
       // 以 user-a 身份清理：父（user-a 超期软删）进入 deletable，但被跨用户
-      // 子（user-b/user-c）引用阻塞。
+      // 子（user-b/user-c）引用阻塞。**游标键须按 userId 分区写（r 复审）**：
+      // run(userId:) 读 `last_sync_at:user-a`，写全局键 `last_sync_at` 会让
+      // 同步守卫把清理当作"未同步"跳过（清理逻辑不执行、断言假阳性）。
+      await putMeta(
+        '${AppMetadataKeys.lastSyncAt}:user-a',
+        nowStr(),
+      );
       final report = (await service.run(userId: 'user-a')).requireValue();
-      // 父被跨用户子引用阻塞：不删除（FK 违约会回滚整个清理事务）。
-      expect(report.deletedByTable['activityCategories'], isNull,
+      // 父被跨用户子引用阻塞：不删除（FK 违约会回滚整个清理事务）。**键恒被
+      // 写入（值为 0 而非 null，r 复审）**——断言 0 而非 isNull。
+      expect(report.deletedByTable['activityCategories'], 0,
           reason: '跨用户子引用阻塞父物理删除');
       // 父仍存活（软删态保留）。
       final parent = (await (db.select(

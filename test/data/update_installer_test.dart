@@ -642,38 +642,46 @@ void main() {
       }
     });
 
-    test('applyStaging：数据目录位于程序目录内部（仅大小写不同）→ 拒绝（r 复审）', () async {
-      // Windows 路径大小写不敏感：dataDir 与 programDir 仅大小写不同仍属
-      // "数据目录在程序目录内部"——`_clearProgramDir` 会连带清空数据目录，
-      // 大小写敏感比较会漏判放行该危险配置。
-      final root = await Directory.systemTemp.createTemp('win_case');
-      final program = Directory('${root.path}/Program')..createSync();
-      // 仅大小写不同的数据目录（Windows 上指向同一目录）。
-      final data = Directory('${root.path}/program/data')..createSync();
-      final staging = Directory('${program.path}/staging')..createSync();
-      File('${staging.path}/app.exe').writeAsStringSync('new');
-      try {
-        final installer = WindowsInstaller(
-          programDir: program.path,
-          dataDir: data.path,
-        );
-        final result = await installer.applyStaging(staging.path);
-        expect(
-          result.isSuccess,
-          isFalse,
-          reason: '数据目录在程序目录内部（大小写不敏感）须拒绝',
-        );
-        // 程序目录未被改动（无备份残留、staging 未消费）。
-        expect(
-          program.listSync().where(
-            (e) => e.path.split(RegExp(r'[\\/]')).last.startsWith('.backup-'),
-          ),
-          isEmpty,
-        );
-      } finally {
-        await root.delete(recursive: true);
-      }
-    });
+    test(
+      'applyStaging：数据目录位于程序目录内部（仅大小写不同）→ 拒绝（r 复审）',
+      () async {
+        // Windows 路径大小写不敏感：dataDir 与 programDir 仅大小写不同仍属
+        // "数据目录在程序目录内部"——`_clearProgramDir` 会连带清空数据目录，
+        // 大小写敏感比较会漏判放行该危险配置。
+        final root = await Directory.systemTemp.createTemp('win_case');
+        final program = Directory('${root.path}/Program')..createSync();
+        // 仅大小写不同的数据目录（Windows 上指向同一目录）。
+        final data = Directory('${root.path}/program/data')..createSync(recursive: true);
+        final staging = Directory('${program.path}/staging')..createSync();
+        File('${staging.path}/app.exe').writeAsStringSync('new');
+        try {
+          final installer = WindowsInstaller(
+            programDir: program.path,
+            dataDir: data.path,
+          );
+          final result = await installer.applyStaging(staging.path);
+          expect(
+            result.isSuccess,
+            isFalse,
+            reason: '数据目录在程序目录内部（大小写不敏感）须拒绝',
+          );
+          // 程序目录未被改动（无备份残留、staging 未消费）。
+          expect(
+            program.listSync().where(
+              (e) =>
+                  e.path.split(RegExp(r'[\\/]')).last.startsWith('.backup-'),
+            ),
+            isEmpty,
+          );
+        } finally {
+          await root.delete(recursive: true);
+        }
+      },
+      // **平台守卫（r 复审）**：大小写不敏感语义仅 Windows 成立——Linux/
+      // 大小写敏感 macOS 卷上 `Program` 与 `program` 是不同目录，无法构造
+      // "仅大小写不同的同一目录"，该用例在非 Windows 平台跳过。
+      skip: Platform.isWindows ? false : '大小写不敏感语义仅 Windows 成立',
+    );
 
     test(
       'applyStaging 备份为空（backupOk=false，r5）：staging 被 exclude → 失败 + 备份清理',
