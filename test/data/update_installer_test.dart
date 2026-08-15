@@ -14,24 +14,27 @@ List<int> buildZip(Map<String, String> files) {
   return ZipEncoder().encode(archive);
 }
 
-/// 动态探测文件系统是否**大小写不敏感**（Windows/macOS 默认 APFS）：
-/// 创建 `CaseProbe` 目录后查 `caseprobe`（不同大小写）——可见 = 大小写
-/// 不敏感，返回 null（用例运行）；不可见 = 大小写敏感（Linux/大小写敏感卷），
-/// 返回跳过原因（两个不同大小写的目录是不同目录，无法构造"仅大小写不同的
-/// 同一目录"场景）。
-String? skipReasonIfCaseSensitive() {
+/// 动态探测文件系统是否**大小写敏感**（Windows/macOS 默认 APFS 为大小写
+/// 不敏感）：创建 `CaseProbe` 目录后查 `caseprobe`（不同大小写）——不可见 =
+/// 大小写敏感。**探测与清理分离（r 复审修正）**：清理失败不影响探测结论
+///（探测结果先落变量，清理包独立 try，外层只兜探测阶段的真实 IO 异常——
+/// 防"探测已判定敏感、清理抛错被外层 catch 吞掉返回 null 使用例照常运行"）。
+bool filesystemIsCaseSensitive() {
   try {
     final probe = Directory.systemTemp.createTempSync('case_probe');
     try {
-      final upper = Directory('${probe.path}/CaseProbe')..createSync();
+      Directory('${probe.path}/CaseProbe').createSync();
       final lowerVisible = Directory('${probe.path}/caseprobe').existsSync();
-      upper.deleteSync();
-      return lowerVisible ? null : '文件系统大小写敏感，无法构造大小写变体同一目录';
+      return !lowerVisible;
     } finally {
-      probe.deleteSync(recursive: true);
+      try {
+        probe.deleteSync(recursive: true);
+      } on FileSystemException {
+        // 清理失败不影响探测结论（临时目录残留由系统回收）。
+      }
     }
   } on FileSystemException {
-    return null; // 探测失败按大小写不敏感处理（Windows/macOS 主目标平台）
+    return false; // 探测失败按大小写不敏感处理（Windows/macOS 主目标平台）
   }
 }
 
@@ -666,6 +669,16 @@ void main() {
     test(
       'applyStaging：数据目录位于程序目录内部（仅大小写不同）→ 拒绝（r 复审）',
       () async {
+        // **动态跳过在测试体内（r 复审修正）**：`skip:` 参数在 collection 阶段
+        // 求值——同步文件系统 I/O 探测一旦抛非 FileSystemException（平台差异）
+        // 会中断整个测试文件收集；且每次收集都产生临时目录写删副作用。改为
+        // 测试体内探测 + markTestSkipped（运行时跳过，不中断收集）。大小写
+        // 敏感文件系统（Linux/大小写敏感卷）上 `Program` 与 `program` 是不同
+        // 目录，无法构造"仅大小写不同的同一目录"场景。
+        if (filesystemIsCaseSensitive()) {
+          markTestSkipped('文件系统大小写敏感，无法构造大小写变体同一目录');
+          return;
+        }
         // 大小写不敏感文件系统（Windows/macOS 默认 APFS）上：dataDir 与
         // programDir 仅大小写不同仍属"数据目录在程序目录内部"——
         // `_clearProgramDir` 会连带清空数据目录，大小写敏感比较会漏判放行。
@@ -694,13 +707,6 @@ void main() {
           await root.delete(recursive: true);
         }
       },
-      // **平台守卫（r 复审修正）**：大小写不敏感语义非 Windows 独有（macOS
-      // 默认 APFS 同样大小写不敏感）——硬编码平台 skip 会把本可在 macOS 上
-      // 真实运行的用例误跳过。改为**动态探测**文件系统大小写敏感性：
-      // 创建 `Program` 后查 `program`（不同大小写）是否可见，可见 = 大小写
-      // 不敏感（Windows/macOS 默认卷）；不可见（Linux/大小写敏感卷）时两个
-      // 目录不同、无法构造"仅大小写不同的同一目录"，此时跳过。
-      skip: skipReasonIfCaseSensitive(),
     );
 
     test(
