@@ -462,14 +462,18 @@ class CloudSyncEngine {
         // 失败（外层 catch 只 markFailure 不清游标，下轮重拉同一行再抛错，
         // 全部 7 张表被阻塞且只能手动 reset 恢复）。跳过不计 count/maxSeen
         //（游标不越过脏行，下轮重试）。
-        // **必须先于 apply（r 复审修正）**：apply 回调在 fromMap(row) 内用
-        // readDateTime 严格解析 updated_at——非法值会在 apply 阶段抛
-        // FormatException，走不到下方跳过分支，须在 apply 前完成校验。
+        // **必须先于 apply（r 复审修正 + 二轮修正）**：apply 回调在 fromMap(row)
+        // 内用 readDateTime 严格解析 updated_at（要求携带时区偏移、
+        // parsed.isUtc==true）——非法值会在 apply 阶段抛 FormatException，走
+        // 不到下方跳过分支，须在 apply 前完成校验。**与 readDateTime 同语义
+        // （二轮修正）**：仅 tryParse 不够——无偏移串（如 `2026-08-10T04:00:00`）
+        // tryParse 返回非 null 但 isUtc==false，仍会在 apply 抛错；须同样要求
+        // isUtc（与网关 fetchRemoteUpdatedAt 的 fail-stop 语义一致）。
         final rawUpdatedAt = row['updated_at'];
         final rowUpdatedAt = rawUpdatedAt is String
             ? DateTime.tryParse(rawUpdatedAt)
             : null;
-        if (rowUpdatedAt == null) {
+        if (rowUpdatedAt == null || !rowUpdatedAt.isUtc) {
           stderr.writeln(
             '[cloud-sync] 表 $table 行 updated_at 无法解析，跳过（下轮重试）：'
             '$rawUpdatedAt',

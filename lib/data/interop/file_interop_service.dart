@@ -72,12 +72,20 @@ class FileInteropService {
       try {
         await tmpFile.rename(targetPath);
       } on FileSystemException {
-        // Windows：rename 到已存在目标失败——先删目标再 rename（覆盖语义；
-        // 删除与 rename 之间的小窗口属 Windows 特有边界，POSIX 路径已避免）。
-        if (await File(targetPath).exists()) {
+        // **仅 Windows 覆盖重试（r 复审修正 + 二轮修正）**：POSIX 上 rename
+        // 本身原子覆盖已存在文件，进入此分支意味着真实错误（权限/IO）——
+        // 此时 delete 已有目标再重试会删除旧文件后仍可能失败（数据丢失）。
+        // Windows 的 rename 不覆盖已存在目标，故仅在目标确实存在且为
+        // Windows 路径（盘符前缀）时 delete+rename；其余异常直接上抛
+        //（由外层 catch 转 AppFailure，保留原目标文件）。
+        final isWindowsStyle =
+            RegExp(r'^[A-Za-z]:[\\/]').hasMatch(targetPath);
+        if (isWindowsStyle && await File(targetPath).exists()) {
           await File(targetPath).delete();
+          await tmpFile.rename(targetPath);
+        } else {
+          rethrow;
         }
-        await tmpFile.rename(targetPath);
       }
       return AppSuccess(targetPath);
     } catch (e) {

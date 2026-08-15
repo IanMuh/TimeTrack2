@@ -637,13 +637,15 @@ class CleanupService with RepositoryMappings {
     }
     final deletable = expired.where((id) => !blocked.contains(id)).toList();
     if (deletable.isEmpty) return 0;
-    // **跨用户子引用排除（r 复审修正）**：同用户 UPDATE 会把同用户存活子的
-    // parentId 置空（下方先置空后删除），不阻塞删除；**跨用户**存活子（parentId
-    // 指向将删分类但 userId 不同）不会被同用户 UPDATE 处理，其引用仍指向将删
-    // 行——`PRAGMA foreign_keys=ON` 下 parentId 自引用 FK（NO ACTION）会使
-    // 物理删除父行抛 FOREIGN KEY constraint failed、整个清理事务回滚且每次
-    // 清理重复失败。删除前排除仍被跨用户子引用的父分类（本地全未归属
-    // userId==null 时无跨用户引用，跳过检查）。
+    // **跨用户子引用排除（r 复审修正 + 二轮修正）**：同用户 UPDATE 会把同用户
+    // 存活子的 parentId 置空（下方先置空后删除），不阻塞删除；**跨用户**子
+    //（parentId 指向将删分类但 userId 不同）不会被同用户 UPDATE 处理，其引用
+    // 仍指向将删行——`PRAGMA foreign_keys=ON` 下 parentId 自引用 FK（NO
+    // ACTION）会使物理删除父行抛 FOREIGN KEY constraint failed、整个清理
+    // 事务回滚且每次清理重复失败。**不限 deletedAt（二轮修正）**：跨用户
+    // 软删子同样携带 parentId 引用、同样阻塞删除（r12 的"软删子置空"UPDATE
+    // 仅限同用户行，跨用户软删子不会被置空）——凡被跨用户子引用的父分类
+    //（无论子存活/软删）一律排除。
     final crossUserBlocked = <String>{};
     if (userId != null) {
       for (final chunk in _chunks(deletable)) {
@@ -652,7 +654,6 @@ class CleanupService with RepositoryMappings {
                   ..addColumns([database.activityCategories.parentId])
                   ..where(
                     database.activityCategories.parentId.isIn(chunk) &
-                        database.activityCategories.deletedAt.isNull() &
                         database.activityCategories.userId.isNotValue(userId),
                   ))
                 .get();
