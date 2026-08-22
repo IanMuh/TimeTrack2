@@ -331,6 +331,5 @@
   "todayPrevDay": "前一天",
   "todayNextDay": "后一天",
   "todayPickDate": "选择日期",
-  "todayClearFilters": "清除筛选",
-  "timerTodayPanelHeader": "今日记录"
+  "todayClearFilters": "清除筛选"
 }

@@ -331,6 +331,5 @@
   "todayPrevDay": "Previous day",
   "todayNextDay": "Next day",
   "todayPickDate": "Pick a date",
-  "todayClearFilters": "Clear filters",
-  "timerTodayPanelHeader": "Today"
+  "todayClearFilters": "Clear filters"
 }

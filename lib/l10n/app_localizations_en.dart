@@ -1056,7 +1056,4 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get todayClearFilters => 'Clear filters';
-
-  @override
-  String get timerTodayPanelHeader => 'Today';
 }

@@ -10,7 +10,6 @@ import '../l10n/app_localizations.dart';
 import '../stores/app_store.dart';
 import '../viewmodels/activity.dart';
 import '../viewmodels/commands/command_invocation.dart';
-import 'timer_overview.dart';
 import 'timer_widgets.dart';
 
 /// 计时页（契约 §4.1）——默认着陆页，会话焦点 + 快捷活动区。
@@ -50,7 +49,6 @@ class _TimerPageState extends State<TimerPage> {
   String? _checkedRunningActivityId;
   bool _recording = false; // 运行条目是否处于"记录中"（未分配 = 未记录）
   bool _disposed = false;
-  String? _unassignedActivityId;
 
   static const _pendingTimeout = Duration(milliseconds: 2500);
 
@@ -102,12 +100,6 @@ class _TimerPageState extends State<TimerPage> {
 
   Future<void> _load() async {
     if (_disposed) return;
-    if (_unassignedActivityId == null) {
-      final unassigned = await app.activities.unassignedActivity();
-      if (!_disposed && unassigned.isSuccess) {
-        _unassignedActivityId = unassigned.requireValue().id;
-      }
-    }
     final result = await app.activities.activities();
     if (_disposed) return;
     setState(() {
@@ -319,13 +311,7 @@ class _TimerPageState extends State<TimerPage> {
         .where((a) => a.isUnassigned || _matchesFilter(a))
         .toList();
 
-    final overview = TimerOverviewPanel(
-      entries: app.today.today,
-      unassignedActivityId: _unassignedActivityId,
-      l10n: l10n,
-    );
-    final wide = MediaQuery.sizeOf(context).width >= 840;
-    final content = ListView(
+    return ListView(
       padding: const EdgeInsets.fromLTRB(20, 24, 20, 24),
       children: [
         TimerFocusCard(
@@ -374,19 +360,6 @@ class _TimerPageState extends State<TimerPage> {
             color: Theme.of(context).colorScheme.onSurfaceVariant,
           ),
         ),
-        if (!wide) ...[
-          const SizedBox(height: 20),
-          overview,
-        ],
-      ],
-    );
-    if (!wide) return content;
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(child: content),
-        const SizedBox(width: 20),
-        SizedBox(width: 330, child: overview),
       ],
     );
   }

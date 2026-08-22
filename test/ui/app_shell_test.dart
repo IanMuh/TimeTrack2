@@ -229,7 +229,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull, reason: '紧凑档运行态计时条溢出');
       expect(find.text('未在记录'), findsNothing);
-      expect(find.text('学习'), findsNWidgets(5), reason: '计时条+焦点卡+快捷卡+今日面板(最近/占比)显示');
+      expect(find.text('学习'), findsNWidgets(3), reason: '计时条+焦点卡+快捷活动卡显示运行活动名');
       expect(
         find.textContaining('00:00:'),
         findsAtLeastNWidgets(2),

@@ -2089,12 +2089,6 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'清除筛选'**
   String get todayClearFilters;
-
-  /// No description provided for @timerTodayPanelHeader.
-  ///
-  /// In zh, this message translates to:
-  /// **'今日记录'**
-  String get timerTodayPanelHeader;
 }
 
 class _AppLocalizationsDelegate
