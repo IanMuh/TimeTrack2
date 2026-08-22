@@ -1045,4 +1045,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get todayClearFilters => '清除筛选';
+
+  @override
+  String get timerTodayPanelHeader => '今日记录';
 }

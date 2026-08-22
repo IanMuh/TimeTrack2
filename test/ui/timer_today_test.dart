@@ -88,7 +88,7 @@ void main() {
         .dispatch(CommandInvocation(name: 'switch', args: const ['学习']));
     await tester.pumpAndSettle();
     // 焦点卡 + 计时条 + 快捷卡三处"学习"。
-    expect(find.text('学习'), findsNWidgets(3));
+    expect(find.text('学习'), findsNWidgets(5));
     expect(find.text('今日累计'), findsOneWidget);
 
     // 再击确认中间态：点"通勤"卡（种子活动之一）→ 提示条出现；再击 → 切换。
