@@ -310,58 +310,67 @@ class _TimerPageState extends State<TimerPage> {
     final visible = _activities
         .where((a) => a.isUnassigned || _matchesFilter(a))
         .toList();
-
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 24, 20, 24),
+    final quick = TimerQuickSection(
+      l10n: l10n,
+      categoryFilterId: _categoryFilterId,
+      rootCategories: app.category.childrenByParent[null] ?? const [],
+      childrenByParent: app.category.childrenByParent,
+      ancestorChain: app.category.ancestorChains,
+      descendantsOf: app.category.descendantsOf,
+      activities: visible,
+      categoryIdsByActivity: _categoryIdsByActivity(),
+      runningActivityId: _runningActivityId(),
+      pendingActivityId: _pendingActivityId,
+      todayByActivity: _todayByActivity(),
+      onFilter: (id) => setState(() => _categoryFilterId = id),
+      onActivityTap: _onActivityTap,
+      onActivityDoubleTap: _onActivityDoubleTap,
+      onActivityLongPress: (_) => _openPicker(),
+      onTemporary: _startTemporary,
+      onNewActivity: _openPicker,
+    );
+    final content = ListView(
+      padding: const EdgeInsets.fromLTRB(24, 8, 24, 40),
       children: [
-        TimerFocusCard(
+        TimerFocusSection(
           l10n: l10n,
           recording: _isRecording,
           runningName: running?.activityNameSnapshot,
           runningColor: running?.activityColorSnapshot,
-          elapsed:
-              running == null ? Duration.zero : running.durationUntil(DateTime.now()),
+          runningPath: _pathOfActivity(running?.activityId),
+          elapsed: running == null
+              ? Duration.zero
+              : running.durationUntil(DateTime.now()),
           todayTotal: _todayTotal,
           todaySessions: _todaySessions,
-          onStartRecording: _isRecording ? null : _openPicker,
-        ),
-        const SizedBox(height: 16),
-        TimerActionRow(
-          l10n: l10n,
           onStop: _isRecording
               ? () => _dispatch(CommandInvocation(name: 'stop'))
               : null,
           onSwitch: _openPicker,
+          onStart: _isRecording ? null : _openPicker,
         ),
-        const SizedBox(height: 20),
-        TimerQuickSection(
-          l10n: l10n,
-          categoryFilterId: _categoryFilterId,
-          rootCategories: app.category.childrenByParent[null] ?? const [],
-          ancestors: app.category.ancestorChains,
-          descendantsOf: app.category.descendantsOf,
-          activities: visible,
-          categoryIdsByActivity: _categoryIdsByActivity(),
-          runningActivityId: _runningActivityId(),
-          pendingActivityId: _pendingActivityId,
-          todayByActivity: _todayByActivity(),
-          onFilter: (id) => setState(() => _categoryFilterId = id),
-          onActivityTap: _onActivityTap,
-          onActivityDoubleTap: _onActivityDoubleTap,
-          onActivityLongPress: (_) => _openPicker(),
-          onTemporary: _startTemporary,
-          onNewActivity: _openPicker,
-        ),
-        const SizedBox(height: 12),
-        Text(
-          l10n.timerInteractionHint,
-          style: TextStyle(
-            fontSize: 11,
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
-          ),
-        ),
+        const SizedBox(height: 48),
+        quick,
       ],
     );
+    return content;
+  }
+
+  String? _pathOfActivity(String? activityId) {
+    if (activityId == null) return null;
+    final primary = _primaryCategoryIdOf(activityId);
+    if (primary == null) return null;
+    final chain = app.category.ancestorChains[primary] ?? const [];
+    return chain.isEmpty ? null : chain.join(' / ');
+  }
+
+  String? _primaryCategoryIdOf(String activityId) {
+    for (final link in app.category.links) {
+      if (link.activityId == activityId && link.isPrimary) {
+        return link.categoryId;
+      }
+    }
+    return null;
   }
 
   Map<String, Set<String>> _categoryIdsByActivity() {

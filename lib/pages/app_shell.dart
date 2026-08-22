@@ -44,6 +44,9 @@ class AppShell extends StatefulWidget {
   /// 宽屏断点：Material 逻辑像素 840（design min-[840px]）。
   static const double wideBreakpoint = 840;
 
+  /// 主内容最大宽度：design max-w-5xl（1024）居中。
+  static const double _contentMaxWidth = 1024;
+
   @override
   State<AppShell> createState() => _AppShellState();
 }
@@ -76,7 +79,21 @@ class _AppShellState extends State<AppShell> {
                 ),
                 Expanded(
                   child: Column(
-                    children: [content, _buildTimerBar(compact: false)],
+                    children: [
+                      // 设计稿：主内容 mx-auto max-w-5xl（min-[840px] 起约束）。
+                      // Expanded 必须是 Column 直接子代——约束包在 Expanded 内。
+                      Expanded(
+                        child: Center(
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(
+                              maxWidth: AppShell._contentMaxWidth,
+                            ),
+                            child: shell,
+                          ),
+                        ),
+                      ),
+                      _buildTimerBar(compact: false),
+                    ],
                   ),
                 ),
               ],

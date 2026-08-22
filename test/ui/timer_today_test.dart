@@ -155,7 +155,7 @@ void main() {
     ));
     await _pumpApp(tester, store);
     // 切到今日页。
-    await tester.tap(find.text('今日'));
+    await tester.tap(find.byIcon(Icons.calendar_today_outlined));
     await tester.pumpAndSettle();
     // 4 指标标签 + 汇总值。
     expect(find.text('总时长'), findsOneWidget);
@@ -183,7 +183,7 @@ void main() {
       TimeTrack2App(appStore: store, locale: const Locale('zh')),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('今日'));
+    await tester.tap(find.byIcon(Icons.calendar_today_outlined));
     await tester.pumpAndSettle();
     // 紧凑档无预览卡。
     expect(find.text('时间线预览'), findsNothing);
@@ -204,7 +204,7 @@ void main() {
       options: const {'start': '09:00', 'end': '10:00'},
     ));
     await _pumpApp(tester, store);
-    await tester.tap(find.text('今日'));
+    await tester.tap(find.byIcon(Icons.calendar_today_outlined));
     await tester.pumpAndSettle();
     // 未分类筛选 chip：学习无分类 → 命中"未分类"时仍在；先清空全部再选未分类。
     await tester.tap(find.text('清除筛选'));

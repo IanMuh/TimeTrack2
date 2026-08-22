@@ -331,5 +331,10 @@
   "todayPrevDay": "前一天",
   "todayNextDay": "后一天",
   "todayPickDate": "选择日期",
-  "todayClearFilters": "清除筛选"
+  "todayClearFilters": "清除筛选",
+  "timerQuickSection": "快捷活动",
+  "timerAllActivities": "全部活动",
+  "timerTodayShort": "今日",
+  "timerGroupCount": "共 {n} 个活动",
+  "timerSwitchHint": "切换 = 结束当前会话并立即开始新活动（原子操作，不留空档）；两种操作均可通过全局撤销恢复。"
 }

@@ -419,32 +419,38 @@ class _TodayHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final label = DateFormat('M月d日 EEE', 'zh').format(day);
+    final compact =
+        MediaQuery.sizeOf(context).width < 600;
+    Widget step(VoidCallback cb, IconData i, String tip, bool left) =>
+        IconButton(
+          tooltip: tip,
+          visualDensity:
+              compact ? VisualDensity.compact : VisualDensity.standard,
+          icon: Icon(i, size: compact ? 20 : 24),
+          onPressed: cb,
+        );
     return Row(
       children: [
-        IconButton(
-          tooltip: l10n.todayPrevDay,
-          icon: const Icon(Icons.chevron_left_rounded),
-          onPressed: onPrev,
-        ),
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.w600,
-            letterSpacing: -0.3,
+        step(onPrev, Icons.chevron_left_rounded, l10n.todayPrevDay, true),
+        Flexible(
+          child: LayoutBuilder(
+            builder: (context, c) => FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: c.maxWidth >= 200 ? 26 : 22,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: -0.5,
+                ),
+              ),
+            ),
           ),
         ),
-        const SizedBox(width: 6),
-        IconButton(
-          tooltip: l10n.todayPickDate,
-          icon: const Icon(Icons.calendar_month_outlined, size: 18),
-          onPressed: onPick,
-        ),
-        IconButton(
-          tooltip: l10n.todayNextDay,
-          icon: const Icon(Icons.chevron_right_rounded),
-          onPressed: onNext,
-        ),
+        const SizedBox(width: 4),
+        step(onPick, Icons.calendar_month_outlined, l10n.todayPickDate, false),
+        step(onNext, Icons.chevron_right_rounded, l10n.todayNextDay, false),
+        if (!isToday)
         if (!isToday)
           TextButton(onPressed: onToday, child: Text(l10n.todayBackToToday)),
         const Spacer(),

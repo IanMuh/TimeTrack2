@@ -1045,4 +1045,22 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get todayClearFilters => '清除筛选';
+
+  @override
+  String get timerQuickSection => '快捷活动';
+
+  @override
+  String get timerAllActivities => '全部活动';
+
+  @override
+  String get timerTodayShort => '今日';
+
+  @override
+  String timerGroupCount(Object n) {
+    return '共 $n 个活动';
+  }
+
+  @override
+  String get timerSwitchHint =>
+      '切换 = 结束当前会话并立即开始新活动（原子操作，不留空档）；两种操作均可通过全局撤销恢复。';
 }

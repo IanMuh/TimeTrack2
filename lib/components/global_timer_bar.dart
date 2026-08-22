@@ -66,7 +66,16 @@ class GlobalTimerBar extends StatelessWidget {
           border: Border(top: BorderSide(color: scheme.outline)),
         ),
         padding: EdgeInsets.symmetric(horizontal: compact ? 12 : 20),
-        child: isRecording ? _buildRunning(context) : _buildIdle(context),
+        child: compact
+            ? (isRecording ? _buildRunning(context) : _buildIdle(context))
+            : Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 1024),
+                  child: isRecording
+                      ? _buildRunning(context)
+                      : _buildIdle(context),
+                ),
+              ),
       ),
     );
   }

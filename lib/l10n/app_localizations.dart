@@ -2089,6 +2089,36 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'清除筛选'**
   String get todayClearFilters;
+
+  /// No description provided for @timerQuickSection.
+  ///
+  /// In zh, this message translates to:
+  /// **'快捷活动'**
+  String get timerQuickSection;
+
+  /// No description provided for @timerAllActivities.
+  ///
+  /// In zh, this message translates to:
+  /// **'全部活动'**
+  String get timerAllActivities;
+
+  /// No description provided for @timerTodayShort.
+  ///
+  /// In zh, this message translates to:
+  /// **'今日'**
+  String get timerTodayShort;
+
+  /// No description provided for @timerGroupCount.
+  ///
+  /// In zh, this message translates to:
+  /// **'共 {n} 个活动'**
+  String timerGroupCount(Object n);
+
+  /// No description provided for @timerSwitchHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'切换 = 结束当前会话并立即开始新活动（原子操作，不留空档）；两种操作均可通过全局撤销恢复。'**
+  String get timerSwitchHint;
 }
 
 class _AppLocalizationsDelegate

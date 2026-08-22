@@ -1056,4 +1056,22 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get todayClearFilters => 'Clear filters';
+
+  @override
+  String get timerQuickSection => 'Quick activities';
+
+  @override
+  String get timerAllActivities => 'All activities';
+
+  @override
+  String get timerTodayShort => 'Today';
+
+  @override
+  String timerGroupCount(Object n) {
+    return '$n activities in total';
+  }
+
+  @override
+  String get timerSwitchHint =>
+      'Switch = end current session and start the new one immediately (atomic, no gap); both actions are undoable.';
 }

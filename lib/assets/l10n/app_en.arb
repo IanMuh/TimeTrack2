@@ -331,5 +331,10 @@
   "todayPrevDay": "Previous day",
   "todayNextDay": "Next day",
   "todayPickDate": "Pick a date",
-  "todayClearFilters": "Clear filters"
+  "todayClearFilters": "Clear filters",
+  "timerQuickSection": "Quick activities",
+  "timerAllActivities": "All activities",
+  "timerTodayShort": "Today",
+  "timerGroupCount": "{n} activities in total",
+  "timerSwitchHint": "Switch = end current session and start the new one immediately (atomic, no gap); both actions are undoable."
 }
