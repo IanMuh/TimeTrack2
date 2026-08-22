@@ -21,7 +21,7 @@ Future<void> main() async {
       getIt.unregister<AppStore>();
     }
     getIt.registerSingleton<AppStore>(appStore);
-    runApp(const TimeTrack2App());
+    runApp(TimeTrack2App(appStore: appStore));
   } catch (e, st) {
     // 启动失败兜底（模块门禁 medium）：数据库损坏/迁移异常不得静默空白
     // 窗口——输出可诊断日志（含堆栈）后渲染错误页。

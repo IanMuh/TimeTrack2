@@ -104,6 +104,12 @@ abstract class AppLocalizations {
   /// **'TimeTrack2'**
   String get appTitle;
 
+  /// No description provided for @appBrand.
+  ///
+  /// In zh, this message translates to:
+  /// **'TimeTrack'**
+  String get appBrand;
+
   /// No description provided for @appSubtitle.
   ///
   /// In zh, this message translates to:
@@ -236,11 +242,29 @@ abstract class AppLocalizations {
   /// **'确定'**
   String get ok;
 
+  /// No description provided for @commandDone.
+  ///
+  /// In zh, this message translates to:
+  /// **'已完成'**
+  String get commandDone;
+
   /// No description provided for @notStartedRecord.
   ///
   /// In zh, this message translates to:
   /// **'未开始记录'**
   String get notStartedRecord;
+
+  /// No description provided for @notRecording.
+  ///
+  /// In zh, this message translates to:
+  /// **'未在记录'**
+  String get notRecording;
+
+  /// No description provided for @timerBarGoToTimer.
+  ///
+  /// In zh, this message translates to:
+  /// **'回到计时页'**
+  String get timerBarGoToTimer;
 
   /// No description provided for @timerBarSwitchHint.
   ///
@@ -253,6 +277,12 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'切换活动'**
   String get timerBarSwitch;
+
+  /// No description provided for @timerBarSwitchUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'切换活动选择器将在后续版本提供'**
+  String get timerBarSwitchUnavailable;
 
   /// No description provided for @undo.
   ///
@@ -757,6 +787,12 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'同步状态'**
   String get syncStatus;
+
+  /// No description provided for @syncStatusSynced.
+  ///
+  /// In zh, this message translates to:
+  /// **'已同步'**
+  String get syncStatusSynced;
 
   /// No description provided for @lastSyncNever.
   ///
@@ -1777,6 +1813,18 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'顶级分类'**
   String get topLevelCategory;
+
+  /// No description provided for @close.
+  ///
+  /// In zh, this message translates to:
+  /// **'关闭'**
+  String get close;
+
+  /// No description provided for @errorTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'出错了'**
+  String get errorTitle;
 }
 
 class _AppLocalizationsDelegate

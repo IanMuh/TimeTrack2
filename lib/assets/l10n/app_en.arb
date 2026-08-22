@@ -1,6 +1,7 @@
 {
   "@@locale": "en",
   "appTitle": "TimeTrack2",
+  "appBrand": "TimeTrack",
   "appSubtitle": "Time tracking",
   "navTimer": "Timer",
   "navToday": "Today",
@@ -23,9 +24,13 @@
   "cancel": "Cancel",
   "delete": "Delete",
   "ok": "OK",
+  "commandDone": "Done",
   "notStartedRecord": "No active session",
+  "notRecording": "Not recording",
+  "timerBarGoToTimer": "Back to timer",
   "timerBarSwitchHint": "Tap to switch activity",
   "timerBarSwitch": "Switch activity",
+  "timerBarSwitchUnavailable": "Activity picker will be available in a later version",
   "undo": "Undo",
   "redo": "Redo",
   "undoHint": "Undo last action",
@@ -110,6 +115,7 @@
   "syncStatusCloud": "Cloud sync",
   "syncStatusLocal": "Local mode",
   "syncStatus": "Sync status",
+  "syncStatusSynced": "Synced",
   "lastSyncNever": "Never synced",
   "lastSyncAt": "Last sync: {time}",
   "lastSyncError": "Last sync error: {error}",
@@ -279,5 +285,7 @@
   "editCategory": "Edit category",
   "deleteCategory": "Delete category",
   "parentCategory": "Parent category",
-  "topLevelCategory": "Top level"
+  "topLevelCategory": "Top level",
+  "close": "Close",
+  "errorTitle": "Something went wrong"
 }

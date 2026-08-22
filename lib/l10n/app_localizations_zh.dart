@@ -12,6 +12,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get appTitle => 'TimeTrack2';
 
   @override
+  String get appBrand => 'TimeTrack';
+
+  @override
   String get appSubtitle => '时间追踪';
 
   @override
@@ -80,13 +83,25 @@ class AppLocalizationsZh extends AppLocalizations {
   String get ok => '确定';
 
   @override
+  String get commandDone => '已完成';
+
+  @override
   String get notStartedRecord => '未开始记录';
+
+  @override
+  String get notRecording => '未在记录';
+
+  @override
+  String get timerBarGoToTimer => '回到计时页';
 
   @override
   String get timerBarSwitchHint => '点击切换活动';
 
   @override
   String get timerBarSwitch => '切换活动';
+
+  @override
+  String get timerBarSwitchUnavailable => '切换活动选择器将在后续版本提供';
 
   @override
   String get undo => '撤销';
@@ -355,6 +370,9 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get syncStatus => '同步状态';
+
+  @override
+  String get syncStatusSynced => '已同步';
 
   @override
   String get lastSyncNever => '从未同步';
@@ -889,4 +907,10 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get topLevelCategory => '顶级分类';
+
+  @override
+  String get close => '关闭';
+
+  @override
+  String get errorTitle => '出错了';
 }

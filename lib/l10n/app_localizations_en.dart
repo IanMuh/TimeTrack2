@@ -12,6 +12,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get appTitle => 'TimeTrack2';
 
   @override
+  String get appBrand => 'TimeTrack';
+
+  @override
   String get appSubtitle => 'Time tracking';
 
   @override
@@ -81,13 +84,26 @@ class AppLocalizationsEn extends AppLocalizations {
   String get ok => 'OK';
 
   @override
+  String get commandDone => 'Done';
+
+  @override
   String get notStartedRecord => 'No active session';
+
+  @override
+  String get notRecording => 'Not recording';
+
+  @override
+  String get timerBarGoToTimer => 'Back to timer';
 
   @override
   String get timerBarSwitchHint => 'Tap to switch activity';
 
   @override
   String get timerBarSwitch => 'Switch activity';
+
+  @override
+  String get timerBarSwitchUnavailable =>
+      'Activity picker will be available in a later version';
 
   @override
   String get undo => 'Undo';
@@ -356,6 +372,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get syncStatus => 'Sync status';
+
+  @override
+  String get syncStatusSynced => 'Synced';
 
   @override
   String get lastSyncNever => 'Never synced';
@@ -897,4 +916,10 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get topLevelCategory => 'Top level';
+
+  @override
+  String get close => 'Close';
+
+  @override
+  String get errorTitle => 'Something went wrong';
 }

@@ -1,6 +1,7 @@
 {
   "@@locale": "zh",
   "appTitle": "TimeTrack2",
+  "appBrand": "TimeTrack",
   "appSubtitle": "时间追踪",
   "navTimer": "计时",
   "navToday": "今日",
@@ -23,9 +24,13 @@
   "cancel": "取消",
   "delete": "删除",
   "ok": "确定",
+  "commandDone": "已完成",
   "notStartedRecord": "未开始记录",
+  "notRecording": "未在记录",
+  "timerBarGoToTimer": "回到计时页",
   "timerBarSwitchHint": "点击切换活动",
   "timerBarSwitch": "切换活动",
+  "timerBarSwitchUnavailable": "切换活动选择器将在后续版本提供",
   "undo": "撤销",
   "redo": "重做",
   "undoHint": "撤销上一步操作",
@@ -110,6 +115,7 @@
   "syncStatusCloud": "云同步",
   "syncStatusLocal": "本地模式",
   "syncStatus": "同步状态",
+  "syncStatusSynced": "已同步",
   "lastSyncNever": "从未同步",
   "lastSyncAt": "上次同步：{time}",
   "lastSyncError": "上次同步出错：{error}",
@@ -279,5 +285,7 @@
   "editCategory": "编辑分类",
   "deleteCategory": "删除分类",
   "parentCategory": "父级分类",
-  "topLevelCategory": "顶级分类"
+  "topLevelCategory": "顶级分类",
+  "close": "关闭",
+  "errorTitle": "出错了"
 }
