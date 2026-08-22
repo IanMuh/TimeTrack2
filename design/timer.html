@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TimeTrack · 计时</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = { darkMode: 'class' }
+</script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<style>
+  body { font-family: Inter, "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif; }
+  .tnum { font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body class="bg-zinc-50 text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100">
+
+  <!-- ================= 移动顶栏（< 840，含品牌 / 撤销菜单 / 深色切换） ================= -->
+  <header class="fixed inset-x-0 top-0 z-40 flex h-14 items-center justify-between border-b border-zinc-200 bg-white/85 px-3 backdrop-blur min-[840px]:hidden dark:border-zinc-800 dark:bg-zinc-950/85">
+    <div class="relative">
+      <div class="flex items-center gap-0.5">
+        <button id="mobileUndoBtn" onclick="toggleUndoMenu(event)" class="rounded-lg p-2 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100" title="撤销 / 重做" aria-label="撤销 / 重做">
+          <i data-lucide="undo-2" class="h-4 w-4"></i>
+        </button>
+        <span class="text-[17px] font-semibold tracking-tight">TimeTrack</span>
+      </div>
+      <!-- 移动端撤销/重做收纳菜单 -->
+      <div id="undoMenu" class="absolute left-0 top-full z-50 mt-2 hidden w-64 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+        <div class="flex items-center justify-between border-b border-zinc-100 px-3 py-2.5 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+          <span>撤销 / 重做</span>
+          <span class="tnum text-[10px]">Ctrl+Z / Ctrl+Y</span>
+        </div>
+        <button class="flex w-full items-center justify-between px-3 py-2 text-sm transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800">
+          <span class="flex items-center gap-2"><i data-lucide="undo-2" class="h-3.5 w-3.5 text-zinc-500 dark:text-zinc-400"></i>撤销 · 切换活动</span>
+        </button>
+        <button disabled class="flex w-full items-center justify-between px-3 py-2 text-sm text-zinc-300 dark:text-zinc-600">
+          <span class="flex items-center gap-2"><i data-lucide="redo-2" class="h-3.5 w-3.5"></i>重做（无可撤销）</span>
+        </button>
+      </div>
+    </div>
+    <button onclick="toggleDark()" class="rounded-lg p-2 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100" aria-label="切换深浅色">
+      <i data-lucide="moon" class="icon-moon h-4 w-4"></i>
+      <i data-lucide="sun" class="icon-sun hidden h-4 w-4"></i>
+    </button>
+  </header>
+
+  <!-- ================= 侧向导航（≥ 840，含撤销/重做 + 同步指示） ================= -->
+  <aside class="fixed inset-y-0 left-0 z-30 hidden w-[232px] flex-col border-r border-zinc-200 bg-white min-[840px]:flex dark:border-zinc-800 dark:bg-zinc-900">
+    <div class="flex h-16 shrink-0 items-center px-5">
+      <span class="text-lg font-semibold tracking-tight">TimeTrack</span>
+    </div>
+    <nav class="flex-1 space-y-1 px-3 pt-2">
+      <a href="timer.html" class="flex items-center gap-2.5 rounded-lg bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-600 transition-colors dark:bg-indigo-500/10 dark:text-indigo-400">
+        <i data-lucide="timer" class="h-4 w-4"></i> 计时
+      </a>
+      <a href="today.html" class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100">
+        <i data-lucide="calendar-days" class="h-4 w-4"></i> 今日
+      </a>
+      <a href="#" class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100">
+        <i data-lucide="rows-3" class="h-4 w-4"></i> 时间线
+      </a>
+      <a href="#" class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100">
+        <i data-lucide="pie-chart" class="h-4 w-4"></i> 统计
+      </a>
+      <a href="#" class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100">
+        <i data-lucide="settings" class="h-4 w-4"></i> 设置
+      </a>
+    </nav>
+    <div class="shrink-0 border-t border-zinc-100 p-3 dark:border-zinc-800">
+      <div class="flex items-center gap-1">
+        <button class="rounded-lg p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100" title="撤销：切换活动（Ctrl+Z）" aria-label="撤销">
+          <i data-lucide="undo-2" class="h-4 w-4"></i>
+        </button>
+        <button disabled class="rounded-lg p-1.5 text-zinc-300 dark:text-zinc-600" title="重做：暂无操作（Ctrl+Y）" aria-label="重做">
+          <i data-lucide="redo-2" class="h-4 w-4"></i>
+        </button>
+        <div class="ml-auto flex items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
+          <i data-lucide="cloud" class="h-3.5 w-3.5"></i>
+          <span>已同步</span>
+        </div>
+      </div>
+      <p class="mt-2 px-1 text-[10px] leading-relaxed text-zinc-400 dark:text-zinc-500">
+        最近操作：切换活动<br>输入框聚焦时快捷键自动让位
+      </p>
+    </div>
+  </aside>
+
+  <!-- ================= 全局计时条（常驻，运行中） ================= -->
+  <div class="fixed inset-x-0 bottom-16 z-40 h-14 border-t border-zinc-200 bg-white/95 backdrop-blur min-[840px]:bottom-0 min-[840px]:left-[232px] dark:border-zinc-800 dark:bg-zinc-900/95">
+    <div class="mx-auto flex h-full max-w-5xl items-center gap-3 px-4 min-[840px]:px-8">
+      <a href="timer.html" class="flex min-w-0 items-center gap-2.5" title="回到计时页">
+        <span class="relative flex h-2.5 w-2.5 shrink-0">
+          <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-500 opacity-60"></span>
+          <span class="relative inline-flex h-2.5 w-2.5 rounded-full bg-rose-500"></span>
+        </span>
+        <span class="truncate text-sm font-medium">设计评审</span>
+        <span class="hidden truncate text-xs text-zinc-500 min-[600px]:inline dark:text-zinc-400">工作 / 项目A</span>
+      </a>
+      <span class="tnum shrink-0 text-sm font-semibold tracking-tight">01:24:36</span>
+      <div class="ml-auto flex shrink-0 items-center gap-2">
+        <button class="rounded-lg border border-zinc-200 px-2.5 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 dark:border-zinc-700 dark:text-red-400 dark:hover:bg-red-500/10">停止</button>
+        <button class="rounded-lg bg-indigo-600 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-indigo-500">切换活动</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 主内容 ================= -->
+  <main class="min-h-screen pb-40 pt-14 min-[840px]:ml-[232px] min-[840px]:pb-28 min-[840px]:pt-0">
+    <div class="mx-auto w-full max-w-5xl px-4 min-[840px]:px-8">
+
+      <!-- 会话焦点 -->
+      <section class="flex flex-col items-center pt-6 text-center min-[840px]:pt-10">
+        <div class="inline-flex items-center gap-2 rounded-full border border-rose-200 bg-rose-50 px-3 py-1 dark:border-rose-500/30 dark:bg-rose-500/10">
+          <span class="relative flex h-2 w-2">
+            <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-500 opacity-70"></span>
+            <span class="relative inline-flex h-2 w-2 rounded-full bg-rose-500"></span>
+          </span>
+          <span class="text-sm font-medium text-rose-600 dark:text-rose-400">正在记录</span>
+        </div>
+
+        <div class="tnum mt-5 text-5xl font-semibold tracking-tight min-[600px]:text-6xl min-[840px]:text-7xl">01:24:36</div>
+
+        <div class="mt-3 flex items-center justify-center gap-1.5 text-sm text-zinc-500 dark:text-zinc-400">
+          <span class="h-2 w-2 rounded-full bg-rose-500"></span>
+          <span class="font-medium text-zinc-700 dark:text-zinc-300">设计评审</span>
+          <span class="text-zinc-300 dark:text-zinc-600">·</span>
+          <span>工作 / 项目A</span>
+        </div>
+
+        <div class="mt-6 flex items-center gap-5 text-sm">
+          <div class="flex items-center gap-1.5 text-zinc-500 dark:text-zinc-400">
+            今日累计
+            <span class="tnum font-semibold text-zinc-900 dark:text-zinc-100">10:42</span>
+          </div>
+          <div class="h-3 w-px bg-zinc-200 dark:bg-zinc-700"></div>
+          <div class="flex items-center gap-1.5 text-zinc-500 dark:text-zinc-400">
+            今日
+            <span class="tnum font-semibold text-zinc-900 dark:text-zinc-100">10</span>
+            个会话
+          </div>
+        </div>
+
+        <div class="mt-8 flex flex-col items-center gap-3">
+          <div class="flex items-center gap-3">
+            <button class="flex items-center gap-2 rounded-lg border border-zinc-200 px-4 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 dark:border-zinc-700 dark:text-red-400 dark:hover:bg-red-500/10">
+              <i data-lucide="square" class="h-4 w-4"></i> 停止
+            </button>
+            <button class="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-500">
+              <i data-lucide="arrow-right-left" class="h-4 w-4"></i> 切换活动
+            </button>
+          </div>
+          <p class="max-w-md text-xs leading-relaxed text-zinc-400 dark:text-zinc-500">
+            切换 = 结束当前会话并立即开始新活动（原子操作，不留空档）；两种操作均可通过全局撤销恢复。
+          </p>
+        </div>
+      </section>
+
+      <!-- 快捷活动区 -->
+      <section class="mt-12 min-[840px]:mt-16">
+        <div class="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 class="text-base font-medium tracking-tight">快捷活动</h2>
+          <span class="text-xs text-zinc-400 dark:text-zinc-500">单击选中 · 再击确认 · 双击直切 · 悬停编辑</span>
+        </div>
+
+        <!-- 分类过滤行：chip 按分类管理活动；紧凑档横滚溢出，中宽起自动换行；固定入口常驻行尾 -->
+        <div class="mt-4 flex items-center gap-2 overflow-x-auto pb-1 min-[600px]:flex-wrap min-[600px]:overflow-visible [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+
+          <!-- 全部 -->
+          <button onclick="filterCat('all')" data-cat="all" class="chip-cat flex shrink-0 items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:border-zinc-300 hover:text-zinc-900 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-zinc-700 dark:hover:text-zinc-100" aria-pressed="false">
+            全部
+            <span class="chip-count tnum rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">8</span>
+          </button>
+
+          <!-- 工作（默认选中） -->
+          <button onclick="filterCat('work')" data-cat="work" class="chip-cat flex shrink-0 items-center gap-1.5 rounded-full border border-indigo-600 bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-600 transition-colors dark:border-indigo-500/60 dark:bg-indigo-500/10 dark:text-indigo-400" aria-pressed="true">
+            <span class="h-2 w-2 shrink-0 rounded-full bg-indigo-500"></span>
+            工作
+            <span class="chip-count tnum rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-medium text-indigo-600 dark:bg-indigo-500/20 dark:text-indigo-400">6</span>
+          </button>
+
+          <!-- 个人 -->
+          <button onclick="filterCat('personal')" data-cat="personal" class="chip-cat flex shrink-0 items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:border-zinc-300 hover:text-zinc-900 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-zinc-700 dark:hover:text-zinc-100" aria-pressed="false">
+            <span class="h-2 w-2 shrink-0 rounded-full bg-teal-500"></span>
+            个人
+            <span class="chip-count tnum rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">1</span>
+          </button>
+
+          <!-- 生活 -->
+          <button onclick="filterCat('life')" data-cat="life" class="chip-cat flex shrink-0 items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:border-zinc-300 hover:text-zinc-900 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-zinc-700 dark:hover:text-zinc-100" aria-pressed="false">
+            <span class="h-2 w-2 shrink-0 rounded-full bg-orange-500"></span>
+            生活
+            <span class="chip-count tnum rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">1</span>
+          </button>
+
+          <!-- 未分类 -->
+          <button onclick="filterCat('unclassified')" data-cat="unclassified" class="chip-cat flex shrink-0 items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:border-zinc-300 hover:text-zinc-900 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-zinc-700 dark:hover:text-zinc-100" aria-pressed="false">
+            <span class="h-2 w-2 shrink-0 rounded-full bg-zinc-400"></span>
+            未分类
+            <span class="chip-count tnum rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">1</span>
+          </button>
+
+          <span class="h-5 w-px shrink-0 bg-zinc-200 dark:bg-zinc-800"></span>
+
+          <!-- 固定入口：临时活动（免配置）+ 新增活动（虚线），任何分类过滤下常驻可达；紧凑档 sticky 于行尾 -->
+          <div class="sticky right-0 z-10 flex shrink-0 items-center gap-2 pl-2 pr-0.5 [background:linear-gradient(to_right,transparent,#fafafa_25%,#fafafa)] dark:[background:linear-gradient(to_right,transparent,#09090b_25%,#09090b)]">
+            <button class="flex shrink-0 items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:border-zinc-300 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:border-zinc-700 dark:hover:bg-zinc-800">
+              <span class="h-2 w-2 shrink-0 rounded-full bg-zinc-400"></span>
+              临时活动
+              <span class="shrink-0 rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">免配置</span>
+            </button>
+            <button class="flex shrink-0 items-center gap-1.5 rounded-full border border-dashed border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-400 transition-colors hover:border-indigo-400 hover:text-indigo-500 dark:border-zinc-700 dark:text-zinc-500 dark:hover:border-indigo-500 dark:hover:text-indigo-400">
+              <i data-lucide="plus" class="h-3.5 w-3.5"></i>
+              新增活动
+            </button>
+          </div>
+        </div>
+
+        <!-- 分组说明行：让"分类在管理活动"的语义显性化 -->
+        <div data-cat="all" class="group-header mt-3.5 hidden items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
+          <i data-lucide="layers" class="h-3.5 w-3.5 text-zinc-400 dark:text-zinc-500"></i>
+          <span>全部活动</span>
+          <span class="text-zinc-300 dark:text-zinc-600">·</span>
+          <span>共 <span class="tnum font-medium text-zinc-700 dark:text-zinc-300">8</span> 个活动</span>
+        </div>
+        <div data-cat="work" class="group-header mt-3.5 flex items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
+          <span class="h-2 w-2 rounded-full bg-indigo-500"></span>
+          <span class="font-medium text-zinc-700 dark:text-zinc-300">工作</span>
+          <span class="text-zinc-300 dark:text-zinc-600">/</span>
+          <span>项目A · <span class="tnum">4</span>、平台组 · <span class="tnum">2</span></span>
+        </div>
+        <div data-cat="personal" class="group-header mt-3.5 hidden items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
+          <span class="h-2 w-2 rounded-full bg-teal-500"></span>
+          <span class="font-medium text-zinc-700 dark:text-zinc-300">个人</span>
+          <span class="text-zinc-300 dark:text-zinc-600">·</span>
+          <span><span class="tnum">1</span> 个活动</span>
+        </div>
+        <div data-cat="life" class="group-header mt-3.5 hidden items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
+          <span class="h-2 w-2 rounded-full bg-orange-500"></span>
+          <span class="font-medium text-zinc-700 dark:text-zinc-300">生活</span>
+          <span class="text-zinc-300 dark:text-zinc-600">·</span>
+          <span><span class="tnum">1</span> 个活动</span>
+        </div>
+        <div data-cat="unclassified" class="group-header mt-3.5 hidden items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
+          <span class="h-2 w-2 rounded-full bg-zinc-400"></span>
+          <span class="font-medium text-zinc-700 dark:text-zinc-300">未分类</span>
+          <span class="text-zinc-300 dark:text-zinc-600">·</span>
+          <span><span class="tnum">1</span> 个活动</span>
+        </div>
+
+        <!-- 活动网格：随 chip 过滤联动；紧凑 2 列 / 中宽 3 列 / 宽屏 4 列 -->
+        <div class="mt-4 grid grid-cols-2 gap-3 min-[600px]:grid-cols-3 min-[840px]:grid-cols-4">
+
+          <!-- 运行中活动（rose）：区分态（工作 / 项目A） -->
+          <button data-cat="work" class="activity-card group relative flex flex-col rounded-2xl border border-rose-200 bg-white p-3 text-left ring-2 ring-rose-500/50 transition-all hover:shadow-sm dark:border-rose-500/30 dark:bg-zinc-900 dark:ring-rose-500/30">
+            <div class="flex items-center gap-2">
+              <span class="h-2.5 w-2.5 shrink-0 rounded-full bg-rose-500"></span>
+              <span class="truncate text-sm font-medium">设计评审</span>
+              <span class="ml-auto inline-flex shrink-0 items-center gap-1 rounded-full bg-rose-50 px-1.5 py-0.5 text-[10px] font-medium text-rose-600 dark:bg-rose-500/10 dark:text-rose-400">
+                <span class="h-1 w-1 animate-pulse rounded-full bg-rose-500"></span>运行中
+              </span>
+            </div>
+            <div class="mt-1 truncate text-xs text-zinc-500 dark:text-zinc-400">工作 / 项目A</div>
+            <div class="mt-2.5 flex items-center justify-between">
+              <span class="tnum text-sm font-semibold tracking-tight text-rose-600 dark:text-rose-400">01:24:36</span>
+              <i data-lucide="pencil" class="h-3.5 w-3.5 text-zinc-300 opacity-0 transition-opacity group-hover:opacity-100 dark:text-zinc-600"></i>
+            </div>
+          </button>
+
+          <!-- 单击选中待确认态（emerald）：描边 + 提示条（工作 / 项目A） -->
+          <button data-cat="work" class="activity-card group flex flex-col overflow-hidden rounded-2xl border border-indigo-500 bg-white text-left ring-2 ring-indigo-500 transition-all dark:bg-zinc-900 dark:ring-indigo-500/50">
+            <div class="p-3 pb-0">
+              <div class="flex items-center gap-2">
+                <span class="h-2.5 w-2.5 shrink-0 rounded-full bg-emerald-500"></span>
+                <span class="truncate text-sm font-medium">写代码</span>
+              </div>
+              <div class="mt-1 truncate text-xs text-zinc-500 dark:text-zinc-400">工作 / 项目A</div>
+              <div class="mt-2.5 flex items-center justify-between text-xs">
+                <span class="text-zinc-500 dark:text-zinc-400">今日 <span class="tnum font-medium text-zinc-700 dark:text-zinc-300">4:12</span></span>
+                <i data-lucide="pencil" class="h-3.5 w-3.5 text-zinc-300 opacity-0 transition-opacity group-hover:opacity-100 dark:text-zinc-600"></i>
+              </div>
+            </div>
+            <div class="mt-3 flex items-center justify-center gap-1 bg-indigo-50 px-2 py-1.5 text-[11px] font-medium text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400">
+              <i data-lucide="mouse-pointer-click" class="h-3 w-3"></i> 再击确认切换
+            </div>
+          </button>
+
+          <!-- 站会（sky） -->
+          <button data-cat="work" class="activity-card group flex flex-col rounded-2xl border border-zinc-200 bg-white p-3 text-left transition-all hover:border-zinc-300 hover:shadow-sm dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-700">
+            <div class="flex items-center gap-2">
+              <span class="h-2.5 w-2.5 shrink-0 rounded-full bg-sky-500"></span>
+              <span class="truncate text-sm font-medium">站会</span>
+            </div>
+            <div class="mt-1 truncate text-xs text-zinc-500 dark:text-zinc-400">工作 / 项目A</div>
+            <div class="mt-2.5 flex items-center justify-between text-xs">
+              <span class="text-zinc-500 dark:text-zinc-400">今日 <span class="tnum font-medium text-zinc-700 dark:text-zinc-300">0:20</span></span>
+              <i data-lucide="pencil" class="h-3.5 w-3.5 text-zinc-300 opacity-0 transition-opacity group-hover:opacity-100 dark:text-zinc-600"></i>
+            </div>
+          </button>
+
+          <!-- 文档编写（indigo） -->
+          <button data-cat="work" class="activity-card group flex flex-col rounded-2xl border border-zinc-200 bg-white p-3 text-left transition-all hover:border-zinc-300 hover:shadow-sm dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-700">
+            <div class="flex items-center gap-2">
+              <span class="h-2.5 w-2.5 shrink-0 rounded-full bg-indigo-500"></span>
+              <span class="truncate text-sm font-medium">文档编写</span>
+            </div>
+            <div class="mt-1 truncate text-xs text-zinc-500 dark:text-zinc-400">工作 / 项目A</div>
+            <div class="mt-2.5 flex items-center justify-between text-xs">
+              <span class="text-zinc-500 dark:text-zinc-400">今日 <span class="tnum font-medium text-zinc-700 dark:text-zinc-300">0:52</span></span>
+              <i data-lucide="pencil" class="h-3.5 w-3.5 text-zinc-300 opacity-0 transition-opacity group-hover:opacity-100 dark:text-zinc-600"></i>
+            </div>
+          </button>
+
+          <!-- 代码评审（violet） -->
+          <button data-cat="work" class="activity-card group flex flex-col rounded-2xl border border-zinc-200 bg-white p-3 text-left transition-all hover:border-zinc-300 hover:shadow-sm dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-700">
+            <div class="flex items-center gap-2">
+              <span class="h-2.5 w-2.5 shrink-0 rounded-full bg-violet-500"></span>
+              <span class="truncate text-sm font-medium">代码评审</span>
+            </div>
+            <div class="mt-1 truncate text-xs text-zinc-500 dark:text-zinc-400">工作 / 平台组</div>
+            <div class="mt-2.5 flex items-center justify-between text-xs">
+              <span class="text-zinc-500 dark:text-zinc-400">今日 <span class="tnum font-medium text-zinc-700 dark:text-zinc-300">0:45</span></span>
+              <i data-lucide="pencil" class="h-3.5 w-3.5 text-zinc-300 opacity-0 transition-opacity group-hover:opacity-100 dark:text-zinc-600"></i>
+            </div>
+          </button>
+
+          <!-- 答疑沟通（amber） -->
+          <button data-cat="work" class="activity-card group flex flex-col rounded-2xl border border-zinc-200 bg-white p-3 text-left transition-all hover:border-zinc-300 hover:shadow-sm dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-700">
+            <div class="flex items-center gap-2">
+              <span class="h-2.5 w-2.5 shrink-0 rounded-full bg-amber-500"></span>
+              <span class="truncate text-sm font-medium">答疑沟通</span>
+            </div>
+            <div class="mt-1 truncate text-xs text-zinc-500 dark:text-zinc-400">工作 / 平台组</div>
+            <div class="mt-2.5 flex items-center justify-between text-xs">
+              <span class="text-zinc-500 dark:text-zinc-400">今日 <span class="tnum font-medium text-zinc-700 dark:text-zinc-300">0:30</span></span>
+              <i data-lucide="pencil" class="h-3.5 w-3.5 text-zinc-300 opacity-0 transition-opacity group-hover:opacity-100 dark:text-zinc-600"></i>
+            </div>
+          </button>
+
+          <!-- 休息（teal · 个人） -->
+          <button data-cat="personal" class="activity-card group hidden flex-col rounded-2xl border border-zinc-200 bg-white p-3 text-left transition-all hover:border-zinc-300 hover:shadow-sm dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-700">
+            <div class="flex items-center gap-2">
+              <span class="h-2.5 w-2.5 shrink-0 rounded-full bg-teal-500"></span>
+              <span class="truncate text-sm font-medium">休息</span>
+            </div>
+            <div class="mt-1 truncate text-xs text-zinc-500 dark:text-zinc-400">个人</div>
+            <div class="mt-2.5 flex items-center justify-between text-xs">
+              <span class="text-zinc-500 dark:text-zinc-400">今日 <span class="tnum font-medium text-zinc-700 dark:text-zinc-300">1:05</span></span>
+              <i data-lucide="pencil" class="h-3.5 w-3.5 text-zinc-300 opacity-0 transition-opacity group-hover:opacity-100 dark:text-zinc-600"></i>
+            </div>
+          </button>
+
+          <!-- 通勤（orange · 生活） -->
+          <button data-cat="life" class="activity-card group hidden flex-col rounded-2xl border border-zinc-200 bg-white p-3 text-left transition-all hover:border-zinc-300 hover:shadow-sm dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-700">
+            <div class="flex items-center gap-2">
+              <span class="h-2.5 w-2.5 shrink-0 rounded-full bg-orange-500"></span>
+              <span class="truncate text-sm font-medium">通勤</span>
+            </div>
+            <div class="mt-1 truncate text-xs text-zinc-500 dark:text-zinc-400">生活</div>
+            <div class="mt-2.5 flex items-center justify-between text-xs">
+              <span class="text-zinc-500 dark:text-zinc-400">今日 <span class="tnum font-medium text-zinc-700 dark:text-zinc-300">0:52</span></span>
+              <i data-lucide="pencil" class="h-3.5 w-3.5 text-zinc-300 opacity-0 transition-opacity group-hover:opacity-100 dark:text-zinc-600"></i>
+            </div>
+          </button>
+
+          <!-- 临时活动（zinc · 未分类） -->
+          <button data-cat="unclassified" class="activity-card group hidden flex-col rounded-2xl border border-zinc-200 bg-white p-3 text-left transition-all hover:border-zinc-300 hover:shadow-sm dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-700">
+            <div class="flex items-center gap-2">
+              <span class="h-2.5 w-2.5 shrink-0 rounded-full bg-zinc-400"></span>
+              <span class="truncate text-sm font-medium">临时活动</span>
+              <span class="ml-auto shrink-0 rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">免配置</span>
+            </div>
+            <div class="mt-1 truncate text-xs text-zinc-500 dark:text-zinc-400">未分类 · 直接开始记录</div>
+            <div class="mt-2.5 flex items-center justify-between text-xs">
+              <span class="text-zinc-500 dark:text-zinc-400">今日 <span class="tnum font-medium text-zinc-700 dark:text-zinc-300">0:27</span></span>
+              <i data-lucide="pencil" class="h-3.5 w-3.5 text-zinc-300 opacity-0 transition-opacity group-hover:opacity-100 dark:text-zinc-600"></i>
+            </div>
+          </button>
+        </div>
+
+        <p class="mt-3 text-xs leading-relaxed text-zinc-400 dark:text-zinc-500">
+          交互约定：顶部分类 chip 过滤活动（"全部" = 不分分类）；单击卡片 = 选中待确认（出现"再击确认切换"）→ 再击 = 原子切换（结束当前 + 立即开始，无空档）；双击 = 直接切换；悬停 = 编辑入口（桌面）/ 长按 = 编辑（移动）。"临时活动"与"新增活动"为固定入口，任何分类下均可直接使用。切换类操作进入撤销栈，可用全局撤销恢复。
+        </p>
+      </section>
+
+      <!-- 状态变体：空态 / 错误态 缩样 -->
+      <section class="mt-12 pb-4 min-[840px]:mt-16">
+        <div class="mb-4">
+          <h2 class="text-base font-medium tracking-tight">状态变体</h2>
+          <p class="mt-1 text-xs text-zinc-400 dark:text-zinc-500">页面级三态 · 本页上方为正常态（运行中）；以下平铺展示空态与错误态缩样。</p>
+        </div>
+        <div class="grid gap-4 sm:grid-cols-2">
+
+          <!-- 空态缩样 -->
+          <div class="overflow-hidden rounded-2xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+            <div class="flex items-center justify-between border-b border-zinc-100 px-4 py-2.5 dark:border-zinc-800">
+              <span class="text-xs font-medium text-zinc-500 dark:text-zinc-400">空态 · 无任何活动</span>
+              <span class="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">缩样</span>
+            </div>
+            <div class="flex flex-col items-center px-6 py-8 text-center">
+              <div class="flex h-11 w-11 items-center justify-center rounded-full bg-zinc-100 dark:bg-zinc-800">
+                <i data-lucide="timer-off" class="h-5 w-5 text-zinc-400"></i>
+              </div>
+              <p class="mt-3 text-sm font-medium">还没有活动</p>
+              <p class="mt-1 max-w-[230px] text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
+                创建第一个活动即可开始计时；也可以先用"临时活动"免配置直接记录。
+              </p>
+              <button class="mt-4 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-indigo-500">新增活动</button>
+              <div class="mt-5 w-full rounded-xl border border-dashed border-zinc-300 px-3 py-2.5 text-center text-xs text-zinc-400 dark:border-zinc-700">
+                快捷活动区 · 空 · 点击"新增活动"
+              </div>
+            </div>
+          </div>
+
+          <!-- 错误态缩样 -->
+          <div class="overflow-hidden rounded-2xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+            <div class="flex items-center justify-between border-b border-zinc-100 px-4 py-2.5 dark:border-zinc-800">
+              <span class="text-xs font-medium text-zinc-500 dark:text-zinc-400">错误态 · 页面级加载失败</span>
+              <span class="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">缩样</span>
+            </div>
+            <div class="flex flex-col items-center px-6 py-8 text-center">
+              <div class="flex h-11 w-11 items-center justify-center rounded-full bg-red-50 dark:bg-red-500/10">
+                <i data-lucide="alert-triangle" class="h-5 w-5 text-red-500"></i>
+              </div>
+              <p class="mt-3 text-sm font-medium">加载失败</p>
+              <p class="mt-1 max-w-[230px] text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
+                无法读取活动与当前会话，请稍后重试。本地数据未受影响。
+              </p>
+              <button class="mt-4 inline-flex items-center gap-1 rounded-lg border border-zinc-200 px-3 py-1.5 text-xs font-medium transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800">
+                <i data-lucide="refresh-cw" class="h-3 w-3"></i> 重试
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <!-- ================= 底部导航（< 840） ================= -->
+  <nav class="fixed inset-x-0 bottom-0 z-40 flex h-16 items-stretch border-t border-zinc-200 bg-white min-[840px]:hidden dark:border-zinc-800 dark:bg-zinc-900">
+    <a href="timer.html" class="relative flex flex-1 flex-col items-center justify-center gap-1 text-[11px] font-medium text-indigo-600 dark:text-indigo-400">
+      <span class="absolute top-0 h-0.5 w-6 rounded-full bg-indigo-600"></span>
+      <i data-lucide="timer" class="h-5 w-5"></i>
+      <span>计时</span>
+    </a>
+    <a href="today.html" class="flex flex-1 flex-col items-center justify-center gap-1 text-[11px] font-medium text-zinc-500 transition-colors hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100">
+      <i data-lucide="calendar-days" class="h-5 w-5"></i>
+      <span>今日</span>
+    </a>
+    <a href="#" class="flex flex-1 flex-col items-center justify-center gap-1 text-[11px] font-medium text-zinc-500 transition-colors hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100">
+      <i data-lucide="rows-3" class="h-5 w-5"></i>
+      <span>时间线</span>
+    </a>
+    <a href="#" class="flex flex-1 flex-col items-center justify-center gap-1 text-[11px] font-medium text-zinc-500 transition-colors hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100">
+      <i data-lucide="pie-chart" class="h-5 w-5"></i>
+      <span>统计</span>
+    </a>
+    <a href="#" class="flex flex-1 flex-col items-center justify-center gap-1 text-[11px] font-medium text-zinc-500 transition-colors hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100">
+      <i data-lucide="settings" class="h-5 w-5"></i>
+      <span>设置</span>
+    </a>
+  </nav>
+
+  <!-- 桌面深色切换（≥840，右上角） -->
+  <button onclick="toggleDark()" class="fixed right-4 top-4 z-50 hidden h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 bg-white text-zinc-500 shadow-sm transition-colors hover:text-zinc-900 min-[840px]:flex dark:border-zinc-700 dark:bg-zinc-900 dark:hover:text-zinc-100" aria-label="切换深浅色">
+    <i data-lucide="moon" class="icon-moon h-4 w-4"></i>
+    <i data-lucide="sun" class="icon-sun hidden h-4 w-4"></i>
+  </button>
+
+  <script>
+    function toggleDark() {
+      const root = document.documentElement;
+      root.classList.toggle('dark');
+      const dark = root.classList.contains('dark');
+      document.querySelectorAll('.icon-moon').forEach(function (el) { el.classList.toggle('hidden', dark); });
+      document.querySelectorAll('.icon-sun').forEach(function (el) { el.classList.toggle('hidden', !dark); });
+    }
+    function toggleUndoMenu(e) {
+      e.stopPropagation();
+      document.getElementById('undoMenu').classList.toggle('hidden');
+    }
+    document.addEventListener('click', function (ev) {
+      const m = document.getElementById('undoMenu');
+      const btn = document.getElementById('mobileUndoBtn');
+      if (m && !m.classList.contains('hidden') && !ev.target.closest('#undoMenu') && !ev.target.closest('#mobileUndoBtn')) {
+        m.classList.add('hidden');
+      }
+    });
+    // 快捷活动区：分类 chip 过滤（最小交互，等价 tab 切换；固定入口不受过滤影响）
+    var chipOn = ['border-indigo-600','bg-indigo-50','text-indigo-600','dark:border-indigo-500/60','dark:bg-indigo-500/10','dark:text-indigo-400'];
+    var chipOff = ['border-zinc-200','bg-white','text-zinc-600','hover:border-zinc-300','hover:text-zinc-900','dark:border-zinc-800','dark:bg-zinc-900','dark:text-zinc-300','dark:hover:border-zinc-700','dark:hover:text-zinc-100'];
+    var countOn = ['bg-indigo-100','text-indigo-600','dark:bg-indigo-500/20','dark:text-indigo-400'];
+    var countOff = ['bg-zinc-100','text-zinc-500','dark:bg-zinc-800','dark:text-zinc-400'];
+    function filterCat(cat) {
+      document.querySelectorAll('.chip-cat').forEach(function (c) {
+        var on = c.getAttribute('data-cat') === cat;
+        chipOn.forEach(function (cl) { c.classList.toggle(cl, on); });
+        chipOff.forEach(function (cl) { c.classList.toggle(cl, !on); });
+        c.setAttribute('aria-pressed', on ? 'true' : 'false');
+        c.querySelectorAll('.chip-count').forEach(function (b) {
+          countOn.forEach(function (cl) { b.classList.toggle(cl, on); });
+          countOff.forEach(function (cl) { b.classList.toggle(cl, !on); });
+        });
+      });
+      document.querySelectorAll('.activity-card').forEach(function (card) {
+        card.classList.toggle('hidden', card.getAttribute('data-cat') !== cat);
+      });
+      document.querySelectorAll('.group-header').forEach(function (h) {
+        h.classList.toggle('hidden', h.getAttribute('data-cat') !== cat);
+      });
+    }
+    lucide.createIcons();
+  </script>
+</body>
+</html>

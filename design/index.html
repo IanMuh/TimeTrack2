@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TimeTrack · 设计提案总览</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = { darkMode: 'class' }
+</script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<style>
+  body { font-family: Inter, "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif; }
+  .tnum { font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body class="bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100">
+
+<!-- ================= 顶栏 ================= -->
+<header class="sticky top-0 z-50 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/85 dark:bg-zinc-950/85 backdrop-blur">
+  <div class="max-w-[1280px] mx-auto px-6 h-14 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <span class="w-7 h-7 rounded-lg bg-indigo-600 text-white flex items-center justify-center"><i data-lucide="timer" class="w-4 h-4"></i></span>
+      <span class="font-semibold tracking-tight text-lg">TimeTrack</span>
+      <span class="hidden min-[600px]:inline text-sm text-zinc-400 border-l border-zinc-200 dark:border-zinc-800 pl-3">UI 设计提案</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <span class="hidden min-[600px]:inline text-xs text-zinc-400">版本 v1.0 · 2026-08-16</span>
+      <button onclick="document.documentElement.classList.toggle('dark')" class="w-8 h-8 flex items-center justify-center rounded-lg border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors" title="切换深浅色">
+        <i data-lucide="moon" class="w-4 h-4"></i>
+      </button>
+    </div>
+  </div>
+</header>
+
+<main class="max-w-[1280px] mx-auto px-6 py-10 space-y-16">
+
+  <!-- ================= 主张 ================= -->
+  <section class="max-w-3xl">
+    <h1 class="text-3xl min-[600px]:text-4xl font-semibold tracking-tight">离线优先的时间追踪<br class="hidden min-[600px]:block">双情境 · 三档自适应 · 一个交互系统</h1>
+    <p class="mt-4 text-sm text-zinc-500 dark:text-zinc-400 leading-relaxed max-w-2xl">
+      依据《UI功能契约 v1.0》产出 6 个高保真 HTML 设计稿。同一产品、同一套数据语义：Windows 桌面长时驻留，
+      Android 移动单手一瞥；<600 / 600–840 / ≥840 三档断点与浅深双主题全覆盖。所有操作经统一指令通道分发，
+      反馈语义系统级一致。点击下方卡片查看各页面设计稿。
+    </p>
+    <div class="mt-5 flex flex-wrap gap-2">
+      <span class="inline-flex items-center gap-1.5 rounded-full bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 text-xs px-3 py-1"><i data-lucide="layout-grid" class="w-3.5 h-3.5"></i>6 页设计稿</span>
+      <span class="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs px-3 py-1"><i data-lucide="check" class="w-3.5 h-3.5"></i>契约 §10 对照</span>
+      <span class="inline-flex items-center gap-1.5 rounded-full bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 text-xs px-3 py-1"><i data-lucide="palette" class="w-3.5 h-3.5"></i>8 色活动色板</span>
+    </div>
+  </section>
+
+  <!-- ================= 设计决策摘要 ================= -->
+  <section>
+    <div class="mb-5 flex items-center gap-2.5">
+      <span class="w-8 h-8 rounded-lg bg-indigo-600/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center"><i data-lucide="sliders-horizontal" class="w-4 h-4"></i></span>
+      <h2 class="text-2xl font-semibold tracking-tight">设计决策摘要</h2>
+    </div>
+    <div class="grid gap-6 min-[840px]:grid-cols-2">
+      <!-- 色彩令牌 -->
+      <div class="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm p-5">
+        <h3 class="text-[15px] font-medium mb-1">色彩令牌</h3>
+        <p class="text-xs text-zinc-400 mb-4">品牌主色 + 语义色 + 活动色板（深浅同色相策略）</p>
+        <div class="space-y-4">
+          <div>
+            <div class="text-[11px] text-zinc-400 mb-1.5">品牌主色</div>
+            <div class="flex items-center gap-2">
+              <span class="w-8 h-8 rounded-lg bg-indigo-600"></span>
+              <span class="text-xs text-zinc-500 dark:text-zinc-400">indigo-600 · 主按钮 / 强调 / 导航高亮</span>
+            </div>
+          </div>
+          <div>
+            <div class="text-[11px] text-zinc-400 mb-1.5">语义色</div>
+            <div class="flex items-center gap-3">
+              <span class="flex items-center gap-1.5"><span class="w-6 h-6 rounded-lg bg-emerald-500"></span><span class="text-xs text-zinc-500 dark:text-zinc-400">成功</span></span>
+              <span class="flex items-center gap-1.5"><span class="w-6 h-6 rounded-lg bg-amber-500"></span><span class="text-xs text-zinc-500 dark:text-zinc-400">警告</span></span>
+              <span class="flex items-center gap-1.5"><span class="w-6 h-6 rounded-lg bg-red-500"></span><span class="text-xs text-zinc-500 dark:text-zinc-400">危险</span></span>
+              <span class="flex items-center gap-1.5"><span class="w-6 h-6 rounded-lg bg-sky-500"></span><span class="text-xs text-zinc-500 dark:text-zinc-400">信息</span></span>
+            </div>
+          </div>
+          <div>
+            <div class="text-[11px] text-zinc-400 mb-1.5">活动色板（8 色）</div>
+            <div class="flex gap-1.5">
+              <span class="h-8 flex-1 rounded-lg bg-rose-500" title="rose"></span>
+              <span class="h-8 flex-1 rounded-lg bg-orange-500" title="orange"></span>
+              <span class="h-8 flex-1 rounded-lg bg-amber-500" title="amber"></span>
+              <span class="h-8 flex-1 rounded-lg bg-emerald-500" title="emerald"></span>
+              <span class="h-8 flex-1 rounded-lg bg-teal-500" title="teal"></span>
+              <span class="h-8 flex-1 rounded-lg bg-sky-500" title="sky"></span>
+              <span class="h-8 flex-1 rounded-lg bg-indigo-500" title="indigo"></span>
+              <span class="h-8 flex-1 rounded-lg bg-violet-500" title="violet"></span>
+            </div>
+            <p class="mt-2 text-[11px] text-zinc-400">深色底使用 <span class="font-mono">bg-{c}-500/10</span> 大面积底色 / <span class="font-mono">text-{c}-400</span> 文字，保持同色相可读性；「未分配」固定 zinc-400。</p>
+          </div>
+        </div>
+      </div>
+      <!-- 字体 / 断点 / 主题 -->
+      <div class="space-y-6">
+        <div class="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm p-5">
+          <h3 class="text-[15px] font-medium mb-1">字体与数字</h3>
+          <p class="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
+            <span class="font-medium text-zinc-700 dark:text-zinc-300">Inter</span> + <span class="font-medium text-zinc-700 dark:text-zinc-300">Noto Sans SC</span> /
+            Microsoft YaHei 中文兜底；标题 <span class="tracking-tight">tracking-tight</span>，字重整体压一档。
+          </p>
+          <div class="mt-3 flex items-center gap-3">
+            <span class="rounded-lg border border-zinc-200 dark:border-zinc-800 px-3 py-1.5 text-sm">标题 24–28px</span>
+            <span class="rounded-lg border border-zinc-200 dark:border-zinc-800 px-3 py-1.5 text-sm tnum">01:24:36</span>
+            <span class="text-[11px] text-zinc-400">计时数字 tnum 等宽，不跳动</span>
+          </div>
+        </div>
+        <div class="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm p-5">
+          <h3 class="text-[15px] font-medium mb-1">断点三档</h3>
+          <div class="mt-3 space-y-2">
+            <div class="flex items-center gap-3">
+              <span class="w-16 shrink-0 text-xs font-medium text-zinc-500 dark:text-zinc-400">&lt; 600</span>
+              <div class="flex-1 h-6 rounded-lg bg-zinc-100 dark:bg-zinc-800 flex items-center px-3"><span class="text-[11px] text-zinc-500 dark:text-zinc-400">紧凑 · 底部导航 + 计时条两层叠置</span></div>
+            </div>
+            <div class="flex items-center gap-3">
+              <span class="w-16 shrink-0 text-xs font-medium text-zinc-500 dark:text-zinc-400">600–840</span>
+              <div class="flex-1 h-6 rounded-lg bg-zinc-100 dark:bg-zinc-800 flex items-center px-3"><span class="text-[11px] text-zinc-500 dark:text-zinc-400">中宽 · 底部导航</span></div>
+            </div>
+            <div class="flex items-center gap-3">
+              <span class="w-16 shrink-0 text-xs font-medium text-zinc-500 dark:text-zinc-400">≥ 840</span>
+              <div class="flex-1 h-6 rounded-lg bg-indigo-50 dark:bg-indigo-500/10 flex items-center px-3"><span class="text-[11px] text-indigo-600 dark:text-indigo-400">宽屏 · 232px 侧导航 + 撤销/重做 + 同步状态</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm p-5">
+          <h3 class="text-[15px] font-medium mb-1">浅 / 深双主题</h3>
+          <p class="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
+            默认浅色（<span class="font-mono">zinc-50</span> 底 / <span class="font-mono">white</span> 卡片）；深色（<span class="font-mono">zinc-950</span> 底 / <span class="font-mono">zinc-900</span> 卡片）完整推导，非浅色附注。
+            每个页面右上角有切换按钮，可验收双主题。
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 页面索引卡片 ================= -->
+  <section>
+    <div class="mb-5 flex items-center gap-2.5">
+      <span class="w-8 h-8 rounded-lg bg-indigo-600/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center"><i data-lucide="layout-grid" class="w-4 h-4"></i></span>
+      <h2 class="text-2xl font-semibold tracking-tight">页面索引</h2>
+      <span class="text-xs text-zinc-400">每张卡片内嵌 iframe 预览，可切换 390 / 700 / 1280 三档宽度</span>
+    </div>
+
+    <div id="pages" class="grid gap-8 min-[840px]:grid-cols-2">
+
+      <!-- 计时页 -->
+      <article class="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm overflow-hidden" data-preview="timer">
+        <div class="p-5">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2.5">
+              <span class="w-8 h-8 rounded-lg bg-indigo-600/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center"><i data-lucide="timer" class="w-4 h-4"></i></span>
+              <h3 class="text-[16px] font-medium">计时页 <span class="text-xs text-zinc-400 font-normal">timer.html</span></h3>
+            </div>
+            <a href="timer.html" target="_blank" class="inline-flex items-center gap-1 text-sm text-indigo-600 dark:text-indigo-400 hover:underline">打开设计稿 <i data-lucide="arrow-up-right" class="w-4 h-4"></i></a>
+          </div>
+          <ul class="mt-3 space-y-1 text-xs text-zinc-500 dark:text-zinc-400">
+            <li>· 会话焦点：活动 + 实时时长 + 今日累计 + 会话数</li>
+            <li>· 快捷活动：单击选中 / 再击确认（中间态）/ 双击直切 / 悬停长按编辑</li>
+            <li>· 「临时活动」+「新增活动」固定入口；运行中有区分态</li>
+            <li>· 停止 + 原子「切换活动」；全局计时条贯穿</li>
+          </ul>
+        </div>
+        <div class="px-5 pb-5">
+          <div class="mb-2 flex items-center gap-1" id="timer-ctrl">
+            <span class="text-[11px] text-zinc-400 mr-2">预览宽度</span>
+            <button data-w="390" data-active="1" onclick="setW('timer',this)" class="px-2 py-0.5 rounded-md text-[11px] bg-indigo-600 text-white">390</button>
+            <button data-w="700" onclick="setW('timer',this)" class="px-2 py-0.5 rounded-md text-[11px] border border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400">700</button>
+            <button data-w="1280" onclick="setW('timer',this)" class="px-2 py-0.5 rounded-md text-[11px] border border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400">1280</button>
+          </div>
+          <div id="timer-box" class="relative h-56 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-900 overflow-hidden">
+            <iframe id="timer-frame" src="timer.html" class="pointer-events-none absolute top-0 left-0" style="width:390px;height:0;transform-origin:top left;" title="计时页预览" loading="lazy"></iframe>
+          </div>
+        </div>
+      </article>
+
+      <!-- 今日页 -->
+      <article class="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm overflow-hidden" data-preview="today">
+        <div class="p-5">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2.5">
+              <span class="w-8 h-8 rounded-lg bg-indigo-600/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center"><i data-lucide="calendar-days" class="w-4 h-4"></i></span>
+              <h3 class="text-[16px] font-medium">今日页 <span class="text-xs text-zinc-400 font-normal">today.html</span></h3>
+            </div>
+            <a href="today.html" target="_blank" class="inline-flex items-center gap-1 text-sm text-indigo-600 dark:text-indigo-400 hover:underline">打开设计稿 <i data-lucide="arrow-up-right" class="w-4 h-4"></i></a>
+          </div>
+          <ul class="mt-3 space-y-1 text-xs text-zinc-500 dark:text-zinc-400">
+            <li>· 任意日期查看：日历选择 + 前后步进</li>
+            <li>· 4 指标 + 较前日对比</li>
+            <li>· 分类分组聚合：折叠 / 祖先链路径 / 未分类置底</li>
+            <li>· 分类多选筛选联动指标与列表；宽屏时间线预览</li>
+          </ul>
+        </div>
+        <div class="px-5 pb-5">
+          <div class="mb-2 flex items-center gap-1" id="today-ctrl">
+            <span class="text-[11px] text-zinc-400 mr-2">预览宽度</span>
+            <button data-w="390" data-active="1" onclick="setW('today',this)" class="px-2 py-0.5 rounded-md text-[11px] bg-indigo-600 text-white">390</button>
+            <button data-w="700" onclick="setW('today',this)" class="px-2 py-0.5 rounded-md text-[11px] border border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400">700</button>
+            <button data-w="1280" onclick="setW('today',this)" class="px-2 py-0.5 rounded-md text-[11px] border border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400">1280</button>
+          </div>
+          <div id="today-box" class="relative h-56 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-900 overflow-hidden">
+            <iframe id="today-frame" src="today.html" class="pointer-events-none absolute top-0 left-0" style="width:390px;height:0;transform-origin:top left;" title="今日页预览" loading="lazy"></iframe>
+          </div>
+        </div>
+      </article>
+
+      <!-- 时间线页 -->
+      <article class="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm overflow-hidden" data-preview="timeline">
+        <div class="p-5">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2.5">
+              <span class="w-8 h-8 rounded-lg bg-indigo-600/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center"><i data-lucide="rows-3" class="w-4 h-4"></i></span>
+              <h3 class="text-[16px] font-medium">时间线页 <span class="text-xs text-zinc-400 font-normal">timeline.html</span></h3>
+            </div>
+            <a href="timeline.html" target="_blank" class="inline-flex items-center gap-1 text-sm text-indigo-600 dark:text-indigo-400 hover:underline">打开设计稿 <i data-lucide="arrow-up-right" class="w-4 h-4"></i></a>
+          </div>
+          <ul class="mt-3 space-y-1 text-xs text-zinc-500 dark:text-zinc-400">
+            <li>· 时间比例可视化 + 条目列表流双视图，日志视图</li>
+            <li>· 分段堆叠 1–12 段可调、缩放、点击编辑</li>
+            <li>· 条目编辑对话框：搜索 / 现场新建 / 合并 / 拆分 / 延伸 + 4 类校验</li>
+            <li>· is_auto 自动条目可识别；未来日期提示横幅</li>
+          </ul>
+        </div>
+        <div class="px-5 pb-5">
+          <div class="mb-2 flex items-center gap-1" id="timeline-ctrl">
+            <span class="text-[11px] text-zinc-400 mr-2">预览宽度</span>
+            <button data-w="390" data-active="1" onclick="setW('timeline',this)" class="px-2 py-0.5 rounded-md text-[11px] bg-indigo-600 text-white">390</button>
+            <button data-w="700" onclick="setW('timeline',this)" class="px-2 py-0.5 rounded-md text-[11px] border border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400">700</button>
+            <button data-w="1280" onclick="setW('timeline',this)" class="px-2 py-0.5 rounded-md text-[11px] border border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400">1280</button>
+          </div>
+          <div id="timeline-box" class="relative h-56 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-900 overflow-hidden">
+            <iframe id="timeline-frame" src="timeline.html" class="pointer-events-none absolute top-0 left-0" style="width:390px;height:0;transform-origin:top left;" title="时间线页预览" loading="lazy"></iframe>
+          </div>
+        </div>
+      </article>
+
+      <!-- 统计页 -->
+      <article class="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm overflow-hidden" data-preview="stats">
+        <div class="p-5">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2.5">
+              <span class="w-8 h-8 rounded-lg bg-indigo-600/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center"><i data-lucide="chart-pie" class="w-4 h-4"></i></span>
+              <h3 class="text-[16px] font-medium">统计页 <span class="text-xs text-zinc-400 font-normal">stats.html</span></h3>
+            </div>
+            <a href="stats.html" target="_blank" class="inline-flex items-center gap-1 text-sm text-indigo-600 dark:text-indigo-400 hover:underline">打开设计稿 <i data-lucide="arrow-up-right" class="w-4 h-4"></i></a>
+          </div>
+          <ul class="mt-3 space-y-1 text-xs text-zinc-500 dark:text-zinc-400">
+            <li>· 范围 5 预设 + 自定义 + 日期步进</li>
+            <li>· 4 维度：活动 / 主分类（树聚合）/ 时长区间 / 分类×时长</li>
+            <li>· 树形筛选折叠展开多选，三档断点信息完整（全屏宽）</li>
+            <li>· 柱状 + 环形图 + 图例；自动条目可排除；AI 入口预留</li>
+          </ul>
+        </div>
+        <div class="px-5 pb-5">
+          <div class="mb-2 flex items-center gap-1" id="stats-ctrl">
+            <span class="text-[11px] text-zinc-400 mr-2">预览宽度</span>
+            <button data-w="390" data-active="1" onclick="setW('stats',this)" class="px-2 py-0.5 rounded-md text-[11px] bg-indigo-600 text-white">390</button>
+            <button data-w="700" onclick="setW('stats',this)" class="px-2 py-0.5 rounded-md text-[11px] border border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400">700</button>
+            <button data-w="1280" onclick="setW('stats',this)" class="px-2 py-0.5 rounded-md text-[11px] border border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400">1280</button>
+          </div>
+          <div id="stats-box" class="relative h-56 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-900 overflow-hidden">
+            <iframe id="stats-frame" src="stats.html" class="pointer-events-none absolute top-0 left-0" style="width:390px;height:0;transform-origin:top left;" title="统计页预览" loading="lazy"></iframe>
+          </div>
+        </div>
+      </article>
+
+      <!-- 设置页 -->
+      <article class="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm overflow-hidden" data-preview="settings">
+        <div class="p-5">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2.5">
+              <span class="w-8 h-8 rounded-lg bg-indigo-600/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center"><i data-lucide="settings" class="w-4 h-4"></i></span>
+              <h3 class="text-[16px] font-medium">设置页 <span class="text-xs text-zinc-400 font-normal">settings.html</span></h3>
+            </div>
+            <a href="settings.html" target="_blank" class="inline-flex items-center gap-1 text-sm text-indigo-600 dark:text-indigo-400 hover:underline">打开设计稿 <i data-lucide="arrow-up-right" class="w-4 h-4"></i></a>
+          </div>
+          <ul class="mt-3 space-y-1 text-xs text-zinc-500 dark:text-zinc-400">
+            <li>· 10 分区：通用 / 备份导出 / 提醒 / 时间线 / 云同步 / AI / 后台记录 / 设备互通 / 版本更新 / 关于</li>
+            <li>· 后台记录规则列表与表单（复用合并选择器）</li>
+            <li>· 清除全部前强制导出备份提示；登录含加载/失败态</li>
+            <li>· 更新状态机 10 态完整呈现</li>
+          </ul>
+        </div>
+        <div class="px-5 pb-5">
+          <div class="mb-2 flex items-center gap-1" id="settings-ctrl">
+            <span class="text-[11px] text-zinc-400 mr-2">预览宽度</span>
+            <button data-w="390" data-active="1" onclick="setW('settings',this)" class="px-2 py-0.5 rounded-md text-[11px] bg-indigo-600 text-white">390</button>
+            <button data-w="700" onclick="setW('settings',this)" class="px-2 py-0.5 rounded-md text-[11px] border border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400">700</button>
+            <button data-w="1280" onclick="setW('settings',this)" class="px-2 py-0.5 rounded-md text-[11px] border border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400">1280</button>
+          </div>
+          <div id="settings-box" class="relative h-56 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-900 overflow-hidden">
+            <iframe id="settings-frame" src="settings.html" class="pointer-events-none absolute top-0 left-0" style="width:390px;height:0;transform-origin:top left;" title="设置页预览" loading="lazy"></iframe>
+          </div>
+        </div>
+      </article>
+
+      <!-- 跨页系统 -->
+      <article class="rounded-2xl border border-indigo-200 dark:border-indigo-500/30 bg-indigo-50/40 dark:bg-indigo-500/5 shadow-sm overflow-hidden" data-preview="system">
+        <div class="p-5">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2.5">
+              <span class="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center"><i data-lucide="folder-tree" class="w-4 h-4"></i></span>
+              <h3 class="text-[16px] font-medium">跨页系统 <span class="text-xs text-zinc-400 font-normal">system.html</span></h3>
+            </div>
+            <a href="system.html" target="_blank" class="inline-flex items-center gap-1 text-sm text-indigo-600 dark:text-indigo-400 hover:underline">打开设计稿 <i data-lucide="arrow-up-right" class="w-4 h-4"></i></a>
+          </div>
+          <ul class="mt-3 space-y-1 text-xs text-zinc-500 dark:text-zinc-400">
+            <li>· 活动-分类合并选择器：桌面弹窗 / 移动抽屉两形态 + 递归删除 + 退化态</li>
+            <li>· 弹窗体系：三条决策规则 + 6 场景（含强制更新不可跳过）</li>
+            <li>· 撤销/重做：桌面常驻 + 移动菜单 + 冲突禁用原因</li>
+            <li>· 平台驻留：Android 授权引导 / 托盘 / 前台服务通知；全局反馈一致性</li>
+          </ul>
+        </div>
+        <div class="px-5 pb-5">
+          <div class="mb-2 flex items-center gap-1" id="system-ctrl">
+            <span class="text-[11px] text-zinc-400 mr-2">预览宽度</span>
+            <button data-w="390" data-active="1" onclick="setW('system',this)" class="px-2 py-0.5 rounded-md text-[11px] bg-indigo-600 text-white">390</button>
+            <button data-w="700" onclick="setW('system',this)" class="px-2 py-0.5 rounded-md text-[11px] border border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400">700</button>
+            <button data-w="1280" onclick="setW('system',this)" class="px-2 py-0.5 rounded-md text-[11px] border border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400">1280</button>
+          </div>
+          <div id="system-box" class="relative h-56 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-900 overflow-hidden">
+            <iframe id="system-frame" src="system.html" class="pointer-events-none absolute top-0 left-0" style="width:390px;height:0;transform-origin:top left;" title="跨页系统预览" loading="lazy"></iframe>
+          </div>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <!-- ================= 契约 §10 对照清单 ================= -->
+  <section>
+    <details class="group rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm overflow-hidden">
+      <summary class="cursor-pointer select-none px-6 py-5 flex items-center justify-between hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
+        <div class="flex items-center gap-3">
+          <span class="w-8 h-8 rounded-lg bg-emerald-600/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center"><i data-lucide="clipboard-check" class="w-4 h-4"></i></span>
+          <div>
+            <h2 class="text-lg font-semibold tracking-tight">契约 §10 对照清单</h2>
+            <p class="text-xs text-zinc-400">静态对照文本 · 逐项详见对应页面设计稿</p>
+          </div>
+        </div>
+        <span class="text-zinc-400 group-open:rotate-180 transition-transform"><i data-lucide="chevron-down" class="w-5 h-5"></i></span>
+      </summary>
+      <div class="px-6 pb-6 border-t border-zinc-100 dark:border-zinc-800 pt-4 text-sm text-zinc-600 dark:text-zinc-300">
+        <p class="mb-4 rounded-lg bg-zinc-50 dark:bg-zinc-800/60 px-3 py-2 text-xs text-zinc-500 dark:text-zinc-400">
+          ✓ = 设计已覆盖。跨页场景（选择器 / 弹窗 / 撤销 / 平台驻留）详见 system.html；各页专有场景详见对应页面。
+        </p>
+        <div class="grid gap-x-8 gap-y-4 min-[840px]:grid-cols-2">
+          <div>
+            <h4 class="text-xs font-semibold text-zinc-400 mb-2 tracking-wide">不变式（§2）</h4>
+            <ul class="space-y-1">
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>离线优先，页面不因网络阻塞，同步状态可感知</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>删除分类 = 递归 + 单条撤销记录，删除入口有确认与范围提示</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>历史条目按快照展示，统计按当前归属</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>跨天滚转与跨天编辑拆分在 UI 有对应处理</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>「未分配」唯一 + 相邻合并（阈值可配）可被用户理解</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>操作反馈（成功/失败/可撤销）系统级一致</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>数据变更后所有页面即时一致</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>is_auto 条目可识别、统计可排除、可批量清理、编辑有防误保护</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>强制更新不可跳过；更新失败有浏览器兜底</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>LAN 主机无任何自动开启路径</li>
+            </ul>
+          </div>
+          <div>
+            <h4 class="text-xs font-semibold text-zinc-400 mb-2 tracking-wide">应用壳（§3）</h4>
+            <ul class="space-y-1">
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>5 页导航（图标+文字），无首页/报告页</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>宽屏侧导航 / 中宽与紧凑底部导航；紧凑两层叠置可行</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>全局计时条：活动名 + 实时计时 + 回计时页 + 任意页切换活动 + 未运行占位</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>撤销/重做：桌面常驻 + 移动菜单（含动作名）+ Ctrl+Z/Y + 输入框让位 + 不可用时禁用并提示</li>
+            </ul>
+            <h4 class="text-xs font-semibold text-zinc-400 mb-2 mt-4 tracking-wide">计时页（§4.1）</h4>
+            <ul class="space-y-1">
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>会话焦点（活动/实时时长/今日累计/会话数）</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>停止 + 原子切换</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>快捷区含「临时活动」与「新增活动」固定入口，运行中有区分态</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>单击选中/再击确认（中间态可见）、双击直切、长按/悬停编辑</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>三态</li>
+            </ul>
+          </div>
+          <div>
+            <h4 class="text-xs font-semibold text-zinc-400 mb-2 tracking-wide">今日页（§4.2）</h4>
+            <ul class="space-y-1">
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>任意日期查看（日历 + 步进）</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>4 指标 + 较前日对比</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>分类分组聚合：折叠、祖先链路径、「未分类」置底、组内活动明细</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>分类多选筛选联动列表与指标</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>宽屏时间线预览 + 跳转</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>三态</li>
+            </ul>
+            <h4 class="text-xs font-semibold text-zinc-400 mb-2 mt-4 tracking-wide">时间线页（§4.3）</h4>
+            <ul class="space-y-1">
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>添加条目 + 日期步进 + 跨度切换 + 条目/日志视图切换</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>汇总 3 项</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>时间比例可视化（刻度/日期分组/点击编辑/滚动缩放/分段 1–12 可调）</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>条目列表流（时间/活动/备注/点击编辑）</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>未来日期横幅</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>编辑对话框：搜索 + 现场新建 + 起止编辑 + 保持运行开关 + 备注 + 合并/拆分/延伸 + 删除/取消/保存 + 4 类校验</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>日志视图 4 字段；is_auto 标识；三态</li>
+            </ul>
+          </div>
+          <div>
+            <h4 class="text-xs font-semibold text-zinc-400 mb-2 tracking-wide">统计页（§4.4）</h4>
+            <ul class="space-y-1">
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>范围 5 预设 + 步进</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>维度 4 种，含主分类树聚合（路径标签）</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>树形分类筛选（折叠/展开/多选）</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>树统计三档断点信息完整（全屏宽）</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>柱状 + 环形 + 图例 + 每日明细（fl_chart 内）</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>自动条目可排除；AI 入口预留：未配置时引导不报错</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>三态</li>
+            </ul>
+            <h4 class="text-xs font-semibold text-zinc-400 mb-2 mt-4 tracking-wide">设置页（§4.5）</h4>
+            <ul class="space-y-1">
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>10 分区齐全，内容逐项覆盖</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>清除全部前强制导出备份提示</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>提醒 15–180 / 5–60、合并阈值 1–60 范围呈现</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>登录流程含加载/失败态</li>
+            </ul>
+          </div>
+          <div>
+            <h4 class="text-xs font-semibold text-zinc-400 mb-2 tracking-wide">合并选择器（§5.1）</h4>
+            <ul class="space-y-1">
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>桌面弹窗（树 + 活动集 + 搜索 + 双新建）/ 移动抽屉（搜索 + 分类行 + 活动集）</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>选分类过滤、选活动即完成</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>新建/编辑活动内嵌（名/色/持续临时/主副分类）</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>递归删除内嵌 + 确认提示 + 单条撤销</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>空分类入口、无分类退化「全部活动」</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>变更实时刷新；长按/右键管理；&gt;3 层祖先链呈现</li>
+            </ul>
+            <h4 class="text-xs font-semibold text-zinc-400 mb-2 mt-4 tracking-wide">弹窗体系（§5.2）</h4>
+            <ul class="space-y-1">
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>三条决策规则成立</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>6 个场景载体分配正确（含强制更新不可跳过）</li>
+            </ul>
+          </div>
+          <div>
+            <h4 class="text-xs font-semibold text-zinc-400 mb-2 tracking-wide">后台记录（§6）</h4>
+            <ul class="space-y-1">
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>授权卡（Android 跳系统设置 / Windows 说明条）+ 未授权禁用总开关</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>规则列表字段与操作齐全（含 per-rule 同步开关）</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>规则表单（模式/类型/目标活动/同步开关/优先级说明）</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>Android 首次全屏引导（含隐私承诺与「暂不开启」）</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>托盘三行为 + 状态提示；前台服务通知（映射文案/点击回主/暂停动作）</li>
+            </ul>
+            <h4 class="text-xs font-semibold text-zinc-400 mb-2 mt-4 tracking-wide">更新（§7）</h4>
+            <ul class="space-y-1">
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>10 个状态在更新卡完整呈现</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>进度 + 速度 + 取消；忽略版本持久化；稍后提醒</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>静默检查仅 Snackbar；强制更新唯一操作；降级浏览器兜底；双平台安装差异呈现</li>
+            </ul>
+            <h4 class="text-xs font-semibold text-zinc-400 mb-2 mt-4 tracking-wide">技术（§8）</h4>
+            <ul class="space-y-1">
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>Material 3 + fl_chart 可实现性自评（无可实现性问题）</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>三档断点 + 深浅色全覆盖</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>键盘可达；计时数字稳定不跳动（tnum）</li>
+              <li class="flex gap-2"><span class="text-emerald-500 shrink-0">✓</span>文案中文占位、无硬编码键名要求冲突</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </details>
+  </section>
+
+  <!-- 页脚 -->
+  <footer class="border-t border-zinc-200 dark:border-zinc-800 pt-6 pb-2 flex items-center justify-between text-xs text-zinc-400">
+    <span>TimeTrack · UI 设计提案 v1.0 · 输入依据：UI功能契约.md</span>
+    <span>Design Language · Inter + Noto Sans SC</span>
+  </footer>
+</main>
+
+<script>lucide.createIcons()</script>
+<script>
+  // iframe 预览：按选中宽度缩放
+  function applyPreview(id) {
+    var box = document.getElementById(id + '-box');
+    var ctrl = document.getElementById(id + '-ctrl');
+    var active = ctrl.querySelector('button[data-active="1"]');
+    if (!active) return;
+    var w = parseInt(active.dataset.w, 10);
+    var bw = box.clientWidth || 320;
+    var bh = box.clientHeight || 224;
+    var scale = bw / w;
+    var f = document.getElementById(id + '-frame');
+    f.style.width = w + 'px';
+    f.style.height = Math.round(bh / scale) + 'px';
+    f.style.transform = 'scale(' + scale + ')';
+  }
+  function setW(id, btn) {
+    var ctrl = document.getElementById(id + '-ctrl');
+    ctrl.querySelectorAll('button').forEach(function (b) {
+      b.dataset.active = '0';
+      b.classList.remove('bg-indigo-600', 'text-white');
+      b.classList.add('border', 'border-zinc-200', 'dark:border-zinc-700', 'text-zinc-500', 'dark:text-zinc-400');
+    });
+    btn.dataset.active = '1';
+    btn.classList.add('bg-indigo-600', 'text-white');
+    btn.classList.remove('border', 'border-zinc-200', 'dark:border-zinc-700', 'text-zinc-500', 'dark:text-zinc-400');
+    applyPreview(id);
+  }
+  document.querySelectorAll('[data-preview]').forEach(function (el) { applyPreview(el.dataset.preview); });
+  window.addEventListener('resize', function () {
+    document.querySelectorAll('[data-preview]').forEach(function (el) { applyPreview(el.dataset.preview); });
+  });
+</script>
+</body>
+</html>

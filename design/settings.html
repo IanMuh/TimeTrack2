@@ -1,0 +1,978 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TimeTrack · 设置</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = { darkMode: 'class' }
+</script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<style>
+  body { font-family: Inter, "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif; }
+  .tnum { font-variant-numeric: tabular-nums; }
+  html { scroll-behavior: smooth; }
+</style>
+</head>
+<body class="min-h-screen bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100 antialiased">
+
+<!-- ============ 宽屏侧导航（≥840） ============ -->
+<aside class="fixed inset-y-0 left-0 z-50 hidden w-[232px] flex-col border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900 min-[840px]:flex">
+  <div class="flex h-16 items-center gap-2.5 px-5">
+    <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-600"><i data-lucide="timer" class="h-4 w-4 text-white"></i></span>
+    <span class="font-semibold tracking-tight">TimeTrack</span>
+  </div>
+  <nav class="mt-2 flex-1 space-y-0.5 px-3">
+    <a class="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"><i data-lucide="timer" class="h-4 w-4"></i>计时</a>
+    <a class="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"><i data-lucide="calendar-days" class="h-4 w-4"></i>今日</a>
+    <a class="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"><i data-lucide="rows-3" class="h-4 w-4"></i>时间线</a>
+    <a class="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"><i data-lucide="pie-chart" class="h-4 w-4"></i>统计</a>
+    <a class="flex items-center gap-3 rounded-lg bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400"><i data-lucide="settings" class="h-4 w-4"></i>设置</a>
+  </nav>
+  <div class="space-y-3 px-3 pb-4">
+    <div class="flex items-center gap-1">
+      <button title="撤销：删除分类「杂项」" class="flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"><i data-lucide="undo-2" class="h-3.5 w-3.5"></i>撤销</button>
+      <button title="当前无可重做操作" class="flex flex-1 cursor-not-allowed items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs text-zinc-300 dark:text-zinc-600"><i data-lucide="redo-2" class="h-3.5 w-3.5"></i>重做</button>
+    </div>
+    <p class="px-2 text-[10px] text-zinc-400 dark:text-zinc-500">Ctrl+Z 撤销 · Ctrl+Y 重做 · 输入框聚焦时让位</p>
+    <div class="flex items-center gap-1.5 px-2 pt-1 text-xs text-zinc-500 dark:text-zinc-400">
+      <i data-lucide="cloud" class="h-3.5 w-3.5 text-emerald-500"></i>已同步
+    </div>
+  </div>
+</aside>
+
+<!-- ============ 移动顶栏（<840） ============ -->
+<header class="sticky top-0 z-40 flex h-14 items-center justify-between border-b border-zinc-200 bg-zinc-50/95 px-4 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/95 min-[840px]:hidden">
+  <div class="flex items-center gap-2">
+    <span class="flex h-6 w-6 items-center justify-center rounded-md bg-indigo-600"><i data-lucide="timer" class="h-3.5 w-3.5 text-white"></i></span>
+    <span class="font-semibold tracking-tight">TimeTrack</span>
+  </div>
+  <button data-theme-toggle class="rounded-lg p-2 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100">
+    <i data-lucide="moon" class="h-4 w-4 dark:hidden"></i>
+    <i data-lucide="sun" class="hidden h-4 w-4 dark:block"></i>
+  </button>
+</header>
+
+<div class="min-[840px]:ml-[232px]">
+  <!-- 页面大标题 -->
+  <div class="mx-auto max-w-6xl px-4 pt-6 sm:px-6 lg:px-8 min-[840px]:pt-10">
+    <div class="flex items-start justify-between gap-4">
+      <div>
+        <h1 class="text-2xl font-semibold tracking-tight sm:text-[28px]">设置</h1>
+        <p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">所有设置即时生效并自动保存，更改后相关页面即时一致。</p>
+      </div>
+      <button data-theme-toggle class="hidden items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800 min-[840px]:inline-flex">
+        <i data-lucide="moon" class="h-4 w-4 dark:hidden"></i>
+        <i data-lucide="sun" class="hidden h-4 w-4 dark:block"></i>
+        深浅色
+      </button>
+    </div>
+  </div>
+
+  <!-- 紧凑/中宽：顶部分区锚点条（横向滚动） -->
+  <nav class="sticky top-14 z-30 mt-4 flex items-center gap-2 overflow-x-auto border-y border-zinc-200 bg-zinc-50/95 px-4 py-2.5 backdrop-blur [scrollbar-width:none] dark:border-zinc-800 dark:bg-zinc-950/95 min-[840px]:hidden">
+    <a href="#sec-general" class="flex shrink-0 items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:border-zinc-300 hover:text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:text-zinc-100"><i data-lucide="sliders-horizontal" class="h-3.5 w-3.5 text-zinc-400"></i>通用</a>
+    <a href="#sec-backup" class="flex shrink-0 items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:border-zinc-300 hover:text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:text-zinc-100"><i data-lucide="database-backup" class="h-3.5 w-3.5 text-zinc-400"></i>备份与导出</a>
+    <a href="#sec-reminder" class="flex shrink-0 items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:border-zinc-300 hover:text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:text-zinc-100"><i data-lucide="bell" class="h-3.5 w-3.5 text-zinc-400"></i>提醒</a>
+    <a href="#sec-timeline" class="flex shrink-0 items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:border-zinc-300 hover:text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:text-zinc-100"><i data-lucide="rows-3" class="h-3.5 w-3.5 text-zinc-400"></i>时间线</a>
+    <a href="#sec-sync" class="flex shrink-0 items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:border-zinc-300 hover:text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:text-zinc-100"><i data-lucide="cloud" class="h-3.5 w-3.5 text-zinc-400"></i>云同步</a>
+    <a href="#sec-ai" class="flex shrink-0 items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:border-zinc-300 hover:text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:text-zinc-100"><i data-lucide="sparkles" class="h-3.5 w-3.5 text-zinc-400"></i>AI 配置</a>
+    <a href="#sec-background" class="flex shrink-0 items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:border-zinc-300 hover:text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:text-zinc-100"><i data-lucide="activity" class="h-3.5 w-3.5 text-zinc-400"></i>后台记录</a>
+    <a href="#sec-device" class="flex shrink-0 items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:border-zinc-300 hover:text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:text-zinc-100"><i data-lucide="network" class="h-3.5 w-3.5 text-zinc-400"></i>设备互通</a>
+    <a href="#sec-update" class="flex shrink-0 items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:border-zinc-300 hover:text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:text-zinc-100"><i data-lucide="refresh-cw" class="h-3.5 w-3.5 text-zinc-400"></i>版本更新</a>
+    <a href="#sec-about" class="flex shrink-0 items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:border-zinc-300 hover:text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:text-zinc-100"><i data-lucide="info" class="h-3.5 w-3.5 text-zinc-400"></i>关于</a>
+  </nav>
+
+  <!-- 内容区：宽屏左锚点导航 + 右分区卡；紧凑单栏 -->
+  <div class="mx-auto flex max-w-6xl items-start gap-10 px-4 pb-40 pt-6 sm:px-6 lg:px-8 min-[840px]:pt-8">
+    <aside class="hidden w-52 shrink-0 min-[840px]:sticky min-[840px]:top-8 min-[840px]:block">
+      <nav class="space-y-0.5">
+        <a href="#sec-general" class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"><i data-lucide="sliders-horizontal" class="h-4 w-4 text-zinc-400"></i>通用</a>
+        <a href="#sec-backup" class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"><i data-lucide="database-backup" class="h-4 w-4 text-zinc-400"></i>备份与导出</a>
+        <a href="#sec-reminder" class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"><i data-lucide="bell" class="h-4 w-4 text-zinc-400"></i>提醒</a>
+        <a href="#sec-timeline" class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"><i data-lucide="rows-3" class="h-4 w-4 text-zinc-400"></i>时间线</a>
+        <a href="#sec-sync" class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"><i data-lucide="cloud" class="h-4 w-4 text-zinc-400"></i>云同步</a>
+        <a href="#sec-ai" class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"><i data-lucide="sparkles" class="h-4 w-4 text-zinc-400"></i>AI 配置</a>
+        <a href="#sec-background" class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"><i data-lucide="activity" class="h-4 w-4 text-zinc-400"></i>后台记录</a>
+        <a href="#sec-device" class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"><i data-lucide="network" class="h-4 w-4 text-zinc-400"></i>设备互通</a>
+        <a href="#sec-update" class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"><i data-lucide="refresh-cw" class="h-4 w-4 text-zinc-400"></i>版本更新</a>
+        <a href="#sec-about" class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"><i data-lucide="info" class="h-4 w-4 text-zinc-400"></i>关于</a>
+      </nav>
+    </aside>
+
+    <main class="min-w-0 flex-1 space-y-6">
+
+      <!-- ============ 1. 通用 ============ -->
+      <section id="sec-general" class="scroll-mt-32 rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900 min-[840px]:scroll-mt-8">
+        <header class="flex items-start gap-3 border-b border-zinc-100 px-5 pb-4 pt-5 dark:border-zinc-800">
+          <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400"><i data-lucide="sliders-horizontal" class="h-4 w-4"></i></span>
+          <div>
+            <h2 class="text-[15px] font-medium">通用</h2>
+            <p class="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">外观、时间显示与全局默认值</p>
+          </div>
+        </header>
+        <div class="divide-y divide-zinc-100 px-5 dark:divide-zinc-800">
+          <!-- 外观 -->
+          <div class="py-4">
+            <div class="mb-3 flex items-baseline justify-between">
+              <p class="text-sm font-medium">外观</p>
+              <p class="text-xs text-zinc-400">默认浅色，可切深色或跟随系统</p>
+            </div>
+            <div class="grid grid-cols-3 gap-2.5">
+              <button class="relative flex flex-col items-center gap-1.5 rounded-xl border border-indigo-500 bg-indigo-50/50 px-3 py-3.5 ring-2 ring-indigo-500/30 transition-colors dark:bg-indigo-500/10">
+                <i data-lucide="sun" class="h-5 w-5 text-indigo-600 dark:text-indigo-400"></i>
+                <span class="text-sm font-medium">浅色</span>
+                <span class="absolute right-2 top-2 flex h-4 w-4 items-center justify-center rounded-full bg-indigo-600 text-white"><i data-lucide="check" class="h-2.5 w-2.5"></i></span>
+              </button>
+              <button class="flex flex-col items-center gap-1.5 rounded-xl border border-zinc-200 px-3 py-3.5 transition-colors hover:border-zinc-300 dark:border-zinc-700 dark:hover:border-zinc-600">
+                <i data-lucide="moon" class="h-5 w-5 text-zinc-400"></i>
+                <span class="text-sm">深色</span>
+              </button>
+              <button class="flex flex-col items-center gap-1.5 rounded-xl border border-zinc-200 px-3 py-3.5 transition-colors hover:border-zinc-300 dark:border-zinc-700 dark:hover:border-zinc-600">
+                <i data-lucide="monitor" class="h-5 w-5 text-zinc-400"></i>
+                <span class="text-sm">跟随系统</span>
+              </button>
+            </div>
+          </div>
+          <!-- 每周起始日 -->
+          <div class="flex flex-wrap items-center justify-between gap-3 py-3.5">
+            <div>
+              <p class="text-sm font-medium">每周起始日</p>
+              <p class="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">统计页「本周」从哪天开始</p>
+            </div>
+            <div class="relative">
+              <select class="appearance-none rounded-lg border border-zinc-200 bg-white py-2 pl-3 pr-9 text-sm focus:ring-2 focus:ring-indigo-500/40 dark:border-zinc-700 dark:bg-zinc-900">
+                <option>周一</option>
+                <option>周日</option>
+                <option>周六</option>
+              </select>
+              <i data-lucide="chevron-down" class="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400"></i>
+            </div>
+          </div>
+          <!-- 时间格式 -->
+          <div class="flex flex-wrap items-center justify-between gap-3 py-3.5">
+            <div>
+              <p class="text-sm font-medium">时间格式</p>
+              <p class="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">时间线条目与计时的显示格式</p>
+            </div>
+            <div class="flex rounded-lg border border-zinc-200 bg-zinc-50 p-0.5 dark:border-zinc-700 dark:bg-zinc-800">
+              <button class="rounded-md px-3 py-1.5 text-sm text-zinc-500 transition-colors hover:text-zinc-900 dark:hover:text-zinc-100">12 小时</button>
+              <button class="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm">24 小时</button>
+            </div>
+          </div>
+          <!-- 默认记录时长 -->
+          <div class="flex flex-wrap items-center justify-between gap-3 py-3.5">
+            <div>
+              <p class="text-sm font-medium">默认记录时长</p>
+              <p class="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">「临时活动」等快捷启动的默认时长</p>
+            </div>
+            <div class="relative">
+              <select class="appearance-none rounded-lg border border-zinc-200 bg-white py-2 pl-3 pr-9 text-sm focus:ring-2 focus:ring-indigo-500/40 dark:border-zinc-700 dark:bg-zinc-900">
+                <option>15 分钟</option>
+                <option selected>25 分钟</option>
+                <option>30 分钟</option>
+                <option>45 分钟</option>
+                <option>60 分钟</option>
+              </select>
+              <i data-lucide="chevron-down" class="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400"></i>
+            </div>
+          </div>
+          <!-- 快速提醒 -->
+          <div class="flex items-center justify-between py-3.5">
+            <div>
+              <p class="text-sm font-medium">快速提醒</p>
+              <p class="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">到触发时刻提醒开始记录（见「提醒」分区）</p>
+            </div>
+            <button aria-pressed="true" class="relative h-6 w-10 shrink-0 rounded-full bg-indigo-600 transition-colors">
+              <span class="absolute left-[18px] top-0.5 h-5 w-5 rounded-full bg-white shadow-sm"></span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 2. 备份与导出 ============ -->
+      <section id="sec-backup" class="scroll-mt-32 rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900 min-[840px]:scroll-mt-8">
+        <header class="flex items-start gap-3 border-b border-zinc-100 px-5 pb-4 pt-5 dark:border-zinc-800">
+          <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400"><i data-lucide="database-backup" class="h-4 w-4"></i></span>
+          <div>
+            <h2 class="text-[15px] font-medium">备份与导出</h2>
+            <p class="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">数据迁移与新设备恢复的唯一通道</p>
+          </div>
+        </header>
+        <div class="divide-y divide-zinc-100 px-5 dark:divide-zinc-800">
+          <div class="flex flex-wrap items-center justify-between gap-3 py-3.5">
+            <div>
+              <p class="text-sm font-medium">导出备份</p>
+              <p class="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">导出为 .timetrack.json 单个文件，包含全部时间条目、活动与设置</p>
+            </div>
+            <button class="flex items-center gap-2 rounded-lg border border-zinc-200 px-4 py-2 text-sm font-medium transition-colors hover:bg-zinc-50 focus-visible:ring-2 focus-visible:ring-indigo-500/40 dark:border-zinc-700 dark:hover:bg-zinc-800"><i data-lucide="download" class="h-4 w-4"></i>导出</button>
+          </div>
+          <div class="flex flex-wrap items-center justify-between gap-3 py-3.5">
+            <div>
+              <p class="text-sm font-medium">导入数据</p>
+              <p class="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">从 .timetrack.json 恢复，导入的数据将与现有数据合并</p>
+            </div>
+            <button class="flex items-center gap-2 rounded-lg border border-zinc-200 px-4 py-2 text-sm font-medium transition-colors hover:bg-zinc-50 focus-visible:ring-2 focus-visible:ring-indigo-500/40 dark:border-zinc-700 dark:hover:bg-zinc-800"><i data-lucide="upload" class="h-4 w-4"></i>导入</button>
+          </div>
+          <!-- 清除全部数据（危险区） -->
+          <div class="py-4">
+            <div class="rounded-xl border border-red-200 bg-red-50/60 px-4 py-4 dark:border-red-500/30 dark:bg-red-500/5">
+              <div class="flex items-center gap-2 text-sm font-medium text-red-600 dark:text-red-400">
+                <i data-lucide="alert-triangle" class="h-4 w-4"></i>清除全部数据
+              </div>
+              <p class="mt-1.5 text-sm text-red-600/80 dark:text-red-400/80">永久删除本机全部时间条目、活动与设置，且不可撤销。执行前必须先导出备份。</p>
+              <button class="mt-3 flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-500 focus-visible:ring-2 focus-visible:ring-red-500/40"><i data-lucide="trash-2" class="h-4 w-4"></i>清除全部数据</button>
+            </div>
+            <!-- 对话框缩样：清除前强制提示先导出备份（硬约束） -->
+            <div class="mt-4 rounded-xl border border-dashed border-zinc-300 p-4 dark:border-zinc-700">
+              <p class="mb-3 flex items-center gap-1.5 text-xs text-zinc-400"><i data-lucide="eye" class="h-3.5 w-3.5"></i>对话框缩样 · 已打开状态（清除前强制提示先导出备份）</p>
+              <div class="relative rounded-xl bg-zinc-950/40 p-4">
+                <div class="mx-auto max-w-sm rounded-2xl border border-zinc-200 bg-white p-5 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+                  <div class="flex items-start gap-3">
+                    <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-red-100 text-red-600 dark:bg-red-500/10"><i data-lucide="alert-triangle" class="h-5 w-5"></i></span>
+                    <div>
+                      <h3 class="font-medium">清除全部数据</h3>
+                      <p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">此操作将永久删除全部时间条目、活动与设置，无法撤销。清除前请先导出备份，以免数据丢失。</p>
+                    </div>
+                  </div>
+                  <div class="mt-4 flex flex-wrap justify-end gap-2">
+                    <button class="rounded-lg border border-zinc-200 px-3 py-1.5 text-sm transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800">取消</button>
+                    <button class="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-indigo-500">先导出备份</button>
+                    <button class="rounded-lg border border-red-200 px-3 py-1.5 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 dark:border-red-500/30 dark:hover:bg-red-500/10">仍然清除</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 3. 提醒 ============ -->
+      <section id="sec-reminder" class="scroll-mt-32 rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900 min-[840px]:scroll-mt-8">
+        <header class="flex items-start gap-3 border-b border-zinc-100 px-5 pb-4 pt-5 dark:border-zinc-800">
+          <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400"><i data-lucide="bell" class="h-4 w-4"></i></span>
+          <div>
+            <h2 class="text-[15px] font-medium">提醒</h2>
+            <p class="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">何时提醒、多久一次、用什么方式</p>
+          </div>
+        </header>
+        <div class="divide-y divide-zinc-100 px-5 dark:divide-zinc-800">
+          <div class="flex flex-wrap items-center justify-between gap-3 py-3.5">
+            <div>
+              <p class="text-sm font-medium">触发时刻</p>
+              <p class="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">每日到设定时间后提醒开始记录</p>
+            </div>
+            <input type="time" value="09:00" class="tnum rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500/40 dark:border-zinc-700 dark:bg-zinc-900">
+          </div>
+          <!-- 持续时长阈值 15-180 -->
+          <div class="py-4">
+            <div class="mb-3 flex items-baseline justify-between">
+              <div>
+                <p class="text-sm font-medium">持续时长阈值</p>
+                <p class="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">会话运行达到该时长后触发提醒</p>
+              </div>
+              <span class="tnum text-sm font-medium text-indigo-600 dark:text-indigo-400">60 分钟</span>
+            </div>
+            <div class="relative h-5">
+              <div class="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-zinc-200 dark:bg-zinc-700"></div>
+              <div class="absolute left-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-indigo-600" style="width:27%"></div>
+              <div class="absolute top-1/2 h-4 w-4 -translate-y-1/2 rounded-full border border-zinc-300 bg-white shadow-sm" style="left:calc(27% - 8px)"></div>
+            </div>
+            <div class="mt-1 flex justify-between text-[10px] text-zinc-400">
+              <span class="tnum">15 分钟</span><span class="tnum">60 分钟</span><span class="tnum">120 分钟</span><span class="tnum">180 分钟</span>
+            </div>
+          </div>
+          <!-- 重复间隔 5-60 -->
+          <div class="py-4">
+            <div class="mb-3 flex items-baseline justify-between">
+              <div>
+                <p class="text-sm font-medium">重复间隔</p>
+                <p class="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">提醒后每隔该时长再次提醒，直到手动结束会话</p>
+              </div>
+              <span class="tnum text-sm font-medium text-indigo-600 dark:text-indigo-400">15 分钟</span>
+            </div>
+            <div class="relative h-5">
+              <div class="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-zinc-200 dark:bg-zinc-700"></div>
+              <div class="absolute left-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-indigo-600" style="width:18%"></div>
+              <div class="absolute top-1/2 h-4 w-4 -translate-y-1/2 rounded-full border border-zinc-300 bg-white shadow-sm" style="left:calc(18% - 8px)"></div>
+            </div>
+            <div class="mt-1 flex justify-between text-[10px] text-zinc-400">
+              <span class="tnum">5 分钟</span><span class="tnum">15 分钟</span><span class="tnum">30 分钟</span><span class="tnum">60 分钟</span>
+            </div>
+          </div>
+          <!-- 方式三选 -->
+          <div class="py-4">
+            <p class="mb-3 text-sm font-medium">提醒方式</p>
+            <div class="grid grid-cols-3 gap-2.5">
+              <button class="relative flex flex-col items-center gap-1.5 rounded-xl border border-indigo-500 bg-indigo-50/50 px-2 py-3 ring-2 ring-indigo-500/30 dark:bg-indigo-500/10">
+                <i data-lucide="message-square" class="h-5 w-5 text-indigo-600 dark:text-indigo-400"></i>
+                <span class="text-xs font-medium">对话框</span>
+                <span class="text-[10px] text-zinc-400">需决策</span>
+                <span class="absolute right-2 top-2 flex h-4 w-4 items-center justify-center rounded-full bg-indigo-600 text-white"><i data-lucide="check" class="h-2.5 w-2.5"></i></span>
+              </button>
+              <button class="flex flex-col items-center gap-1.5 rounded-xl border border-zinc-200 px-2 py-3 transition-colors hover:border-zinc-300 dark:border-zinc-700 dark:hover:border-zinc-600">
+                <i data-lucide="panel-top" class="h-5 w-5 text-zinc-400"></i>
+                <span class="text-xs">横幅</span>
+                <span class="text-[10px] text-zinc-400">轻打扰</span>
+              </button>
+              <button class="flex flex-col items-center gap-1.5 rounded-xl border border-zinc-200 px-2 py-3 transition-colors hover:border-zinc-300 dark:border-zinc-700 dark:hover:border-zinc-600">
+                <i data-lucide="bell-off" class="h-5 w-5 text-zinc-400"></i>
+                <span class="text-xs">静音</span>
+                <span class="text-[10px] text-zinc-400">不打扰</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 4. 时间线 ============ -->
+      <section id="sec-timeline" class="scroll-mt-32 rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900 min-[840px]:scroll-mt-8">
+        <header class="flex items-start gap-3 border-b border-zinc-100 px-5 pb-4 pt-5 dark:border-zinc-800">
+          <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400"><i data-lucide="git-merge" class="h-4 w-4"></i></span>
+          <div>
+            <h2 class="text-[15px] font-medium">时间线</h2>
+            <p class="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">相邻条目自动合并的判定阈值</p>
+          </div>
+        </header>
+        <div class="px-5 py-4">
+          <div class="mb-3 flex items-baseline justify-between">
+            <div>
+              <p class="text-sm font-medium">相邻条目合并阈值</p>
+              <p class="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">间隔小于该阈值时自动合并</p>
+            </div>
+            <span class="tnum text-sm font-medium text-indigo-600 dark:text-indigo-400">10 分钟</span>
+          </div>
+          <div class="relative h-5">
+            <div class="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-zinc-200 dark:bg-zinc-700"></div>
+            <div class="absolute left-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-indigo-600" style="width:15%"></div>
+            <div class="absolute top-1/2 h-4 w-4 -translate-y-1/2 rounded-full border border-zinc-300 bg-white shadow-sm" style="left:calc(15% - 8px)"></div>
+          </div>
+          <div class="mt-1 flex justify-between text-[10px] text-zinc-400">
+            <span class="tnum">1 分钟</span><span class="tnum">15 分钟</span><span class="tnum">30 分钟</span><span class="tnum">60 分钟</span>
+          </div>
+          <!-- 说明：未分配相邻合并（不变式 5） -->
+          <div class="mt-4 rounded-xl border border-sky-100 bg-sky-50 px-4 py-3 dark:border-sky-500/20 dark:bg-sky-500/10">
+            <p class="flex items-start gap-2 text-sm text-sky-700 dark:text-sky-300">
+              <i data-lucide="info" class="mt-0.5 h-4 w-4 shrink-0"></i>
+              系统有且仅有一个「未分配」活动。时间线上与它相邻的未分配条目，在间隔小于该阈值时会自动合并为一条连续记录，避免碎片化。
+            </p>
+          </div>
+          <!-- 图示 -->
+          <div class="mt-3 overflow-x-auto rounded-xl border border-zinc-200 bg-zinc-50/60 px-4 py-3 dark:border-zinc-800 dark:bg-zinc-800/40">
+            <div class="flex items-center gap-2 whitespace-nowrap text-[11px] text-zinc-500">
+              <span class="rounded-md bg-zinc-300/70 px-2 py-1 font-mono">未分配 08:00–08:30</span>
+              <span class="text-zinc-400">间隔 5 分钟 &lt; 阈值 10 分钟</span>
+              <span class="rounded-md bg-zinc-300/70 px-2 py-1 font-mono">未分配 08:35–09:00</span>
+            </div>
+            <div class="my-1.5 flex items-center gap-1.5 text-[11px] text-zinc-400">
+              <i data-lucide="arrow-down" class="h-3.5 w-3.5"></i>相邻未分配条目自动合并
+            </div>
+            <div class="flex items-center gap-2 text-[11px] text-zinc-500">
+              <span class="rounded-md bg-zinc-400/80 px-2 py-1 font-mono text-white">未分配 08:00–09:00 · 单条记录</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 5. 云同步 ============ -->
+      <section id="sec-sync" class="scroll-mt-32 rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900 min-[840px]:scroll-mt-8">
+        <header class="flex items-start gap-3 border-b border-zinc-100 px-5 pb-4 pt-5 dark:border-zinc-800">
+          <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400"><i data-lucide="cloud" class="h-4 w-4"></i></span>
+          <div>
+            <h2 class="text-[15px] font-medium">云同步</h2>
+            <p class="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">多设备数据双向同步，本地优先、异步进行</p>
+          </div>
+        </header>
+        <div class="space-y-4 px-5 py-4">
+          <!-- 配置状态卡 -->
+          <div class="flex items-center gap-3 rounded-xl border border-zinc-200 p-4 dark:border-zinc-700">
+            <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400"><i data-lucide="cloud" class="h-5 w-5"></i></span>
+            <div class="min-w-0">
+              <p class="text-sm font-medium">已配置 Supabase</p>
+              <p class="mt-0.5 truncate text-xs text-zinc-500 dark:text-zinc-400">已登录 yuki@example.com</p>
+            </div>
+            <span class="ml-auto flex shrink-0 items-center gap-1.5 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400">
+              <span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>在线
+            </span>
+          </div>
+          <!-- 同步状态摘要 -->
+          <div class="grid grid-cols-3 gap-2.5">
+            <div class="rounded-lg border border-zinc-200 px-3 py-2.5 text-center dark:border-zinc-700">
+              <p class="text-[11px] text-zinc-400">上次同步</p>
+              <p class="tnum mt-0.5 text-sm font-medium">刚刚</p>
+            </div>
+            <div class="rounded-lg border border-zinc-200 px-3 py-2.5 text-center dark:border-zinc-700">
+              <p class="text-[11px] text-zinc-400">待上传</p>
+              <p class="tnum mt-0.5 text-sm font-medium">0 条</p>
+            </div>
+            <div class="rounded-lg border border-zinc-200 px-3 py-2.5 text-center dark:border-zinc-700">
+              <p class="text-[11px] text-zinc-400">待下载</p>
+              <p class="tnum mt-0.5 text-sm font-medium">0 条</p>
+            </div>
+          </div>
+          <!-- 操作 -->
+          <div class="flex flex-wrap items-center gap-2">
+            <button class="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-500 focus-visible:ring-2 focus-visible:ring-indigo-500/40"><i data-lucide="refresh-cw" class="h-4 w-4"></i>立即同步</button>
+            <button class="flex items-center gap-2 rounded-lg border border-zinc-200 px-4 py-2 text-sm font-medium transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800"><i data-lucide="log-out" class="h-4 w-4"></i>登出</button>
+          </div>
+          <!-- 登录对话框缩样：加载态 / 失败态 -->
+          <div class="rounded-xl border border-dashed border-zinc-300 p-4 dark:border-zinc-700">
+            <p class="mb-3 flex items-center gap-1.5 text-xs text-zinc-400"><i data-lucide="eye" class="h-3.5 w-3.5"></i>登录对话框缩样 · 加载态与失败态并排</p>
+            <div class="grid grid-cols-1 gap-3 min-[600px]:grid-cols-2">
+              <!-- 加载态 -->
+              <div class="rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
+                <h3 class="font-medium">登录</h3>
+                <p class="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">输入邮箱以同步数据到云端</p>
+                <div class="mt-4 space-y-2.5">
+                  <input type="email" value="yuki@example.com" class="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm opacity-60 dark:border-zinc-700 dark:bg-zinc-800">
+                  <input type="password" value="········" class="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm opacity-60 dark:border-zinc-700 dark:bg-zinc-800">
+                  <button class="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white opacity-70">
+                    <span class="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white"></span>登录中…
+                  </button>
+                </div>
+                <p class="mt-2.5 text-center text-[11px] text-zinc-400">加载态 · 提交已禁用</p>
+              </div>
+              <!-- 失败态 -->
+              <div class="rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
+                <h3 class="font-medium">登录</h3>
+                <p class="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">输入邮箱以同步数据到云端</p>
+                <div class="mt-4 space-y-2.5">
+                  <input type="email" value="yuki@example.com" class="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500/40 dark:border-zinc-700 dark:bg-zinc-900">
+                  <input type="password" value="········" class="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500/40 dark:border-zinc-700 dark:bg-zinc-900">
+                  <button class="w-full rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-500">登录</button>
+                  <div class="flex items-center gap-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600 dark:bg-red-500/10 dark:text-red-400">
+                    <i data-lucide="circle-alert" class="h-4 w-4 shrink-0"></i>登录失败：网络连接超时，请稍后重试
+                  </div>
+                </div>
+                <p class="mt-2.5 text-center text-[11px] text-zinc-400">失败态 · 红色错误条提示</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 6. AI 配置（二期） ============ -->
+      <section id="sec-ai" class="scroll-mt-32 rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900 min-[840px]:scroll-mt-8">
+        <header class="flex items-start gap-3 border-b border-zinc-100 px-5 pb-4 pt-5 dark:border-zinc-800">
+          <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400"><i data-lucide="sparkles" class="h-4 w-4"></i></span>
+          <div>
+            <h2 class="flex items-center gap-2 text-[15px] font-medium">AI 配置 <span class="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-500/10 dark:text-amber-400">二期</span></h2>
+            <p class="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">总结与自然语言记录（一期仅预留入口位）</p>
+          </div>
+        </header>
+        <div class="divide-y divide-zinc-100 px-5 dark:divide-zinc-800">
+          <div class="flex items-center justify-between py-3.5">
+            <div>
+              <p class="text-sm font-medium">启用 AI 功能</p>
+              <p class="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">关闭后密钥仍安全保留，不发起任何请求</p>
+            </div>
+            <button aria-pressed="true" class="relative h-6 w-10 shrink-0 rounded-full bg-indigo-600 transition-colors">
+              <span class="absolute left-[18px] top-0.5 h-5 w-5 rounded-full bg-white shadow-sm"></span>
+            </button>
+          </div>
+          <div class="flex flex-wrap items-center justify-between gap-3 py-3.5">
+            <div>
+              <p class="text-sm font-medium">API 密钥</p>
+              <p class="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">使用系统安全存储，永不上传日志</p>
+            </div>
+            <div class="relative w-full max-w-[240px]">
+              <input type="password" value="sk-8f2a…b9c1" class="w-full rounded-lg border border-zinc-200 bg-white py-2 pl-3 pr-10 font-mono text-sm focus:ring-2 focus:ring-indigo-500/40 dark:border-zinc-700 dark:bg-zinc-900">
+              <button title="显示/隐藏密钥" class="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-zinc-400 transition-colors hover:text-zinc-700 dark:hover:text-zinc-200"><i data-lucide="eye" class="h-4 w-4"></i></button>
+            </div>
+          </div>
+          <div class="flex flex-wrap items-center justify-between gap-3 py-3.5">
+            <div>
+              <p class="text-sm font-medium">API 端点</p>
+              <p class="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">OpenAI 兼容接口，可指向任意服务商</p>
+            </div>
+            <input value="https://api.openai.com/v1" class="w-full max-w-[300px] rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500/40 dark:border-zinc-700 dark:bg-zinc-900">
+          </div>
+          <div class="flex flex-wrap items-center justify-between gap-3 py-3.5">
+            <div>
+              <p class="text-sm font-medium">模型</p>
+              <p class="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">文本生成模型标识</p>
+            </div>
+            <input value="gpt-4o-mini" class="w-full max-w-[240px] rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500/40 dark:border-zinc-700 dark:bg-zinc-900">
+          </div>
+          <div class="flex flex-wrap items-center gap-2 py-3.5">
+            <button class="flex items-center gap-2 rounded-lg border border-zinc-200 px-4 py-2 text-sm font-medium transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800"><i data-lucide="plug" class="h-4 w-4"></i>测试连接</button>
+            <button class="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 dark:hover:bg-red-500/10"><i data-lucide="trash-2" class="h-4 w-4"></i>清除密钥</button>
+          </div>
+          <!-- 数据出境披露（amber） -->
+          <div class="py-4">
+            <div class="rounded-r-xl border-l-4 border-amber-500 bg-amber-50 px-4 py-3 dark:bg-amber-500/10">
+              <p class="flex items-start gap-2 text-sm text-amber-800 dark:text-amber-300">
+                <i data-lucide="shield-alert" class="mt-0.5 h-4 w-4 shrink-0"></i>
+                <span><b>数据出境披露：</b>启用 AI 后，所选时间条目的内容摘要可能被发送至第三方 AI 服务并出境。请确认已了解相关隐私风险。</span>
+              </p>
+            </div>
+            <p class="mt-3 flex items-start gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+              <i data-lucide="monitor" class="mt-0.5 h-4 w-4 shrink-0 text-zinc-400"></i>
+              提示：可配置本地模型（如 Ollama / LM Studio）端点，数据完全不出本机，无需出境披露。
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 7. 后台记录 ============ -->
+      <section id="sec-background" class="scroll-mt-32 rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900 min-[840px]:scroll-mt-8">
+        <header class="flex items-start gap-3 border-b border-zinc-100 px-5 pb-4 pt-5 dark:border-zinc-800">
+          <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400"><i data-lucide="activity" class="h-4 w-4"></i></span>
+          <div>
+            <h2 class="text-[15px] font-medium">后台记录</h2>
+            <p class="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">按规则自动计时；自动条目带「自动」标识，可识别、可排除、可批量清理</p>
+          </div>
+        </header>
+        <div class="space-y-4 px-5 py-4">
+          <!-- Windows 授权状态卡 -->
+          <div>
+            <div class="rounded-xl border border-sky-100 bg-sky-50 px-4 py-3 dark:border-sky-500/20 dark:bg-sky-500/10">
+              <p class="flex items-center gap-2 text-sm font-medium text-sky-800 dark:text-sky-300"><i data-lucide="monitor-check" class="h-4 w-4"></i>Windows 版 · 后台驻留</p>
+              <p class="mt-1 text-sm text-sky-700/80 dark:text-sky-400/80">关闭主窗口时自动最小化到系统托盘；托盘右键菜单可显示主窗口、暂停记录或退出。</p>
+              <div class="mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+                <span class="flex items-center gap-1.5 font-medium text-emerald-600 dark:text-emerald-400">
+                  <span class="relative flex h-2 w-2"><span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span><span class="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span></span>
+                  检测状态：运行中
+                </span>
+                <span class="text-xs text-sky-700/60 dark:text-sky-400/60">· 最近命中：code.exe → 工作 / 编码（3 分钟前）</span>
+              </div>
+            </div>
+            <!-- Android 授权卡缩样 -->
+            <div class="mt-3 rounded-xl border border-dashed border-zinc-300 p-4 dark:border-zinc-700">
+              <p class="mb-3 flex items-center gap-1.5 text-xs text-zinc-400"><i data-lucide="eye" class="h-3.5 w-3.5"></i>Android 版授权卡缩样</p>
+              <div class="rounded-xl border border-amber-200 bg-amber-50/60 p-4 dark:border-amber-500/30 dark:bg-amber-500/5">
+                <div class="flex items-center gap-3">
+                  <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-100 text-amber-600 dark:bg-amber-500/10"><i data-lucide="smartphone" class="h-4 w-4"></i></span>
+                  <div class="min-w-0">
+                    <p class="text-sm font-medium">使用情况访问权限</p>
+                    <p class="mt-0.5 flex items-center gap-1.5 text-xs text-amber-700/80 dark:text-amber-400/80"><span class="h-1.5 w-1.5 rounded-full bg-amber-500"></span>未授权 · 后台自动记录不可用</p>
+                  </div>
+                </div>
+                <p class="mt-3 text-xs text-amber-700/70 dark:text-amber-400/70">该权限无法在应用内弹窗授权，只能跳转系统设置页手动开启。</p>
+                <div class="mt-3 flex flex-wrap items-center justify-between gap-3">
+                  <button class="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-indigo-500">去系统设置开启<i data-lucide="external-link" class="h-3.5 w-3.5"></i></button>
+                  <span class="flex items-center gap-2 text-xs text-zinc-400">
+                    <span>总开关</span>
+                    <button aria-disabled="true" class="relative h-6 w-10 shrink-0 cursor-not-allowed rounded-full bg-zinc-200 opacity-40 dark:bg-zinc-700"><span class="absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm"></span></button>
+                    <span>未授权禁用</span>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- 总开关（主） -->
+          <div class="flex items-center justify-between border-t border-zinc-100 pt-4 dark:border-zinc-800">
+            <div>
+              <p class="text-sm font-medium">后台自动记录</p>
+              <p class="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">按规则自动计时；未匹配任何规则时不产生条目</p>
+            </div>
+            <button aria-pressed="true" class="relative h-6 w-10 shrink-0 rounded-full bg-indigo-600 transition-colors">
+              <span class="absolute left-[18px] top-0.5 h-5 w-5 rounded-full bg-white shadow-sm"></span>
+            </button>
+          </div>
+          <!-- 规则列表 -->
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p class="text-sm font-medium">规则</p>
+              <p class="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">匹配模式 → 目标活动 · 共 4 条规则</p>
+            </div>
+            <button class="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-500 focus-visible:ring-2 focus-visible:ring-indigo-500/40"><i data-lucide="plus" class="h-4 w-4"></i>新建规则</button>
+          </div>
+          <div class="divide-y divide-zinc-100 overflow-hidden rounded-xl border border-zinc-200 dark:divide-zinc-800 dark:border-zinc-700">
+            <!-- 规则 1 -->
+            <div class="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/40">
+              <span class="rounded-md bg-zinc-100 px-2 py-1 font-mono text-[13px] dark:bg-zinc-800">code.exe</span>
+              <span class="rounded-full bg-sky-50 px-2 py-0.5 text-xs text-sky-600 dark:bg-sky-500/10 dark:text-sky-400">进程名</span>
+              <span class="flex items-center gap-1.5 text-sm"><span class="h-2 w-2 rounded-full bg-indigo-500"></span>工作 / 编码</span>
+              <span class="ml-auto flex items-center gap-2">
+                <span class="mr-1 flex items-center gap-1.5" title="云同步此规则"><i data-lucide="cloud" class="h-3.5 w-3.5 text-zinc-400"></i><span class="relative inline-block h-[18px] w-8 rounded-full bg-indigo-600 align-middle"><span class="absolute left-4 top-[2px] h-3.5 w-3.5 rounded-full bg-white shadow-sm"></span></span></span>
+                <span class="relative inline-block h-[18px] w-8 rounded-full bg-indigo-600" title="启用 / 停用"><span class="absolute left-4 top-[2px] h-3.5 w-3.5 rounded-full bg-white shadow-sm"></span></span>
+                <button title="编辑规则" class="rounded-lg p-1.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"><i data-lucide="pencil" class="h-3.5 w-3.5"></i></button>
+                <button title="删除规则" class="rounded-lg p-1.5 text-zinc-400 transition-colors hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10"><i data-lucide="trash-2" class="h-3.5 w-3.5"></i></button>
+              </span>
+            </div>
+            <!-- 规则 2 -->
+            <div class="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/40">
+              <span class="rounded-md bg-zinc-100 px-2 py-1 font-mono text-[13px] dark:bg-zinc-800">*微信*</span>
+              <span class="rounded-full bg-violet-50 px-2 py-0.5 text-xs text-violet-600 dark:bg-violet-500/10 dark:text-violet-400">窗口标题</span>
+              <span class="flex items-center gap-1.5 text-sm"><span class="h-2 w-2 rounded-full bg-emerald-500"></span>生活 / 社交</span>
+              <span class="ml-auto flex items-center gap-2">
+                <span class="mr-1 flex items-center gap-1.5" title="云同步此规则"><i data-lucide="cloud" class="h-3.5 w-3.5 text-zinc-400"></i><span class="relative inline-block h-[18px] w-8 rounded-full bg-indigo-600 align-middle"><span class="absolute left-4 top-[2px] h-3.5 w-3.5 rounded-full bg-white shadow-sm"></span></span></span>
+                <span class="relative inline-block h-[18px] w-8 rounded-full bg-indigo-600" title="启用 / 停用"><span class="absolute left-4 top-[2px] h-3.5 w-3.5 rounded-full bg-white shadow-sm"></span></span>
+                <button title="编辑规则" class="rounded-lg p-1.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"><i data-lucide="pencil" class="h-3.5 w-3.5"></i></button>
+                <button title="删除规则" class="rounded-lg p-1.5 text-zinc-400 transition-colors hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10"><i data-lucide="trash-2" class="h-3.5 w-3.5"></i></button>
+              </span>
+            </div>
+            <!-- 规则 3 -->
+            <div class="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/40">
+              <span class="rounded-md bg-zinc-100 px-2 py-1 font-mono text-[13px] dark:bg-zinc-800">figma.exe</span>
+              <span class="rounded-full bg-sky-50 px-2 py-0.5 text-xs text-sky-600 dark:bg-sky-500/10 dark:text-sky-400">进程名</span>
+              <span class="flex items-center gap-1.5 text-sm"><span class="h-2 w-2 rounded-full bg-violet-500"></span>设计 / UI</span>
+              <span class="ml-auto flex items-center gap-2">
+                <span class="mr-1 flex items-center gap-1.5" title="云同步此规则"><i data-lucide="cloud" class="h-3.5 w-3.5 text-zinc-400"></i><span class="relative inline-block h-[18px] w-8 rounded-full bg-zinc-200 align-middle dark:bg-zinc-700"><span class="absolute left-0.5 top-[2px] h-3.5 w-3.5 rounded-full bg-white shadow-sm"></span></span></span>
+                <span class="relative inline-block h-[18px] w-8 rounded-full bg-indigo-600" title="启用 / 停用"><span class="absolute left-4 top-[2px] h-3.5 w-3.5 rounded-full bg-white shadow-sm"></span></span>
+                <button title="编辑规则" class="rounded-lg p-1.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"><i data-lucide="pencil" class="h-3.5 w-3.5"></i></button>
+                <button title="删除规则" class="rounded-lg p-1.5 text-zinc-400 transition-colors hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10"><i data-lucide="trash-2" class="h-3.5 w-3.5"></i></button>
+              </span>
+            </div>
+            <!-- 规则 4 -->
+            <div class="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/40">
+              <span class="rounded-md bg-zinc-100 px-2 py-1 font-mono text-[13px] dark:bg-zinc-800">*Chrome*</span>
+              <span class="rounded-full bg-violet-50 px-2 py-0.5 text-xs text-violet-600 dark:bg-violet-500/10 dark:text-violet-400">窗口标题</span>
+              <span class="flex items-center gap-1.5 text-sm"><span class="h-2 w-2 rounded-full bg-sky-500"></span>工作 / 浏览</span>
+              <span class="ml-auto flex items-center gap-2">
+                <span class="mr-1 flex items-center gap-1.5" title="云同步此规则"><i data-lucide="cloud" class="h-3.5 w-3.5 text-zinc-400"></i><span class="relative inline-block h-[18px] w-8 rounded-full bg-indigo-600 align-middle"><span class="absolute left-4 top-[2px] h-3.5 w-3.5 rounded-full bg-white shadow-sm"></span></span></span>
+                <span class="relative inline-block h-[18px] w-8 rounded-full bg-zinc-200 dark:bg-zinc-700" title="已停用"><span class="absolute left-0.5 top-[2px] h-3.5 w-3.5 rounded-full bg-white shadow-sm"></span></span>
+                <button title="编辑规则" class="rounded-lg p-1.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"><i data-lucide="pencil" class="h-3.5 w-3.5"></i></button>
+                <button title="删除规则" class="rounded-lg p-1.5 text-zinc-400 transition-colors hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10"><i data-lucide="trash-2" class="h-3.5 w-3.5"></i></button>
+              </span>
+            </div>
+          </div>
+          <!-- 新建/编辑规则表单缩样 -->
+          <div class="rounded-xl border border-dashed border-zinc-300 p-4 dark:border-zinc-700">
+            <p class="mb-3 flex items-center gap-1.5 text-xs text-zinc-400"><i data-lucide="eye" class="h-3.5 w-3.5"></i>新建 / 编辑规则表单缩样 · 编辑态</p>
+            <div class="space-y-4 rounded-xl border border-zinc-200 p-4 dark:border-zinc-700">
+              <div>
+                <label class="mb-1.5 block text-sm font-medium">匹配模式</label>
+                <input value="code.exe" class="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 font-mono text-sm focus:ring-2 focus:ring-indigo-500/40 dark:border-zinc-700 dark:bg-zinc-900">
+              </div>
+              <div>
+                <label class="mb-1.5 block text-sm font-medium">匹配类型</label>
+                <div class="flex gap-5">
+                  <label class="flex cursor-pointer items-center gap-2 text-sm">
+                    <span class="flex h-4 w-4 items-center justify-center rounded-full border-2 border-indigo-600"><span class="h-1.5 w-1.5 rounded-full bg-indigo-600"></span></span>进程名
+                  </label>
+                  <label class="flex cursor-pointer items-center gap-2 text-sm text-zinc-500">
+                    <span class="flex h-4 w-4 items-center justify-center rounded-full border-2 border-zinc-300 dark:border-zinc-600"></span>窗口标题
+                  </label>
+                </div>
+              </div>
+              <div>
+                <label class="mb-1.5 block text-sm font-medium">目标活动</label>
+                <button class="flex w-full items-center justify-between gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm transition-colors hover:border-zinc-300 dark:border-zinc-700 dark:hover:border-zinc-600">
+                  <span class="flex items-center gap-2"><span class="h-2 w-2 rounded-full bg-indigo-500"></span>工作 / 编码</span>
+                  <span class="flex items-center gap-1 text-xs text-zinc-400"><i data-lucide="chevron-down" class="h-3.5 w-3.5"></i>打开活动选择器</span>
+                </button>
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-sm">云同步此规则</span>
+                <button aria-pressed="true" class="relative h-[18px] w-8 rounded-full bg-indigo-600"><span class="absolute left-4 top-[2px] h-3.5 w-3.5 rounded-full bg-white shadow-sm"></span></button>
+              </div>
+              <div class="flex items-start gap-2 rounded-lg border border-sky-100 bg-sky-50 px-3 py-2 text-xs text-sky-700 dark:border-sky-500/20 dark:bg-sky-500/10 dark:text-sky-300">
+                <i data-lucide="info" class="mt-0.5 h-3.5 w-3.5 shrink-0"></i>匹配优先级：精确 &gt; 通配 &gt; 标题。请避免过宽的匹配模式以减少误匹配。
+              </div>
+              <div class="flex justify-end gap-2">
+                <button class="rounded-lg border border-zinc-200 px-3 py-1.5 text-sm transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800">取消</button>
+                <button class="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-indigo-500">保存</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 8. 设备互通 ============ -->
+      <section id="sec-device" class="scroll-mt-32 rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900 min-[840px]:scroll-mt-8">
+        <header class="flex items-start gap-3 border-b border-zinc-100 px-5 pb-4 pt-5 dark:border-zinc-800">
+          <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400"><i data-lucide="network" class="h-4 w-4"></i></span>
+          <div>
+            <h2 class="text-[15px] font-medium">设备互通</h2>
+            <p class="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">同一局域网内的设备间同步与文件互通</p>
+          </div>
+        </header>
+        <div class="space-y-4 px-5 py-4">
+          <!-- 互通状态摘要 -->
+          <div class="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-zinc-200 px-4 py-3 text-sm dark:border-zinc-700">
+            <span class="flex items-center gap-1.5 text-zinc-500 dark:text-zinc-400"><i data-lucide="server" class="h-4 w-4 text-zinc-400"></i>主机：<span class="font-medium text-zinc-900 dark:text-zinc-100">未启动</span></span>
+            <span class="flex items-center gap-1.5 text-zinc-500 dark:text-zinc-400"><i data-lucide="smartphone" class="h-4 w-4 text-zinc-400"></i>客户端：<span class="font-medium text-zinc-900 dark:text-zinc-100">未配对</span></span>
+            <span class="flex items-center gap-1.5 text-zinc-500 dark:text-zinc-400"><i data-lucide="file-down" class="h-4 w-4 text-zinc-400"></i>文件互通：<span class="font-medium text-emerald-600 dark:text-emerald-400">就绪</span></span>
+          </div>
+          <!-- LAN 主机卡 -->
+          <div class="rounded-xl border border-zinc-200 p-4 dark:border-zinc-700">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <div class="flex items-center gap-2.5">
+                <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400"><i data-lucide="server" class="h-4 w-4"></i></span>
+                <div>
+                  <p class="text-sm font-medium">LAN 主机</p>
+                  <p class="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">允许局域网内其他设备经配对码连接并同步</p>
+                </div>
+              </div>
+              <span class="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">已停止</span>
+            </div>
+            <div class="mt-3.5 flex flex-wrap items-center gap-2">
+              <button class="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-500"><i data-lucide="play" class="h-4 w-4"></i>启动主机</button>
+              <button disabled class="flex cursor-not-allowed items-center gap-1.5 rounded-lg border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-300 dark:border-zinc-700 dark:text-zinc-600"><i data-lucide="square" class="h-4 w-4"></i>停止</button>
+            </div>
+            <!-- 启动后展示态缩样 -->
+            <div class="mt-3.5 rounded-lg border border-dashed border-zinc-300 p-3 dark:border-zinc-700">
+              <p class="mb-2 text-[11px] text-zinc-400">启动后展示态（缩样）</p>
+              <div class="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
+                <span class="flex items-center gap-1.5"><i data-lucide="link-2" class="h-4 w-4 text-emerald-500"></i><span class="text-xs text-zinc-500 dark:text-zinc-400">地址</span><span class="tnum font-mono">http://192.168.1.5:47321</span></span>
+                <span class="flex items-center gap-1.5"><i data-lucide="key-round" class="h-4 w-4 text-amber-500"></i><span class="text-xs text-zinc-500 dark:text-zinc-400">配对码</span><span class="tnum font-mono tracking-widest">482913</span></span>
+              </div>
+            </div>
+          </div>
+          <!-- LAN 客户端卡 -->
+          <div class="rounded-xl border border-zinc-200 p-4 dark:border-zinc-700">
+            <div class="flex items-center gap-2.5">
+              <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400"><i data-lucide="smartphone" class="h-4 w-4"></i></span>
+              <div>
+                <p class="text-sm font-medium">LAN 客户端</p>
+                <p class="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">连接其他设备开启的主机</p>
+              </div>
+            </div>
+            <div class="mt-3.5 flex flex-wrap items-center gap-2">
+              <input value="192.168.1.5" class="w-full flex-1 min-w-[160px] rounded-lg border border-zinc-200 bg-white px-3 py-2 font-mono text-sm focus:ring-2 focus:ring-indigo-500/40 dark:border-zinc-700 dark:bg-zinc-900">
+              <input placeholder="6 位配对码" class="tnum w-full max-w-[140px] rounded-lg border border-zinc-200 bg-white px-3 py-2 font-mono text-sm placeholder:font-sans placeholder:text-zinc-400 focus:ring-2 focus:ring-indigo-500/40 dark:border-zinc-700 dark:bg-zinc-900">
+              <button class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-500">配对</button>
+            </div>
+          </div>
+          <!-- 文件互通 -->
+          <div class="flex flex-wrap items-center justify-between gap-3 border-t border-zinc-100 pt-4 dark:border-zinc-800">
+            <div>
+              <p class="text-sm font-medium">文件互通</p>
+              <p class="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">通过 .timetrack.json 在设备间手动转移数据</p>
+            </div>
+            <div class="flex gap-2">
+              <button class="flex items-center gap-1.5 rounded-lg border border-zinc-200 px-3 py-2 text-sm transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800"><i data-lucide="file-down" class="h-4 w-4"></i>导出</button>
+              <button class="flex items-center gap-1.5 rounded-lg border border-zinc-200 px-3 py-2 text-sm transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800"><i data-lucide="file-up" class="h-4 w-4"></i>导入</button>
+            </div>
+          </div>
+          <!-- 小字注明 -->
+          <p class="flex items-center gap-1.5 text-xs text-zinc-400"><i data-lucide="info" class="h-3.5 w-3.5"></i>主机仅手动启动，无任何自动开启路径。</p>
+        </div>
+      </section>
+
+      <!-- ============ 9. 版本更新 ============ -->
+      <section id="sec-update" class="scroll-mt-32 rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900 min-[840px]:scroll-mt-8">
+        <header class="flex items-start gap-3 border-b border-zinc-100 px-5 pb-4 pt-5 dark:border-zinc-800">
+          <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400"><i data-lucide="refresh-cw" class="h-4 w-4"></i></span>
+          <div class="flex-1">
+            <h2 class="flex flex-wrap items-center gap-2 text-[15px] font-medium">版本更新 <span class="rounded-full bg-sky-50 px-2 py-0.5 text-xs font-medium text-sky-600 dark:bg-sky-500/10 dark:text-sky-400"><i data-lucide="download" class="mr-0.5 inline h-3 w-3"></i>下载中</span></h2>
+            <p class="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">下载校验一致才安装 · 失败逐层降级 · 强制更新不可跳过</p>
+          </div>
+        </header>
+        <div class="space-y-4 px-5 py-4">
+          <!-- 版本信息 -->
+          <div class="flex flex-wrap items-center gap-x-6 gap-y-3">
+            <div>
+              <p class="text-xs text-zinc-400">当前版本</p>
+              <p class="tnum mt-0.5 text-base font-semibold">v1.2.0</p>
+            </div>
+            <div>
+              <p class="text-xs text-zinc-400">最新版本</p>
+              <p class="tnum mt-0.5 text-base font-semibold text-indigo-600 dark:text-indigo-400">v1.2.1</p>
+            </div>
+            <div>
+              <p class="text-xs text-zinc-400">状态</p>
+              <p class="mt-0.5 text-sm font-medium">正在下载更新包</p>
+            </div>
+          </div>
+          <!-- 主卡 downloading 态 -->
+          <div class="rounded-xl border border-zinc-200 p-4 dark:border-zinc-700">
+            <div class="flex flex-wrap items-center justify-between gap-2 text-sm">
+              <span class="font-medium">v1.2.1 · Windows x64</span>
+              <span class="tnum text-zinc-500 dark:text-zinc-400">18.6 / 30.0 MB</span>
+            </div>
+            <div class="mt-2.5 h-2 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
+              <div class="h-full rounded-full bg-indigo-600" style="width:62%"></div>
+            </div>
+            <div class="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-400">
+              <span class="tnum">2.4 MB/s</span>
+              <span>下载完成后自动校验 SHA-256</span>
+            </div>
+            <div class="mt-3 flex flex-wrap items-center gap-2">
+              <button class="flex items-center gap-1.5 rounded-lg border border-zinc-200 px-3.5 py-1.5 text-sm font-medium transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800"><i data-lucide="x" class="h-4 w-4"></i>取消</button>
+              <button disabled class="flex items-center gap-2 rounded-lg bg-indigo-600 px-3.5 py-1.5 text-sm font-medium text-white opacity-70">
+                <span class="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white"></span>下载中…
+              </button>
+            </div>
+          </div>
+          <!-- 安装差异说明 -->
+          <div class="rounded-xl border border-zinc-100 bg-zinc-50/60 px-4 py-3 text-xs leading-relaxed text-zinc-500 dark:border-zinc-800 dark:bg-zinc-800/40 dark:text-zinc-400">
+            <p class="flex items-start gap-2"><i data-lucide="info" class="mt-0.5 h-4 w-4 shrink-0 text-zinc-400"></i><span><b class="text-zinc-700 dark:text-zinc-300">安装差异：</b>Windows 下载校验通过后提示「重启后生效」，更新在下次启动应用时应用；Android 拉起系统安装器，未授权「安装未知应用」时引导前往系统设置开启。</span></p>
+          </div>
+          <!-- 状态机其余 9 态 -->
+          <div>
+            <p class="pb-2 pt-1 text-sm font-medium">状态机其余 9 态缩样</p>
+            <div class="grid grid-cols-1 gap-3 min-[600px]:grid-cols-2 min-[840px]:grid-cols-3">
+              <!-- idle -->
+              <div class="flex flex-col gap-2.5 rounded-xl border border-zinc-200 p-3.5 transition-shadow hover:shadow-sm dark:border-zinc-700">
+                <div class="flex items-center justify-between">
+                  <span class="font-mono text-[11px] text-zinc-400">idle</span>
+                  <span class="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">已就绪</span>
+                </div>
+                <p class="text-xs text-zinc-500 dark:text-zinc-400">没有进行中的检查或下载</p>
+                <button class="mt-auto rounded-lg border border-zinc-200 px-3 py-1.5 text-xs font-medium transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800">检查更新</button>
+              </div>
+              <!-- checking -->
+              <div class="flex flex-col gap-2.5 rounded-xl border border-zinc-200 p-3.5 transition-shadow hover:shadow-sm dark:border-zinc-700">
+                <div class="flex items-center justify-between">
+                  <span class="font-mono text-[11px] text-zinc-400">checking</span>
+                  <span class="rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-600 dark:bg-sky-500/10 dark:text-sky-400">检查中</span>
+                </div>
+                <p class="flex items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400"><span class="h-3 w-3 animate-spin rounded-full border-2 border-zinc-200 border-t-indigo-500 dark:border-zinc-700 dark:border-t-indigo-400"></span>正在检查新版本…</p>
+              </div>
+              <!-- upToDate -->
+              <div class="flex flex-col gap-2.5 rounded-xl border border-zinc-200 p-3.5 transition-shadow hover:shadow-sm dark:border-zinc-700">
+                <div class="flex items-center justify-between">
+                  <span class="font-mono text-[11px] text-zinc-400">upToDate</span>
+                  <span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400">已是最新</span>
+                </div>
+                <p class="tnum text-xs text-zinc-500 dark:text-zinc-400">v1.2.0 已是最新版本</p>
+                <button class="mt-auto rounded-lg border border-zinc-200 px-3 py-1.5 text-xs font-medium transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800">重新检查</button>
+              </div>
+              <!-- available -->
+              <div class="flex flex-col gap-2.5 rounded-xl border border-zinc-200 p-3.5 transition-shadow hover:shadow-sm dark:border-zinc-700">
+                <div class="flex items-center justify-between">
+                  <span class="font-mono text-[11px] text-zinc-400">available</span>
+                  <span class="rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] font-medium text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400">发现新版本</span>
+                </div>
+                <p class="tnum text-xs text-zinc-500 dark:text-zinc-400">v1.2.1 可用 · 已就绪可下载</p>
+                <div class="mt-auto flex gap-2">
+                  <button class="flex flex-1 items-center justify-center gap-1 rounded-lg border border-zinc-200 px-2 py-1.5 text-xs font-medium transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800"><i data-lucide="x" class="h-3 w-3"></i>忽略此版本</button>
+                  <button class="flex flex-1 items-center justify-center gap-1 rounded-lg border border-zinc-200 px-2 py-1.5 text-xs font-medium transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800"><i data-lucide="clock" class="h-3 w-3"></i>稍后提醒</button>
+                </div>
+              </div>
+              <!-- failed -->
+              <div class="flex flex-col gap-2.5 rounded-xl border border-red-200 p-3.5 transition-shadow hover:shadow-sm dark:border-red-500/30">
+                <div class="flex items-center justify-between">
+                  <span class="font-mono text-[11px] text-zinc-400">failed</span>
+                  <span class="rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-medium text-red-600 dark:bg-red-500/10 dark:text-red-400">下载失败</span>
+                </div>
+                <p class="text-xs text-zinc-500 dark:text-zinc-400">SHA-256 校验未通过，已降级处理</p>
+                <button class="mt-auto flex items-center justify-center gap-1.5 rounded-lg border border-red-200 px-2 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 dark:border-red-500/30 dark:hover:bg-red-500/10"><i data-lucide="external-link" class="h-3 w-3"></i>浏览器打开下载页</button>
+              </div>
+              <!-- paused -->
+              <div class="flex flex-col gap-2.5 rounded-xl border border-zinc-200 p-3.5 transition-shadow hover:shadow-sm dark:border-zinc-700">
+                <div class="flex items-center justify-between">
+                  <span class="font-mono text-[11px] text-zinc-400">paused</span>
+                  <span class="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-600 dark:bg-amber-500/10 dark:text-amber-400">已暂停</span>
+                </div>
+                <p class="tnum text-xs text-zinc-500 dark:text-zinc-400">下载已暂停 · 12.4 MB</p>
+                <button class="mt-auto rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-indigo-500"><i data-lucide="play" class="mr-1 inline h-3 w-3"></i>继续</button>
+              </div>
+              <!-- verifying -->
+              <div class="flex flex-col gap-2.5 rounded-xl border border-zinc-200 p-3.5 transition-shadow hover:shadow-sm dark:border-zinc-700">
+                <div class="flex items-center justify-between">
+                  <span class="font-mono text-[11px] text-zinc-400">verifying</span>
+                  <span class="rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-600 dark:bg-sky-500/10 dark:text-sky-400">校验中</span>
+                </div>
+                <p class="flex items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400"><span class="h-3 w-3 animate-spin rounded-full border-2 border-zinc-200 border-t-indigo-500 dark:border-zinc-700 dark:border-t-indigo-400"></span>正在校验 SHA-256…</p>
+              </div>
+              <!-- installing -->
+              <div class="flex flex-col gap-2.5 rounded-xl border border-zinc-200 p-3.5 transition-shadow hover:shadow-sm dark:border-zinc-700">
+                <div class="flex items-center justify-between">
+                  <span class="font-mono text-[11px] text-zinc-400">installing</span>
+                  <span class="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-600 dark:bg-violet-500/10 dark:text-violet-400">安装中</span>
+                </div>
+                <div class="h-1.5 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800"><div class="h-full rounded-full bg-violet-500" style="width:45%"></div></div>
+                <p class="text-xs text-zinc-500 dark:text-zinc-400">正在安装更新…</p>
+              </div>
+              <!-- restartRequired -->
+              <div class="flex flex-col gap-2.5 rounded-xl border border-amber-200 p-3.5 transition-shadow hover:shadow-sm dark:border-amber-500/30">
+                <div class="flex items-center justify-between">
+                  <span class="font-mono text-[11px] text-zinc-400">restartRequired</span>
+                  <span class="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-600 dark:bg-amber-500/10 dark:text-amber-400">重启后生效</span>
+                </div>
+                <p class="text-xs text-zinc-500 dark:text-zinc-400">安装完成，下次启动应用时生效</p>
+                <button class="mt-auto rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-indigo-500"><i data-lucide="rotate-ccw" class="mr-1 inline h-3 w-3"></i>立即重启</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 10. 关于 ============ -->
+      <section id="sec-about" class="scroll-mt-32 rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900 min-[840px]:scroll-mt-8">
+        <header class="flex items-start gap-3 border-b border-zinc-100 px-5 pb-4 pt-5 dark:border-zinc-800">
+          <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400"><i data-lucide="info" class="h-4 w-4"></i></span>
+          <div>
+            <h2 class="text-[15px] font-medium">关于</h2>
+            <p class="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">版本、开源信息与许可</p>
+          </div>
+        </header>
+        <div class="px-5 py-4">
+          <div class="flex items-center gap-4">
+            <span class="flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-600"><i data-lucide="timer" class="h-6 w-6 text-white"></i></span>
+            <div class="min-w-0">
+              <p class="text-base font-semibold tracking-tight">TimeTrack</p>
+              <p class="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">离线优先 · 个人时间追踪</p>
+            </div>
+            <span class="tnum ml-auto shrink-0 rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">v1.2.0 (42)</span>
+          </div>
+          <div class="mt-4 divide-y divide-zinc-100 dark:divide-zinc-800">
+            <div class="flex flex-wrap items-center justify-between gap-2 py-3.5">
+              <div>
+                <p class="text-sm font-medium">当前版本</p>
+                <p class="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">v1.2.0 · build 42 · 2026-08-16 构建</p>
+              </div>
+              <button class="rounded-lg border border-zinc-200 px-3 py-1.5 text-xs font-medium transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800">检查更新</button>
+            </div>
+            <div class="flex flex-wrap items-center justify-between gap-2 py-3.5">
+              <div>
+                <p class="text-sm font-medium">开源信息</p>
+                <p class="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">本项目基于 MIT License 开源，欢迎参与贡献</p>
+              </div>
+              <a class="flex items-center gap-1 text-sm font-medium text-indigo-600 underline decoration-zinc-300 underline-offset-2 transition-colors hover:text-indigo-500 hover:decoration-indigo-400 dark:text-indigo-400 dark:decoration-zinc-600">查看源码<i data-lucide="arrow-up-right" class="h-3.5 w-3.5"></i></a>
+            </div>
+            <div class="flex flex-wrap items-center justify-between gap-2 py-3.5">
+              <div>
+                <p class="text-sm font-medium">许可</p>
+                <p class="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">MIT License · 含第三方依赖许可</p>
+              </div>
+              <div class="flex items-center gap-1">
+                <a class="text-sm font-medium text-indigo-600 underline decoration-zinc-300 underline-offset-2 transition-colors hover:text-indigo-500 hover:decoration-indigo-400 dark:text-indigo-400 dark:decoration-zinc-600">MIT License</a>
+                <span class="text-zinc-300 dark:text-zinc-600">·</span>
+                <a class="text-sm font-medium text-indigo-600 underline decoration-zinc-300 underline-offset-2 transition-colors hover:text-indigo-500 hover:decoration-indigo-400 dark:text-indigo-400 dark:decoration-zinc-600">第三方开源许可清单</a>
+              </div>
+            </div>
+          </div>
+          <p class="mt-4 flex items-center justify-center gap-1.5 text-xs text-zinc-400"><i data-lucide="heart" class="h-3.5 w-3.5 text-red-400"></i>用爱构建 · TimeTrack 团队</p>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<!-- ============ 全局计时条（宽屏，常驻） ============ -->
+<div class="fixed bottom-0 left-[232px] right-0 z-40 hidden h-14 items-center border-t border-zinc-200 bg-white/95 px-6 backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/95 min-[840px]:flex">
+  <span class="relative flex h-2.5 w-2.5"><span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-indigo-400 opacity-60"></span><span class="relative inline-flex h-2.5 w-2.5 rounded-full bg-indigo-500"></span></span>
+  <span class="ml-2.5 text-sm font-medium">工作 / 编码</span>
+  <span class="tnum ml-2 text-lg font-semibold tracking-tight">01:24:36</span>
+  <span class="ml-3 rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] font-medium text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400">正在记录</span>
+  <div class="ml-auto flex items-center gap-2">
+    <button class="rounded-lg border border-zinc-200 px-3.5 py-1.5 text-sm font-medium transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800">停止</button>
+    <button class="rounded-lg bg-indigo-600 px-3.5 py-1.5 text-sm font-medium text-white transition-colors hover:bg-indigo-500">切换活动</button>
+  </div>
+</div>
+
+<!-- ============ 紧凑/中宽：计时条 + 底部导航两层叠置 ============ -->
+<div class="fixed inset-x-0 bottom-0 z-40 min-[840px]:hidden">
+  <div class="flex h-14 items-center gap-2.5 border-t border-zinc-200 bg-white/95 px-4 backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/95">
+    <span class="h-2 w-2 shrink-0 rounded-full bg-indigo-500"></span>
+    <span class="truncate text-sm font-medium">工作 / 编码</span>
+    <span class="tnum text-base font-semibold tracking-tight">01:24:36</span>
+    <div class="ml-auto flex shrink-0 items-center gap-1">
+      <button title="停止" class="rounded-lg p-2 text-zinc-500 transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800"><i data-lucide="square" class="h-4 w-4"></i></button>
+      <button title="切换活动" class="rounded-lg p-2 text-zinc-500 transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800"><i data-lucide="refresh-cw" class="h-4 w-4"></i></button>
+    </div>
+  </div>
+  <nav class="grid grid-cols-5 border-t border-zinc-200 bg-white py-1.5 pb-2.5 dark:border-zinc-800 dark:bg-zinc-900">
+    <a class="flex flex-col items-center gap-0.5 text-[10px] font-medium text-zinc-500"><i data-lucide="timer" class="h-5 w-5"></i>计时</a>
+    <a class="flex flex-col items-center gap-0.5 text-[10px] font-medium text-zinc-500"><i data-lucide="calendar-days" class="h-5 w-5"></i>今日</a>
+    <a class="flex flex-col items-center gap-0.5 text-[10px] font-medium text-zinc-500"><i data-lucide="rows-3" class="h-5 w-5"></i>时间线</a>
+    <a class="flex flex-col items-center gap-0.5 text-[10px] font-medium text-zinc-500"><i data-lucide="pie-chart" class="h-5 w-5"></i>统计</a>
+    <a class="flex flex-col items-center gap-0.5 text-[10px] font-medium text-indigo-600 dark:text-indigo-400"><i data-lucide="settings" class="h-5 w-5"></i>设置</a>
+  </nav>
+</div>
+
+<script>
+  lucide.createIcons();
+  document.querySelectorAll('[data-theme-toggle]').forEach(function (btn) {
+    btn.addEventListener('click', function () { document.documentElement.classList.toggle('dark'); });
+  });
+</script>
+</body>
+</html>
