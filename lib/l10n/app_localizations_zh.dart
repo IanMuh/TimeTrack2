@@ -156,7 +156,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get oneOff => '临时';
 
   @override
-  String get newActivity => '新增';
+  String get newActivity => '新建活动';
 
   @override
   String get editActivity => '编辑活动';
@@ -913,4 +913,136 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get errorTitle => '出错了';
+
+  @override
+  String get unassignedActivity => '未分配';
+
+  @override
+  String get timerAll => '全部';
+
+  @override
+  String get timerTodayTotal => '今日累计';
+
+  @override
+  String get timerTodaySessions => '会话数';
+
+  @override
+  String get timerRunning => '运行中';
+
+  @override
+  String get timerTapToConfirm => '再击确认切换';
+
+  @override
+  String get timerTemporaryActivity => '临时活动';
+
+  @override
+  String get timerNewActivity => '新增活动';
+
+  @override
+  String get timerInteractionHint => '单击选中 · 再击确认 · 双击直接切换 · 长按编辑';
+
+  @override
+  String get timerNoActivities => '暂无活动，先创建一个吧';
+
+  @override
+  String get timerCategoryEmpty => '此分类暂无活动';
+
+  @override
+  String get todayTotalDuration => '总时长';
+
+  @override
+  String get todayFocusDuration => '专注时长';
+
+  @override
+  String get todayRestDuration => '休息时长';
+
+  @override
+  String get todayVsPrevious => '较前日';
+
+  @override
+  String get todayPreviewTitle => '时间线预览';
+
+  @override
+  String get todayViewFullTimeline => '查看完整时间线';
+
+  @override
+  String get todayBackToToday => '回到今天';
+
+  @override
+  String get todayStartRecording => '开始记录吧';
+
+  @override
+  String get todayEmptyDay => '该日暂无记录';
+
+  @override
+  String get todayCreateCategory => '新建分类';
+
+  @override
+  String get edit => '编辑';
+
+  @override
+  String get ongoing => '持续';
+
+  @override
+  String get secondaryCategories => '副分类';
+
+  @override
+  String get rootCategory => '根分类';
+
+  @override
+  String get searchActivities => '搜索活动与分类…';
+
+  @override
+  String get activityNameRequired => '名称不能为空';
+
+  @override
+  String get categoryEmptyActivities => '此分类暂无活动';
+
+  @override
+  String get categoryCreated => '分类已创建';
+
+  @override
+  String get activityCreated => '活动已创建';
+
+  @override
+  String get activityEdited => '活动已更新';
+
+  @override
+  String get categoryDeleted => '分类已删除，可撤销';
+
+  @override
+  String get deleteFailed => '操作失败';
+
+  @override
+  String get createFailed => '创建失败';
+
+  @override
+  String get currentActivity => '当前';
+
+  @override
+  String get active => '已选中';
+
+  @override
+  String get categoryDeleteHint => '将删除此分类、N 个子分类与 N 个活动的关联（可撤销）';
+
+  @override
+  String get categoryUpdated => '分类已更新';
+
+  @override
+  String get timerStartRecording => '开始记录';
+
+  @override
+  String get timerLoadFailed => '数据加载失败，请重试';
+
+  @override
+  String get todayPrevDay => '前一天';
+
+  @override
+  String get todayNextDay => '后一天';
+
+  @override
+  String get todayPickDate => '选择日期';
+
+  @override
+  String get todayClearFilters => '清除筛选';
 }

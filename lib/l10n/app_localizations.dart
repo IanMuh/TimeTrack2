@@ -383,7 +383,7 @@ abstract class AppLocalizations {
   /// No description provided for @newActivity.
   ///
   /// In zh, this message translates to:
-  /// **'新增'**
+  /// **'新建活动'**
   String get newActivity;
 
   /// No description provided for @editActivity.
@@ -1825,6 +1825,270 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'出错了'**
   String get errorTitle;
+
+  /// No description provided for @unassignedActivity.
+  ///
+  /// In zh, this message translates to:
+  /// **'未分配'**
+  String get unassignedActivity;
+
+  /// No description provided for @timerAll.
+  ///
+  /// In zh, this message translates to:
+  /// **'全部'**
+  String get timerAll;
+
+  /// No description provided for @timerTodayTotal.
+  ///
+  /// In zh, this message translates to:
+  /// **'今日累计'**
+  String get timerTodayTotal;
+
+  /// No description provided for @timerTodaySessions.
+  ///
+  /// In zh, this message translates to:
+  /// **'会话数'**
+  String get timerTodaySessions;
+
+  /// No description provided for @timerRunning.
+  ///
+  /// In zh, this message translates to:
+  /// **'运行中'**
+  String get timerRunning;
+
+  /// No description provided for @timerTapToConfirm.
+  ///
+  /// In zh, this message translates to:
+  /// **'再击确认切换'**
+  String get timerTapToConfirm;
+
+  /// No description provided for @timerTemporaryActivity.
+  ///
+  /// In zh, this message translates to:
+  /// **'临时活动'**
+  String get timerTemporaryActivity;
+
+  /// No description provided for @timerNewActivity.
+  ///
+  /// In zh, this message translates to:
+  /// **'新增活动'**
+  String get timerNewActivity;
+
+  /// No description provided for @timerInteractionHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'单击选中 · 再击确认 · 双击直接切换 · 长按编辑'**
+  String get timerInteractionHint;
+
+  /// No description provided for @timerNoActivities.
+  ///
+  /// In zh, this message translates to:
+  /// **'暂无活动，先创建一个吧'**
+  String get timerNoActivities;
+
+  /// No description provided for @timerCategoryEmpty.
+  ///
+  /// In zh, this message translates to:
+  /// **'此分类暂无活动'**
+  String get timerCategoryEmpty;
+
+  /// No description provided for @todayTotalDuration.
+  ///
+  /// In zh, this message translates to:
+  /// **'总时长'**
+  String get todayTotalDuration;
+
+  /// No description provided for @todayFocusDuration.
+  ///
+  /// In zh, this message translates to:
+  /// **'专注时长'**
+  String get todayFocusDuration;
+
+  /// No description provided for @todayRestDuration.
+  ///
+  /// In zh, this message translates to:
+  /// **'休息时长'**
+  String get todayRestDuration;
+
+  /// No description provided for @todayVsPrevious.
+  ///
+  /// In zh, this message translates to:
+  /// **'较前日'**
+  String get todayVsPrevious;
+
+  /// No description provided for @todayPreviewTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'时间线预览'**
+  String get todayPreviewTitle;
+
+  /// No description provided for @todayViewFullTimeline.
+  ///
+  /// In zh, this message translates to:
+  /// **'查看完整时间线'**
+  String get todayViewFullTimeline;
+
+  /// No description provided for @todayBackToToday.
+  ///
+  /// In zh, this message translates to:
+  /// **'回到今天'**
+  String get todayBackToToday;
+
+  /// No description provided for @todayStartRecording.
+  ///
+  /// In zh, this message translates to:
+  /// **'开始记录吧'**
+  String get todayStartRecording;
+
+  /// No description provided for @todayEmptyDay.
+  ///
+  /// In zh, this message translates to:
+  /// **'该日暂无记录'**
+  String get todayEmptyDay;
+
+  /// No description provided for @todayCreateCategory.
+  ///
+  /// In zh, this message translates to:
+  /// **'新建分类'**
+  String get todayCreateCategory;
+
+  /// No description provided for @edit.
+  ///
+  /// In zh, this message translates to:
+  /// **'编辑'**
+  String get edit;
+
+  /// No description provided for @ongoing.
+  ///
+  /// In zh, this message translates to:
+  /// **'持续'**
+  String get ongoing;
+
+  /// No description provided for @secondaryCategories.
+  ///
+  /// In zh, this message translates to:
+  /// **'副分类'**
+  String get secondaryCategories;
+
+  /// No description provided for @rootCategory.
+  ///
+  /// In zh, this message translates to:
+  /// **'根分类'**
+  String get rootCategory;
+
+  /// No description provided for @searchActivities.
+  ///
+  /// In zh, this message translates to:
+  /// **'搜索活动与分类…'**
+  String get searchActivities;
+
+  /// No description provided for @activityNameRequired.
+  ///
+  /// In zh, this message translates to:
+  /// **'名称不能为空'**
+  String get activityNameRequired;
+
+  /// No description provided for @categoryEmptyActivities.
+  ///
+  /// In zh, this message translates to:
+  /// **'此分类暂无活动'**
+  String get categoryEmptyActivities;
+
+  /// No description provided for @categoryCreated.
+  ///
+  /// In zh, this message translates to:
+  /// **'分类已创建'**
+  String get categoryCreated;
+
+  /// No description provided for @activityCreated.
+  ///
+  /// In zh, this message translates to:
+  /// **'活动已创建'**
+  String get activityCreated;
+
+  /// No description provided for @activityEdited.
+  ///
+  /// In zh, this message translates to:
+  /// **'活动已更新'**
+  String get activityEdited;
+
+  /// No description provided for @categoryDeleted.
+  ///
+  /// In zh, this message translates to:
+  /// **'分类已删除，可撤销'**
+  String get categoryDeleted;
+
+  /// No description provided for @deleteFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'操作失败'**
+  String get deleteFailed;
+
+  /// No description provided for @createFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'创建失败'**
+  String get createFailed;
+
+  /// No description provided for @currentActivity.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前'**
+  String get currentActivity;
+
+  /// No description provided for @active.
+  ///
+  /// In zh, this message translates to:
+  /// **'已选中'**
+  String get active;
+
+  /// No description provided for @categoryDeleteHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'将删除此分类、N 个子分类与 N 个活动的关联（可撤销）'**
+  String get categoryDeleteHint;
+
+  /// No description provided for @categoryUpdated.
+  ///
+  /// In zh, this message translates to:
+  /// **'分类已更新'**
+  String get categoryUpdated;
+
+  /// No description provided for @timerStartRecording.
+  ///
+  /// In zh, this message translates to:
+  /// **'开始记录'**
+  String get timerStartRecording;
+
+  /// No description provided for @timerLoadFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'数据加载失败，请重试'**
+  String get timerLoadFailed;
+
+  /// No description provided for @todayPrevDay.
+  ///
+  /// In zh, this message translates to:
+  /// **'前一天'**
+  String get todayPrevDay;
+
+  /// No description provided for @todayNextDay.
+  ///
+  /// In zh, this message translates to:
+  /// **'后一天'**
+  String get todayNextDay;
+
+  /// No description provided for @todayPickDate.
+  ///
+  /// In zh, this message translates to:
+  /// **'选择日期'**
+  String get todayPickDate;
+
+  /// No description provided for @todayClearFilters.
+  ///
+  /// In zh, this message translates to:
+  /// **'清除筛选'**
+  String get todayClearFilters;
 }
 
 class _AppLocalizationsDelegate

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timetrack2/api/supabase/sync_backend.dart';
 import 'package:timetrack2/app.dart';
+import 'package:timetrack2/components/global_timer_bar.dart';
 import 'package:timetrack2/data/database/app_database.dart' hide ProfileSettings;
 import 'package:timetrack2/pages/settings_page.dart';
 import 'package:timetrack2/pages/stats_page.dart';
@@ -73,6 +74,17 @@ Future<AppStore> _createStore() {
 Finder _pageTitle(Type pageType, String title) =>
     find.descendant(of: find.byType(pageType), matching: find.text(title));
 
+Finder _todayMarker() => find.descendant(
+      of: find.byType(TodayPage),
+      matching: find.textContaining(RegExp('总时长|今日暂无记录')),
+    );
+
+/// 计时页无固定标题字（焦点卡/快捷区），命中任一稳定标记。
+Finder _timerMarker() => find.descendant(
+      of: find.byType(TimerPage),
+      matching: find.textContaining(RegExp('未在记录|今日累计|暂无活动')),
+    );
+
 /// 壳内唯一的 IndexedStack（go_router StatefulShellRoute.indexedStack 的
 /// 分支容器）：currentIndex 即当前分支。
 int _shellIndex(WidgetTester tester) =>
@@ -101,8 +113,8 @@ void main() {
           isNull,
           reason: '宽度 $size 出现渲染异常（溢出/断言）',
         );
-        // 全局计时条常驻：默认着陆计时页、初始无运行条目 → 未记录占位弱化态。
-        expect(find.text('未在记录'), findsOneWidget);
+        // 全局计时条常驻 + 计时页焦点卡（批次 2 起两处"未在记录"占位态）。
+        expect(find.text('未在记录'), findsNWidgets(2));
         // 释放 store（取消 ClockStore 周期 Timer，见文件头纪律）。
         store.dispose();
       });
@@ -134,17 +146,21 @@ void main() {
         await tester.pumpAndSettle();
         expect(navBar().selectedIndex, index, reason: '底部导航选中态应切换');
         expect(
-          _pageTitle(pageType, title),
-          findsOneWidget,
-          reason: '进入 $title 页后页面标题应存在',
+          title.isEmpty
+              ? (pageType == TodayPage ? _todayMarker() : _timerMarker())
+              : _pageTitle(pageType, title),
+          findsAtLeastNWidgets(1),
+          reason: '进入 $title 页后页面内容应存在',
         );
       }
 
-      await switchTo(1, Icons.calendar_today_outlined, TodayPage, '今日');
+      // 计时页为默认着陆页（当前分支 0），无需切页；占位标记已验证如上。
+
+      await switchTo(1, Icons.calendar_today_outlined, TodayPage, '');
       await switchTo(2, Icons.view_timeline_outlined, TimelinePage, '时间线');
       await switchTo(3, Icons.pie_chart_outline, StatsPage, '统计');
       await switchTo(4, Icons.settings_outlined, SettingsPage, '设置');
-      await switchTo(0, Icons.timer_outlined, TimerPage, '计时');
+      await switchTo(0, Icons.timer_outlined, TimerPage, '');
       store.dispose();
     });
 
@@ -173,17 +189,21 @@ void main() {
         await tester.pumpAndSettle();
         expect(_shellIndex(tester), index, reason: '侧导航选中态应切换');
         expect(
-          _pageTitle(pageType, title),
-          findsOneWidget,
-          reason: '进入 $title 页后页面标题应存在',
+          title.isEmpty
+              ? (pageType == TodayPage ? _todayMarker() : _timerMarker())
+              : _pageTitle(pageType, title),
+          findsAtLeastNWidgets(1),
+          reason: '进入 $title 页后页面内容应存在',
         );
       }
 
-      await switchTo(1, Icons.calendar_today_outlined, TodayPage, '今日');
+      // 计时页为默认着陆页（当前分支 0），无需切页；占位标记已验证如上。
+
+      await switchTo(1, Icons.calendar_today_outlined, TodayPage, '');
       await switchTo(2, Icons.view_timeline_outlined, TimelinePage, '时间线');
       await switchTo(3, Icons.pie_chart_outline, StatsPage, '统计');
       await switchTo(4, Icons.settings_outlined, SettingsPage, '设置');
-      await switchTo(0, Icons.timer_outlined, TimerPage, '计时');
+      await switchTo(0, Icons.timer_outlined, TimerPage, '');
       store.dispose();
     });
   });
@@ -199,8 +219,8 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // 未记录占位：'未在记录'。
-      expect(find.text('未在记录'), findsOneWidget);
+      // 未记录占位：计时条 + 计时页焦点卡两处。
+      expect(find.text('未在记录'), findsNWidgets(2));
 
       // 经指令通道切换活动（seed 含"学习"）；计时条为运行态。
       await store.dispatcher.dispatch(
@@ -209,23 +229,32 @@ void main() {
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull, reason: '紧凑档运行态计时条溢出');
       expect(find.text('未在记录'), findsNothing);
-      expect(find.text('学习'), findsOneWidget, reason: '计时条显示运行活动名');
+      expect(find.text('学习'), findsNWidgets(3), reason: '计时条+焦点卡+快捷活动卡显示运行活动名');
       expect(
         find.textContaining('00:00:'),
-        findsOneWidget,
-        reason: '计时数字等宽格式（tabular figures 样式由 Text 样式提供）',
+        findsAtLeastNWidgets(2),
+        reason: '计时数字等宽格式（计时条/焦点卡/卡片角标，tabular figures 由样式提供）',
       );
       // 停止按钮可点；切换按钮禁用（批次 2 提供选择器）——按下不产生动作。
+      // 计时条上的切换按钮仍禁用（选择器批次 2 接入页面级；条内按钮批次 5 统一）。
       expect(
-        tester.widget<FilledButton>(find.widgetWithText(FilledButton, '切换活动')).onPressed,
+        tester
+            .widget<FilledButton>(find.descendant(
+              of: find.byType(GlobalTimerBar),
+              matching: find.widgetWithText(FilledButton, '切换活动'),
+            ))
+            .onPressed,
         isNull,
-        reason: '切换活动按钮本批次禁用（tooltip 说明原因）',
+        reason: '计时条切换按钮仍禁用（tooltip 说明原因）',
       );
 
       // 点"停止"→ 壳层经指令通道分发 → Snackbar 反馈 + 计时条回落未记录。
-      await tester.tap(find.text('停止'));
+      await tester.tap(find.descendant(
+          of: find.byType(GlobalTimerBar),
+          matching: find.text('停止'),
+        ));
       await tester.pumpAndSettle();
-      expect(find.text('未在记录'), findsOneWidget, reason: '停止后回落未记录占位');
+      expect(find.text('未在记录'), findsNWidgets(2), reason: '停止后回落未记录占位（两处）');
       expect(
         find.text('已停止当前活动'),
         findsOneWidget,
@@ -265,7 +294,10 @@ void main() {
         await tester.tap(find.byIcon(icon));
         await tester.pumpAndSettle();
         expect(_shellIndex(tester), index, reason: '$title 页应成为当前页');
-        expect(_pageTitle(pageType, title), findsOneWidget);
+        expect(
+          pageType == TodayPage ? _todayMarker() : _pageTitle(pageType, title),
+          findsOneWidget,
+        );
       }
 
       // 五页全部保活共存于 route 树（IndexedStack 分支）。
@@ -287,7 +319,7 @@ void main() {
       await tester.tap(find.byIcon(Icons.timer_outlined));
       await tester.pumpAndSettle();
       expect(_shellIndex(tester), 0);
-      expect(_pageTitle(TimerPage, '计时'), findsOneWidget);
+      expect(_timerMarker(), findsAtLeastNWidgets(1));
       expect(
         tester.element(find.byType(TimerPage, skipOffstage: false)),
         same(timerElement),

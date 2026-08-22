@@ -29,8 +29,8 @@ class AppRouter {
             return AppShell(app: app, navigationShell: navigationShell);
           },
           branches: [
-            _branch('/timer', 'timer', (context, state) => const TimerPage()),
-            _branch('/today', 'today', (context, state) => const TodayPage()),
+            _branch('/timer', 'timer', (context, state) => TimerPage(app: app)),
+            _branch('/today', 'today', (context, state) => TodayPage(app: app)),
             _branch(
               '/timeline',
               'timeline',

@@ -158,7 +158,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get oneOff => 'One-off';
 
   @override
-  String get newActivity => 'New';
+  String get newActivity => 'New activity';
 
   @override
   String get editActivity => 'Edit activity';
@@ -922,4 +922,138 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get errorTitle => 'Something went wrong';
+
+  @override
+  String get unassignedActivity => 'Unassigned';
+
+  @override
+  String get timerAll => 'All';
+
+  @override
+  String get timerTodayTotal => 'Today total';
+
+  @override
+  String get timerTodaySessions => 'Sessions';
+
+  @override
+  String get timerRunning => 'Running';
+
+  @override
+  String get timerTapToConfirm => 'Tap again to switch';
+
+  @override
+  String get timerTemporaryActivity => 'Temporary';
+
+  @override
+  String get timerNewActivity => 'New activity';
+
+  @override
+  String get timerInteractionHint =>
+      'Click to select, tap again to confirm, double-click to switch, long-press to edit';
+
+  @override
+  String get timerNoActivities => 'No activities yet — create one';
+
+  @override
+  String get timerCategoryEmpty => 'No activities in this category';
+
+  @override
+  String get todayTotalDuration => 'Total time';
+
+  @override
+  String get todayFocusDuration => 'Focus';
+
+  @override
+  String get todayRestDuration => 'Rest';
+
+  @override
+  String get todayVsPrevious => 'vs previous day';
+
+  @override
+  String get todayPreviewTitle => 'Timeline preview';
+
+  @override
+  String get todayViewFullTimeline => 'View full timeline';
+
+  @override
+  String get todayBackToToday => 'Back to today';
+
+  @override
+  String get todayStartRecording => 'Start recording';
+
+  @override
+  String get todayEmptyDay => 'No records on this day';
+
+  @override
+  String get todayCreateCategory => 'New category';
+
+  @override
+  String get edit => 'Edit';
+
+  @override
+  String get ongoing => 'Ongoing';
+
+  @override
+  String get secondaryCategories => 'Secondary categories';
+
+  @override
+  String get rootCategory => 'Root category';
+
+  @override
+  String get searchActivities => 'Search activities and categories…';
+
+  @override
+  String get activityNameRequired => 'Name is required';
+
+  @override
+  String get categoryEmptyActivities => 'No activities in this category';
+
+  @override
+  String get categoryCreated => 'Category created';
+
+  @override
+  String get activityCreated => 'Activity created';
+
+  @override
+  String get activityEdited => 'Activity updated';
+
+  @override
+  String get categoryDeleted => 'Category deleted — undo available';
+
+  @override
+  String get deleteFailed => 'Delete failed';
+
+  @override
+  String get createFailed => 'Create failed';
+
+  @override
+  String get currentActivity => 'Current';
+
+  @override
+  String get active => 'Selected';
+
+  @override
+  String get categoryDeleteHint =>
+      'This deletes N sub-categories and N activity links (single undo)';
+
+  @override
+  String get categoryUpdated => 'Category updated';
+
+  @override
+  String get timerStartRecording => 'Start recording';
+
+  @override
+  String get timerLoadFailed => 'Failed to load. Try again.';
+
+  @override
+  String get todayPrevDay => 'Previous day';
+
+  @override
+  String get todayNextDay => 'Next day';
+
+  @override
+  String get todayPickDate => 'Pick a date';
+
+  @override
+  String get todayClearFilters => 'Clear filters';
 }
