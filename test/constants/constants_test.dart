@@ -169,10 +169,10 @@ void main() {
     });
   });
 
-  group('主题令牌', () {
+  group('主题令牌（按 design/DESIGN_LANG 更新为 indigo/zinc + 8 色活动板）', () {
     test('深浅两套齐全且语义一致', () {
       expect(LightThemeTokens.surface, 0xffffffff);
-      expect(DarkThemeTokens.background, 0xff0f172a);
+      expect(DarkThemeTokens.background, 0xff09090b);
       // 深色文字浅、浅色文字深（对比可读）
       expect(LightThemeTokens.text, isNot(DarkThemeTokens.text));
       // secondary 两侧一致（accent 风格）
@@ -180,26 +180,40 @@ void main() {
     });
 
     test('完整令牌集：关键精确值 + 深色 outlineVariant 有意更亮', () {
-      // 浅色套关键值
-      expect(LightThemeTokens.background, 0xfff8fafc);
-      expect(LightThemeTokens.surfaceMuted, 0xfff1f5f9);
-      expect(LightThemeTokens.outline, 0xffcbd5e1);
-      expect(LightThemeTokens.outlineVariant, 0xffe2e8f0);
-      expect(LightThemeTokens.mutedText, 0xff64748b);
-      // 深色套关键值
-      expect(DarkThemeTokens.outline, 0xff334155);
-      expect(DarkThemeTokens.outlineVariant, 0xff475569);
-      expect(DarkThemeTokens.mutedText, 0xffcbd5e1);
-      // outlineVariant 感知亮度更高（用 computeLuminance 而非 ARGB 整数比较——
-      // 整数比较按 R/G/B 字节字典序，不代表感知亮度）
+      // 浅色套关键值（zinc 体系）
+      expect(LightThemeTokens.background, 0xfffafafa);
+      expect(LightThemeTokens.surfaceMuted, 0xfff4f4f5);
+      expect(LightThemeTokens.outline, 0xffe4e4e7);
+      expect(LightThemeTokens.outlineVariant, 0xffd4d4d8);
+      expect(LightThemeTokens.mutedText, 0xff71717a);
+      expect(LightThemeTokens.primary, 0xff4f46e5);
+      // 深色套关键值（zinc 体系）
+      expect(DarkThemeTokens.outline, 0xff27272a);
+      expect(DarkThemeTokens.outlineVariant, 0xff3f3f46);
+      expect(DarkThemeTokens.mutedText, 0xffa1a1aa);
+      expect(DarkThemeTokens.primary, 0xff4f46e5);
+      expect(DarkThemeTokens.accentText, 0xff818cf8);
+      // outlineVariant 感知亮度：深色套更亮（焦点/选中描边需更高对比，
+      // zinc-700 > zinc-800）；浅色套 variant（zinc-300）比 outline（zinc-200）
+      // 更暗——两侧方向不同属语义差异（variant=变体），只要求可区分。
       expect(
         Color(DarkThemeTokens.outlineVariant).computeLuminance(),
         greaterThan(Color(DarkThemeTokens.outline).computeLuminance()),
       );
-      expect(
-        Color(LightThemeTokens.outlineVariant).computeLuminance(),
-        greaterThan(Color(LightThemeTokens.outline).computeLuminance()),
-      );
+      expect(LightThemeTokens.outlineVariant, isNot(LightThemeTokens.outline));
+    });
+
+    test('活动色板：8 色齐全 + 深浅两档 + 未分配灰', () {
+      expect(ActivityPalette.all, hasLength(8));
+      // 深色档是更亮的一档（可读性：深底上 400 档对比度更高）
+      for (final color in ActivityPalette.all) {
+        expect(
+          Color(ActivityPalette.of(color, dark: true)).computeLuminance(),
+          greaterThan(Color(ActivityPalette.of(color, dark: false)).computeLuminance()),
+          reason: '活动色 $color 深色档应更亮',
+        );
+      }
+      expect(ActivityPalette.unassigned, 0xffa1a1aa);
     });
   });
 
