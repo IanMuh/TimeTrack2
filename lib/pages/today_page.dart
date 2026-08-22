@@ -10,6 +10,7 @@ import '../components/state_views.dart';
 import '../components/tnum_text.dart';
 import '../l10n/app_localizations.dart';
 import '../stores/app_store.dart';
+import '../utils/day_metrics.dart';
 import '../viewmodels/activity_category.dart';
 import '../viewmodels/time_entry.dart';
 
@@ -160,23 +161,13 @@ class _TodayPageState extends State<TodayPage> {
     return end.isAfter(start) ? end.difference(start) : Duration.zero;
   }
 
-  ({Duration total, int sessions, Duration focus, Duration rest}) _metrics(
-      List<TimeEntry> entries) {
-    final dayStart = _day;
-    var total = Duration.zero;
-    var focus = Duration.zero;
-    var rest = Duration.zero;
-    for (final e in entries) {
-      final d = _entryClamp(e, dayStart);
-      total += d;
-      if (e.activityId == _unassignedActivityId) {
-        rest += d;
-      } else {
-        focus += d;
-      }
-    }
-    return (total: total, sessions: entries.length, focus: focus, rest: rest);
-  }
+  /// 统一口径（lib/utils/day_metrics.dart，与计时页/统计一致）。
+  DayMetrics _metrics(List<TimeEntry> entries) => computeDayMetrics(
+        entries,
+        dayStart: _day,
+        now: DateTime.now(),
+        unassignedActivityId: _unassignedActivityId,
+      );
 
   String? _primaryOf(String activityId) {
     for (final link in app.category.links) {
@@ -468,8 +459,8 @@ class _MetricsRow extends StatelessWidget {
   });
 
   final AppLocalizations l10n;
-  final ({Duration total, int sessions, Duration focus, Duration rest}) metrics;
-  final ({Duration total, int sessions, Duration focus, Duration rest})? previous;
+  final DayMetrics metrics;
+  final DayMetrics? previous;
 
   @override
   Widget build(BuildContext context) {

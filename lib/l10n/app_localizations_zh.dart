@@ -1063,4 +1063,285 @@ class AppLocalizationsZh extends AppLocalizations {
   @override
   String get timerSwitchHint =>
       '切换 = 结束当前会话并立即开始新活动（原子操作，不留空档）；两种操作均可通过全局撤销恢复。';
+
+  @override
+  String get entryEditorEdit => '编辑条目';
+
+  @override
+  String get entryEditorNew => '添加条目';
+
+  @override
+  String get entryChangeActivity => '更换';
+
+  @override
+  String get entryStartAt => '开始';
+
+  @override
+  String get entryEndAt => '结束';
+
+  @override
+  String get entryKeepRunning => '保持运行';
+
+  @override
+  String get entryNoteHint => '备注…';
+
+  @override
+  String get entryErrEndBeforeStart => '结束时间必须晚于开始时间';
+
+  @override
+  String get entryErrRunningInFuture => '运行中的条目不能落在将来';
+
+  @override
+  String get entryWarnOverlap => '与既有条目时间重叠，仍要保存吗？';
+
+  @override
+  String get entryOverlapContinue => '仍要保存';
+
+  @override
+  String get entryHintSplit => '跨越 0 点，保存后将自动拆分为两条';
+
+  @override
+  String get entryEditOps => '相邻条目操作';
+
+  @override
+  String get entryMergePrev => '与前一条合并';
+
+  @override
+  String get entryMergeNext => '与后一条合并';
+
+  @override
+  String get entrySplit => '按时刻拆分';
+
+  @override
+  String get entryExtendNow => '延伸到现在';
+
+  @override
+  String get entryDeleteTitle => '删除这条记录？';
+
+  @override
+  String get entryDeleteHint => '删除后可通过全局撤销恢复。';
+
+  @override
+  String get tlAdd => '添加条目';
+
+  @override
+  String get tlSpanToday => '今天';
+
+  @override
+  String get tlSpanThree => '三天';
+
+  @override
+  String get tlSpanWeek => '本周';
+
+  @override
+  String get tlViewEntries => '条目';
+
+  @override
+  String get tlViewLogs => '日志';
+
+  @override
+  String get tlLongest => '最长连续';
+
+  @override
+  String get tlAuto => '自动';
+
+  @override
+  String get tlMerged => '已合并';
+
+  @override
+  String get tlRunningTag => '进行中';
+
+  @override
+  String get tlContinueNext => '延续至次日';
+
+  @override
+  String get tlFutureBanner => '未来日期暂无记录——这是正常状态，开始记录后这里会显示条目。';
+
+  @override
+  String get tlLegendAuto => '自动';
+
+  @override
+  String get tlLegendUnassigned => '未分配';
+
+  @override
+  String get tlLegendContinue => '延续次日';
+
+  @override
+  String get tlZoom => '缩放';
+
+  @override
+  String get tlSegments => '分段/日';
+
+  @override
+  String get tlNow => '现在';
+
+  @override
+  String get tlAxisTab => '时间轴';
+
+  @override
+  String get tlStripTab => '比例条';
+
+  @override
+  String get tlGroupEntries => '条';
+
+  @override
+  String get tlLogsEmpty => '暂无操作日志';
+
+  @override
+  String tlEntriesCount(Object n) {
+    return '$n 条记录';
+  }
+
+  @override
+  String get tlSplitPickTime => '选择拆分时刻';
+
+  @override
+  String get tlNoActivity => '未选择活动';
+
+  @override
+  String get logSwitch => '切换';
+
+  @override
+  String get logStop => '停止';
+
+  @override
+  String get logEdit => '编辑';
+
+  @override
+  String get logDelete => '删除';
+
+  @override
+  String get logUndo => '撤销';
+
+  @override
+  String get logRedo => '重做';
+
+  @override
+  String get logMerge => '合并';
+
+  @override
+  String get logManual => '手动';
+
+  @override
+  String get logSplit => '拆分';
+
+  @override
+  String get logActivityDelete => '删除活动';
+
+  @override
+  String get logCategoryCreate => '新建分类';
+
+  @override
+  String get logCategoryUpdate => '更新分类';
+
+  @override
+  String get logCategoryDelete => '删除分类';
+
+  @override
+  String get logRuleUpdate => '规则变更';
+
+  @override
+  String get logSync => '同步';
+
+  @override
+  String get stRangeToday => '今天';
+
+  @override
+  String get stRangeYesterday => '昨天';
+
+  @override
+  String get stRangeThisWeek => '本周';
+
+  @override
+  String get stRangeLastWeek => '上周';
+
+  @override
+  String get stRangeCustom => '自定义';
+
+  @override
+  String get stDimActivity => '活动';
+
+  @override
+  String get stDimTree => '主分类 · 树聚合';
+
+  @override
+  String get stDimBucket => '时长区间';
+
+  @override
+  String get stDimCross => '分类 × 时长';
+
+  @override
+  String get stFilterTitle => '分类筛选';
+
+  @override
+  String get stFilterAll => '全选';
+
+  @override
+  String get stFilterNone => '清空';
+
+  @override
+  String get stDailyChart => '每日分布';
+
+  @override
+  String get stShareChart => '占比分布';
+
+  @override
+  String get stDailyDetail => '每日明细';
+
+  @override
+  String get stLegendOther => '其他';
+
+  @override
+  String get stExcludeAuto => '排除自动条目';
+
+  @override
+  String get stExcludeAutoHint =>
+      '后台自动记录的条目不参与统计（明细与图表生效；聚合行过滤随批次 5 接入 compute 参数）';
+
+  @override
+  String get stAiButton => 'AI 总结';
+
+  @override
+  String get stAiPhase2 => '二期';
+
+  @override
+  String get stAiGuideTitle => 'AI 总结尚未配置';
+
+  @override
+  String get stAiGuideMessage => '需要先在「设置 → AI 配置」中开启并测试模型连接。你的数据仍优先保存在本地。';
+
+  @override
+  String get stAiGoSettings => '去设置';
+
+  @override
+  String get stAiNotNow => '暂不';
+
+  @override
+  String get stEmpty => '开始记录吧';
+
+  @override
+  String get stEmptyHint => '记录几天后，这里会呈现你的时间去向';
+
+  @override
+  String get stBucketShort => '<30 分';
+
+  @override
+  String get stBucketMedium => '30 分–1 时';
+
+  @override
+  String get stBucketLong => '1–3 时';
+
+  @override
+  String get stBucketXl => '3 时以上';
+
+  @override
+  String stCountShort(Object n) {
+    return '$n 次';
+  }
+
+  @override
+  String get stPickStart => '选择开始日期';
+
+  @override
+  String get stPickEnd => '选择结束日期';
 }

@@ -2119,6 +2119,558 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'切换 = 结束当前会话并立即开始新活动（原子操作，不留空档）；两种操作均可通过全局撤销恢复。'**
   String get timerSwitchHint;
+
+  /// No description provided for @entryEditorEdit.
+  ///
+  /// In zh, this message translates to:
+  /// **'编辑条目'**
+  String get entryEditorEdit;
+
+  /// No description provided for @entryEditorNew.
+  ///
+  /// In zh, this message translates to:
+  /// **'添加条目'**
+  String get entryEditorNew;
+
+  /// No description provided for @entryChangeActivity.
+  ///
+  /// In zh, this message translates to:
+  /// **'更换'**
+  String get entryChangeActivity;
+
+  /// No description provided for @entryStartAt.
+  ///
+  /// In zh, this message translates to:
+  /// **'开始'**
+  String get entryStartAt;
+
+  /// No description provided for @entryEndAt.
+  ///
+  /// In zh, this message translates to:
+  /// **'结束'**
+  String get entryEndAt;
+
+  /// No description provided for @entryKeepRunning.
+  ///
+  /// In zh, this message translates to:
+  /// **'保持运行'**
+  String get entryKeepRunning;
+
+  /// No description provided for @entryNoteHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'备注…'**
+  String get entryNoteHint;
+
+  /// No description provided for @entryErrEndBeforeStart.
+  ///
+  /// In zh, this message translates to:
+  /// **'结束时间必须晚于开始时间'**
+  String get entryErrEndBeforeStart;
+
+  /// No description provided for @entryErrRunningInFuture.
+  ///
+  /// In zh, this message translates to:
+  /// **'运行中的条目不能落在将来'**
+  String get entryErrRunningInFuture;
+
+  /// No description provided for @entryWarnOverlap.
+  ///
+  /// In zh, this message translates to:
+  /// **'与既有条目时间重叠，仍要保存吗？'**
+  String get entryWarnOverlap;
+
+  /// No description provided for @entryOverlapContinue.
+  ///
+  /// In zh, this message translates to:
+  /// **'仍要保存'**
+  String get entryOverlapContinue;
+
+  /// No description provided for @entryHintSplit.
+  ///
+  /// In zh, this message translates to:
+  /// **'跨越 0 点，保存后将自动拆分为两条'**
+  String get entryHintSplit;
+
+  /// No description provided for @entryEditOps.
+  ///
+  /// In zh, this message translates to:
+  /// **'相邻条目操作'**
+  String get entryEditOps;
+
+  /// No description provided for @entryMergePrev.
+  ///
+  /// In zh, this message translates to:
+  /// **'与前一条合并'**
+  String get entryMergePrev;
+
+  /// No description provided for @entryMergeNext.
+  ///
+  /// In zh, this message translates to:
+  /// **'与后一条合并'**
+  String get entryMergeNext;
+
+  /// No description provided for @entrySplit.
+  ///
+  /// In zh, this message translates to:
+  /// **'按时刻拆分'**
+  String get entrySplit;
+
+  /// No description provided for @entryExtendNow.
+  ///
+  /// In zh, this message translates to:
+  /// **'延伸到现在'**
+  String get entryExtendNow;
+
+  /// No description provided for @entryDeleteTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'删除这条记录？'**
+  String get entryDeleteTitle;
+
+  /// No description provided for @entryDeleteHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'删除后可通过全局撤销恢复。'**
+  String get entryDeleteHint;
+
+  /// No description provided for @tlAdd.
+  ///
+  /// In zh, this message translates to:
+  /// **'添加条目'**
+  String get tlAdd;
+
+  /// No description provided for @tlSpanToday.
+  ///
+  /// In zh, this message translates to:
+  /// **'今天'**
+  String get tlSpanToday;
+
+  /// No description provided for @tlSpanThree.
+  ///
+  /// In zh, this message translates to:
+  /// **'三天'**
+  String get tlSpanThree;
+
+  /// No description provided for @tlSpanWeek.
+  ///
+  /// In zh, this message translates to:
+  /// **'本周'**
+  String get tlSpanWeek;
+
+  /// No description provided for @tlViewEntries.
+  ///
+  /// In zh, this message translates to:
+  /// **'条目'**
+  String get tlViewEntries;
+
+  /// No description provided for @tlViewLogs.
+  ///
+  /// In zh, this message translates to:
+  /// **'日志'**
+  String get tlViewLogs;
+
+  /// No description provided for @tlLongest.
+  ///
+  /// In zh, this message translates to:
+  /// **'最长连续'**
+  String get tlLongest;
+
+  /// No description provided for @tlAuto.
+  ///
+  /// In zh, this message translates to:
+  /// **'自动'**
+  String get tlAuto;
+
+  /// No description provided for @tlMerged.
+  ///
+  /// In zh, this message translates to:
+  /// **'已合并'**
+  String get tlMerged;
+
+  /// No description provided for @tlRunningTag.
+  ///
+  /// In zh, this message translates to:
+  /// **'进行中'**
+  String get tlRunningTag;
+
+  /// No description provided for @tlContinueNext.
+  ///
+  /// In zh, this message translates to:
+  /// **'延续至次日'**
+  String get tlContinueNext;
+
+  /// No description provided for @tlFutureBanner.
+  ///
+  /// In zh, this message translates to:
+  /// **'未来日期暂无记录——这是正常状态，开始记录后这里会显示条目。'**
+  String get tlFutureBanner;
+
+  /// No description provided for @tlLegendAuto.
+  ///
+  /// In zh, this message translates to:
+  /// **'自动'**
+  String get tlLegendAuto;
+
+  /// No description provided for @tlLegendUnassigned.
+  ///
+  /// In zh, this message translates to:
+  /// **'未分配'**
+  String get tlLegendUnassigned;
+
+  /// No description provided for @tlLegendContinue.
+  ///
+  /// In zh, this message translates to:
+  /// **'延续次日'**
+  String get tlLegendContinue;
+
+  /// No description provided for @tlZoom.
+  ///
+  /// In zh, this message translates to:
+  /// **'缩放'**
+  String get tlZoom;
+
+  /// No description provided for @tlSegments.
+  ///
+  /// In zh, this message translates to:
+  /// **'分段/日'**
+  String get tlSegments;
+
+  /// No description provided for @tlNow.
+  ///
+  /// In zh, this message translates to:
+  /// **'现在'**
+  String get tlNow;
+
+  /// No description provided for @tlAxisTab.
+  ///
+  /// In zh, this message translates to:
+  /// **'时间轴'**
+  String get tlAxisTab;
+
+  /// No description provided for @tlStripTab.
+  ///
+  /// In zh, this message translates to:
+  /// **'比例条'**
+  String get tlStripTab;
+
+  /// No description provided for @tlGroupEntries.
+  ///
+  /// In zh, this message translates to:
+  /// **'条'**
+  String get tlGroupEntries;
+
+  /// No description provided for @tlLogsEmpty.
+  ///
+  /// In zh, this message translates to:
+  /// **'暂无操作日志'**
+  String get tlLogsEmpty;
+
+  /// No description provided for @tlEntriesCount.
+  ///
+  /// In zh, this message translates to:
+  /// **'{n} 条记录'**
+  String tlEntriesCount(Object n);
+
+  /// No description provided for @tlSplitPickTime.
+  ///
+  /// In zh, this message translates to:
+  /// **'选择拆分时刻'**
+  String get tlSplitPickTime;
+
+  /// No description provided for @tlNoActivity.
+  ///
+  /// In zh, this message translates to:
+  /// **'未选择活动'**
+  String get tlNoActivity;
+
+  /// No description provided for @logSwitch.
+  ///
+  /// In zh, this message translates to:
+  /// **'切换'**
+  String get logSwitch;
+
+  /// No description provided for @logStop.
+  ///
+  /// In zh, this message translates to:
+  /// **'停止'**
+  String get logStop;
+
+  /// No description provided for @logEdit.
+  ///
+  /// In zh, this message translates to:
+  /// **'编辑'**
+  String get logEdit;
+
+  /// No description provided for @logDelete.
+  ///
+  /// In zh, this message translates to:
+  /// **'删除'**
+  String get logDelete;
+
+  /// No description provided for @logUndo.
+  ///
+  /// In zh, this message translates to:
+  /// **'撤销'**
+  String get logUndo;
+
+  /// No description provided for @logRedo.
+  ///
+  /// In zh, this message translates to:
+  /// **'重做'**
+  String get logRedo;
+
+  /// No description provided for @logMerge.
+  ///
+  /// In zh, this message translates to:
+  /// **'合并'**
+  String get logMerge;
+
+  /// No description provided for @logManual.
+  ///
+  /// In zh, this message translates to:
+  /// **'手动'**
+  String get logManual;
+
+  /// No description provided for @logSplit.
+  ///
+  /// In zh, this message translates to:
+  /// **'拆分'**
+  String get logSplit;
+
+  /// No description provided for @logActivityDelete.
+  ///
+  /// In zh, this message translates to:
+  /// **'删除活动'**
+  String get logActivityDelete;
+
+  /// No description provided for @logCategoryCreate.
+  ///
+  /// In zh, this message translates to:
+  /// **'新建分类'**
+  String get logCategoryCreate;
+
+  /// No description provided for @logCategoryUpdate.
+  ///
+  /// In zh, this message translates to:
+  /// **'更新分类'**
+  String get logCategoryUpdate;
+
+  /// No description provided for @logCategoryDelete.
+  ///
+  /// In zh, this message translates to:
+  /// **'删除分类'**
+  String get logCategoryDelete;
+
+  /// No description provided for @logRuleUpdate.
+  ///
+  /// In zh, this message translates to:
+  /// **'规则变更'**
+  String get logRuleUpdate;
+
+  /// No description provided for @logSync.
+  ///
+  /// In zh, this message translates to:
+  /// **'同步'**
+  String get logSync;
+
+  /// No description provided for @stRangeToday.
+  ///
+  /// In zh, this message translates to:
+  /// **'今天'**
+  String get stRangeToday;
+
+  /// No description provided for @stRangeYesterday.
+  ///
+  /// In zh, this message translates to:
+  /// **'昨天'**
+  String get stRangeYesterday;
+
+  /// No description provided for @stRangeThisWeek.
+  ///
+  /// In zh, this message translates to:
+  /// **'本周'**
+  String get stRangeThisWeek;
+
+  /// No description provided for @stRangeLastWeek.
+  ///
+  /// In zh, this message translates to:
+  /// **'上周'**
+  String get stRangeLastWeek;
+
+  /// No description provided for @stRangeCustom.
+  ///
+  /// In zh, this message translates to:
+  /// **'自定义'**
+  String get stRangeCustom;
+
+  /// No description provided for @stDimActivity.
+  ///
+  /// In zh, this message translates to:
+  /// **'活动'**
+  String get stDimActivity;
+
+  /// No description provided for @stDimTree.
+  ///
+  /// In zh, this message translates to:
+  /// **'主分类 · 树聚合'**
+  String get stDimTree;
+
+  /// No description provided for @stDimBucket.
+  ///
+  /// In zh, this message translates to:
+  /// **'时长区间'**
+  String get stDimBucket;
+
+  /// No description provided for @stDimCross.
+  ///
+  /// In zh, this message translates to:
+  /// **'分类 × 时长'**
+  String get stDimCross;
+
+  /// No description provided for @stFilterTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'分类筛选'**
+  String get stFilterTitle;
+
+  /// No description provided for @stFilterAll.
+  ///
+  /// In zh, this message translates to:
+  /// **'全选'**
+  String get stFilterAll;
+
+  /// No description provided for @stFilterNone.
+  ///
+  /// In zh, this message translates to:
+  /// **'清空'**
+  String get stFilterNone;
+
+  /// No description provided for @stDailyChart.
+  ///
+  /// In zh, this message translates to:
+  /// **'每日分布'**
+  String get stDailyChart;
+
+  /// No description provided for @stShareChart.
+  ///
+  /// In zh, this message translates to:
+  /// **'占比分布'**
+  String get stShareChart;
+
+  /// No description provided for @stDailyDetail.
+  ///
+  /// In zh, this message translates to:
+  /// **'每日明细'**
+  String get stDailyDetail;
+
+  /// No description provided for @stLegendOther.
+  ///
+  /// In zh, this message translates to:
+  /// **'其他'**
+  String get stLegendOther;
+
+  /// No description provided for @stExcludeAuto.
+  ///
+  /// In zh, this message translates to:
+  /// **'排除自动条目'**
+  String get stExcludeAuto;
+
+  /// No description provided for @stExcludeAutoHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'后台自动记录的条目不参与统计（明细与图表生效；聚合行过滤随批次 5 接入 compute 参数）'**
+  String get stExcludeAutoHint;
+
+  /// No description provided for @stAiButton.
+  ///
+  /// In zh, this message translates to:
+  /// **'AI 总结'**
+  String get stAiButton;
+
+  /// No description provided for @stAiPhase2.
+  ///
+  /// In zh, this message translates to:
+  /// **'二期'**
+  String get stAiPhase2;
+
+  /// No description provided for @stAiGuideTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'AI 总结尚未配置'**
+  String get stAiGuideTitle;
+
+  /// No description provided for @stAiGuideMessage.
+  ///
+  /// In zh, this message translates to:
+  /// **'需要先在「设置 → AI 配置」中开启并测试模型连接。你的数据仍优先保存在本地。'**
+  String get stAiGuideMessage;
+
+  /// No description provided for @stAiGoSettings.
+  ///
+  /// In zh, this message translates to:
+  /// **'去设置'**
+  String get stAiGoSettings;
+
+  /// No description provided for @stAiNotNow.
+  ///
+  /// In zh, this message translates to:
+  /// **'暂不'**
+  String get stAiNotNow;
+
+  /// No description provided for @stEmpty.
+  ///
+  /// In zh, this message translates to:
+  /// **'开始记录吧'**
+  String get stEmpty;
+
+  /// No description provided for @stEmptyHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'记录几天后，这里会呈现你的时间去向'**
+  String get stEmptyHint;
+
+  /// No description provided for @stBucketShort.
+  ///
+  /// In zh, this message translates to:
+  /// **'<30 分'**
+  String get stBucketShort;
+
+  /// No description provided for @stBucketMedium.
+  ///
+  /// In zh, this message translates to:
+  /// **'30 分–1 时'**
+  String get stBucketMedium;
+
+  /// No description provided for @stBucketLong.
+  ///
+  /// In zh, this message translates to:
+  /// **'1–3 时'**
+  String get stBucketLong;
+
+  /// No description provided for @stBucketXl.
+  ///
+  /// In zh, this message translates to:
+  /// **'3 时以上'**
+  String get stBucketXl;
+
+  /// No description provided for @stCountShort.
+  ///
+  /// In zh, this message translates to:
+  /// **'{n} 次'**
+  String stCountShort(Object n);
+
+  /// No description provided for @stPickStart.
+  ///
+  /// In zh, this message translates to:
+  /// **'选择开始日期'**
+  String get stPickStart;
+
+  /// No description provided for @stPickEnd.
+  ///
+  /// In zh, this message translates to:
+  /// **'选择结束日期'**
+  String get stPickEnd;
 }
 
 class _AppLocalizationsDelegate

@@ -34,9 +34,9 @@ class AppRouter {
             _branch(
               '/timeline',
               'timeline',
-              (context, state) => const TimelinePage(),
+              (context, state) => TimelinePage(app: app),
             ),
-            _branch('/stats', 'stats', (context, state) => const StatsPage()),
+            _branch('/stats', 'stats', (context, state) => StatsPage(app: app)),
             _branch(
               '/settings',
               'settings',

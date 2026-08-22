@@ -1074,4 +1074,290 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get timerSwitchHint =>
       'Switch = end current session and start the new one immediately (atomic, no gap); both actions are undoable.';
+
+  @override
+  String get entryEditorEdit => 'Edit entry';
+
+  @override
+  String get entryEditorNew => 'Add entry';
+
+  @override
+  String get entryChangeActivity => 'Change';
+
+  @override
+  String get entryStartAt => 'Start';
+
+  @override
+  String get entryEndAt => 'End';
+
+  @override
+  String get entryKeepRunning => 'Keep running';
+
+  @override
+  String get entryNoteHint => 'Note…';
+
+  @override
+  String get entryErrEndBeforeStart => 'End must be after start';
+
+  @override
+  String get entryErrRunningInFuture =>
+      'A running entry cannot be in the future';
+
+  @override
+  String get entryWarnOverlap => 'Overlaps existing entries. Save anyway?';
+
+  @override
+  String get entryOverlapContinue => 'Save anyway';
+
+  @override
+  String get entryHintSplit =>
+      'Crosses midnight — will be split into two on save';
+
+  @override
+  String get entryEditOps => 'Neighbor actions';
+
+  @override
+  String get entryMergePrev => 'Merge previous';
+
+  @override
+  String get entryMergeNext => 'Merge next';
+
+  @override
+  String get entrySplit => 'Split at time';
+
+  @override
+  String get entryExtendNow => 'Extend to now';
+
+  @override
+  String get entryDeleteTitle => 'Delete this entry?';
+
+  @override
+  String get entryDeleteHint => 'You can undo this via global undo.';
+
+  @override
+  String get tlAdd => 'Add entry';
+
+  @override
+  String get tlSpanToday => 'Today';
+
+  @override
+  String get tlSpanThree => '3 days';
+
+  @override
+  String get tlSpanWeek => 'Week';
+
+  @override
+  String get tlViewEntries => 'Entries';
+
+  @override
+  String get tlViewLogs => 'Logs';
+
+  @override
+  String get tlLongest => 'Longest';
+
+  @override
+  String get tlAuto => 'Auto';
+
+  @override
+  String get tlMerged => 'Merged';
+
+  @override
+  String get tlRunningTag => 'Running';
+
+  @override
+  String get tlContinueNext => 'Continues next day';
+
+  @override
+  String get tlFutureBanner =>
+      'No records on future dates yet — that is normal; entries will appear here once recorded.';
+
+  @override
+  String get tlLegendAuto => 'Auto';
+
+  @override
+  String get tlLegendUnassigned => 'Unassigned';
+
+  @override
+  String get tlLegendContinue => 'Next-day';
+
+  @override
+  String get tlZoom => 'Zoom';
+
+  @override
+  String get tlSegments => 'Segments/day';
+
+  @override
+  String get tlNow => 'Now';
+
+  @override
+  String get tlAxisTab => 'Timeline';
+
+  @override
+  String get tlStripTab => 'Strip';
+
+  @override
+  String get tlGroupEntries => 'entries';
+
+  @override
+  String get tlLogsEmpty => 'No action logs yet';
+
+  @override
+  String tlEntriesCount(Object n) {
+    return '$n entries';
+  }
+
+  @override
+  String get tlSplitPickTime => 'Pick split time';
+
+  @override
+  String get tlNoActivity => 'No activity selected';
+
+  @override
+  String get logSwitch => 'Switch';
+
+  @override
+  String get logStop => 'Stop';
+
+  @override
+  String get logEdit => 'Edit';
+
+  @override
+  String get logDelete => 'Delete';
+
+  @override
+  String get logUndo => 'Undo';
+
+  @override
+  String get logRedo => 'Redo';
+
+  @override
+  String get logMerge => 'Merge';
+
+  @override
+  String get logManual => 'Manual';
+
+  @override
+  String get logSplit => 'Split';
+
+  @override
+  String get logActivityDelete => 'Delete activity';
+
+  @override
+  String get logCategoryCreate => 'Create category';
+
+  @override
+  String get logCategoryUpdate => 'Update category';
+
+  @override
+  String get logCategoryDelete => 'Delete category';
+
+  @override
+  String get logRuleUpdate => 'Rule change';
+
+  @override
+  String get logSync => 'Sync';
+
+  @override
+  String get stRangeToday => 'Today';
+
+  @override
+  String get stRangeYesterday => 'Yesterday';
+
+  @override
+  String get stRangeThisWeek => 'This week';
+
+  @override
+  String get stRangeLastWeek => 'Last week';
+
+  @override
+  String get stRangeCustom => 'Custom';
+
+  @override
+  String get stDimActivity => 'Activity';
+
+  @override
+  String get stDimTree => 'Category tree';
+
+  @override
+  String get stDimBucket => 'Duration buckets';
+
+  @override
+  String get stDimCross => 'Category × duration';
+
+  @override
+  String get stFilterTitle => 'Category filter';
+
+  @override
+  String get stFilterAll => 'All';
+
+  @override
+  String get stFilterNone => 'Clear';
+
+  @override
+  String get stDailyChart => 'Daily distribution';
+
+  @override
+  String get stShareChart => 'Share';
+
+  @override
+  String get stDailyDetail => 'Daily detail';
+
+  @override
+  String get stLegendOther => 'Other';
+
+  @override
+  String get stExcludeAuto => 'Exclude auto entries';
+
+  @override
+  String get stExcludeAutoHint =>
+      'Background auto entries are excluded from charts and details (row filter lands with compute params in batch 5)';
+
+  @override
+  String get stAiButton => 'AI summary';
+
+  @override
+  String get stAiPhase2 => 'Phase 2';
+
+  @override
+  String get stAiGuideTitle => 'AI summary not configured';
+
+  @override
+  String get stAiGuideMessage =>
+      'Enable and test the model in Settings → AI first. Your data stays local by default.';
+
+  @override
+  String get stAiGoSettings => 'Open settings';
+
+  @override
+  String get stAiNotNow => 'Not now';
+
+  @override
+  String get stEmpty => 'Start recording';
+
+  @override
+  String get stEmptyHint =>
+      'After a few days of tracking, your time breakdown appears here';
+
+  @override
+  String get stBucketShort => '<30m';
+
+  @override
+  String get stBucketMedium => '30m–1h';
+
+  @override
+  String get stBucketLong => '1–3h';
+
+  @override
+  String get stBucketXl => '3h+';
+
+  @override
+  String stCountShort(Object n) {
+    return '$n entries';
+  }
+
+  @override
+  String get stPickStart => 'Pick start date';
+
+  @override
+  String get stPickEnd => 'Pick end date';
 }
