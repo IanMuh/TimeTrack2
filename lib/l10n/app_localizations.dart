@@ -2671,6 +2671,1110 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'选择结束日期'**
   String get stPickEnd;
+
+  /// No description provided for @settingsSecGeneral.
+  ///
+  /// In zh, this message translates to:
+  /// **'通用'**
+  String get settingsSecGeneral;
+
+  /// No description provided for @settingsSecGeneralSub.
+  ///
+  /// In zh, this message translates to:
+  /// **'外观、时间显示与全局默认值'**
+  String get settingsSecGeneralSub;
+
+  /// No description provided for @settingsSecBackup.
+  ///
+  /// In zh, this message translates to:
+  /// **'备份与导出'**
+  String get settingsSecBackup;
+
+  /// No description provided for @settingsSecBackupSub.
+  ///
+  /// In zh, this message translates to:
+  /// **'数据迁移与新设备恢复的唯一通道'**
+  String get settingsSecBackupSub;
+
+  /// No description provided for @settingsSecReminder.
+  ///
+  /// In zh, this message translates to:
+  /// **'提醒'**
+  String get settingsSecReminder;
+
+  /// No description provided for @settingsSecReminderSub.
+  ///
+  /// In zh, this message translates to:
+  /// **'何时提醒、多久一次、用什么方式'**
+  String get settingsSecReminderSub;
+
+  /// No description provided for @settingsSecTimeline.
+  ///
+  /// In zh, this message translates to:
+  /// **'时间线'**
+  String get settingsSecTimeline;
+
+  /// No description provided for @settingsSecTimelineSub.
+  ///
+  /// In zh, this message translates to:
+  /// **'相邻条目自动合并的判定阈值'**
+  String get settingsSecTimelineSub;
+
+  /// No description provided for @settingsSecSync.
+  ///
+  /// In zh, this message translates to:
+  /// **'云同步'**
+  String get settingsSecSync;
+
+  /// No description provided for @settingsSecSyncSub.
+  ///
+  /// In zh, this message translates to:
+  /// **'多设备数据双向同步，本地优先、异步进行'**
+  String get settingsSecSyncSub;
+
+  /// No description provided for @settingsSecAi.
+  ///
+  /// In zh, this message translates to:
+  /// **'AI 配置'**
+  String get settingsSecAi;
+
+  /// No description provided for @settingsSecAiSub.
+  ///
+  /// In zh, this message translates to:
+  /// **'总结与自然语言记录（一期仅预留入口位）'**
+  String get settingsSecAiSub;
+
+  /// No description provided for @settingsAiBadge.
+  ///
+  /// In zh, this message translates to:
+  /// **'二期'**
+  String get settingsAiBadge;
+
+  /// No description provided for @settingsSecBackground.
+  ///
+  /// In zh, this message translates to:
+  /// **'后台记录'**
+  String get settingsSecBackground;
+
+  /// No description provided for @settingsSecBackgroundSub.
+  ///
+  /// In zh, this message translates to:
+  /// **'按规则自动计时；自动条目带「自动」标识，可识别、可排除'**
+  String get settingsSecBackgroundSub;
+
+  /// No description provided for @settingsSecDevice.
+  ///
+  /// In zh, this message translates to:
+  /// **'设备互通'**
+  String get settingsSecDevice;
+
+  /// No description provided for @settingsSecDeviceSub.
+  ///
+  /// In zh, this message translates to:
+  /// **'同一局域网内的设备间同步与文件互通'**
+  String get settingsSecDeviceSub;
+
+  /// No description provided for @settingsSecUpdate.
+  ///
+  /// In zh, this message translates to:
+  /// **'版本更新'**
+  String get settingsSecUpdate;
+
+  /// No description provided for @settingsSecUpdateSub.
+  ///
+  /// In zh, this message translates to:
+  /// **'下载校验一致才安装 · 失败逐层降级 · 强制更新不可跳过'**
+  String get settingsSecUpdateSub;
+
+  /// No description provided for @settingsSecAbout.
+  ///
+  /// In zh, this message translates to:
+  /// **'关于'**
+  String get settingsSecAbout;
+
+  /// No description provided for @settingsSecAboutSub.
+  ///
+  /// In zh, this message translates to:
+  /// **'版本、开源信息与许可'**
+  String get settingsSecAboutSub;
+
+  /// No description provided for @settingsAppearance.
+  ///
+  /// In zh, this message translates to:
+  /// **'外观'**
+  String get settingsAppearance;
+
+  /// No description provided for @settingsAppearanceHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'默认浅色，可切深色或跟随系统'**
+  String get settingsAppearanceHint;
+
+  /// No description provided for @settingsThemeLight.
+  ///
+  /// In zh, this message translates to:
+  /// **'浅色'**
+  String get settingsThemeLight;
+
+  /// No description provided for @settingsThemeDark.
+  ///
+  /// In zh, this message translates to:
+  /// **'深色'**
+  String get settingsThemeDark;
+
+  /// No description provided for @settingsThemeSystem.
+  ///
+  /// In zh, this message translates to:
+  /// **'跟随系统'**
+  String get settingsThemeSystem;
+
+  /// No description provided for @settingsWeekStart.
+  ///
+  /// In zh, this message translates to:
+  /// **'每周起始日'**
+  String get settingsWeekStart;
+
+  /// No description provided for @settingsWeekStartHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'统计页「本周」从哪天开始'**
+  String get settingsWeekStartHint;
+
+  /// No description provided for @settingsWeekMonday.
+  ///
+  /// In zh, this message translates to:
+  /// **'周一'**
+  String get settingsWeekMonday;
+
+  /// No description provided for @settingsWeekSunday.
+  ///
+  /// In zh, this message translates to:
+  /// **'周日'**
+  String get settingsWeekSunday;
+
+  /// No description provided for @settingsWeekSaturday.
+  ///
+  /// In zh, this message translates to:
+  /// **'周六'**
+  String get settingsWeekSaturday;
+
+  /// No description provided for @settingsTimeFormat.
+  ///
+  /// In zh, this message translates to:
+  /// **'时间格式'**
+  String get settingsTimeFormat;
+
+  /// No description provided for @settingsTimeFormatHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'时间线条目与计时的显示格式'**
+  String get settingsTimeFormatHint;
+
+  /// No description provided for @settingsHour12.
+  ///
+  /// In zh, this message translates to:
+  /// **'12 小时'**
+  String get settingsHour12;
+
+  /// No description provided for @settingsHour24.
+  ///
+  /// In zh, this message translates to:
+  /// **'24 小时'**
+  String get settingsHour24;
+
+  /// No description provided for @settingsDefaultDuration.
+  ///
+  /// In zh, this message translates to:
+  /// **'默认记录时长'**
+  String get settingsDefaultDuration;
+
+  /// No description provided for @settingsDefaultDurationHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'「临时活动」等快捷启动的默认时长'**
+  String get settingsDefaultDurationHint;
+
+  /// No description provided for @settingsQuickReminder.
+  ///
+  /// In zh, this message translates to:
+  /// **'快速提醒'**
+  String get settingsQuickReminder;
+
+  /// No description provided for @settingsQuickReminderHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'到触发时刻提醒开始记录（见「提醒」分区）'**
+  String get settingsQuickReminderHint;
+
+  /// No description provided for @settingsMinutesShort.
+  ///
+  /// In zh, this message translates to:
+  /// **'{minutes} 分钟'**
+  String settingsMinutesShort(int minutes);
+
+  /// No description provided for @settingsTriggerTime.
+  ///
+  /// In zh, this message translates to:
+  /// **'触发时刻'**
+  String get settingsTriggerTime;
+
+  /// No description provided for @settingsTriggerTimeHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'每日到设定时间后提醒开始记录'**
+  String get settingsTriggerTimeHint;
+
+  /// No description provided for @settingsDurationThreshold.
+  ///
+  /// In zh, this message translates to:
+  /// **'持续时长阈值'**
+  String get settingsDurationThreshold;
+
+  /// No description provided for @settingsDurationThresholdHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'会话运行达到该时长后触发提醒'**
+  String get settingsDurationThresholdHint;
+
+  /// No description provided for @settingsRepeatInterval.
+  ///
+  /// In zh, this message translates to:
+  /// **'重复间隔'**
+  String get settingsRepeatInterval;
+
+  /// No description provided for @settingsRepeatIntervalHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'提醒后每隔该时长再次提醒，直到手动结束会话'**
+  String get settingsRepeatIntervalHint;
+
+  /// No description provided for @settingsReminderMethod.
+  ///
+  /// In zh, this message translates to:
+  /// **'提醒方式'**
+  String get settingsReminderMethod;
+
+  /// No description provided for @settingsMethodDialog.
+  ///
+  /// In zh, this message translates to:
+  /// **'对话框'**
+  String get settingsMethodDialog;
+
+  /// No description provided for @settingsMethodDialogDesc.
+  ///
+  /// In zh, this message translates to:
+  /// **'需决策'**
+  String get settingsMethodDialogDesc;
+
+  /// No description provided for @settingsMethodBanner.
+  ///
+  /// In zh, this message translates to:
+  /// **'横幅'**
+  String get settingsMethodBanner;
+
+  /// No description provided for @settingsMethodBannerDesc.
+  ///
+  /// In zh, this message translates to:
+  /// **'轻打扰'**
+  String get settingsMethodBannerDesc;
+
+  /// No description provided for @settingsMethodSilent.
+  ///
+  /// In zh, this message translates to:
+  /// **'静音'**
+  String get settingsMethodSilent;
+
+  /// No description provided for @settingsMethodSilentDesc.
+  ///
+  /// In zh, this message translates to:
+  /// **'不打扰'**
+  String get settingsMethodSilentDesc;
+
+  /// No description provided for @settingsMergeThreshold.
+  ///
+  /// In zh, this message translates to:
+  /// **'相邻条目合并阈值'**
+  String get settingsMergeThreshold;
+
+  /// No description provided for @settingsMergeThresholdHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'间隔小于该阈值时自动合并'**
+  String get settingsMergeThresholdHint;
+
+  /// No description provided for @settingsUnassignedNote.
+  ///
+  /// In zh, this message translates to:
+  /// **'系统有且仅有一个「未分配」活动。时间线上与它相邻的未分配条目，在间隔小于该阈值时会自动合并为一条连续记录，避免碎片化。'**
+  String get settingsUnassignedNote;
+
+  /// No description provided for @settingsExport.
+  ///
+  /// In zh, this message translates to:
+  /// **'导出备份'**
+  String get settingsExport;
+
+  /// No description provided for @settingsExportHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'导出为 .timetrack.json 单个文件，包含全部时间条目、活动与设置'**
+  String get settingsExportHint;
+
+  /// No description provided for @settingsExportBtn.
+  ///
+  /// In zh, this message translates to:
+  /// **'导出'**
+  String get settingsExportBtn;
+
+  /// No description provided for @settingsImport.
+  ///
+  /// In zh, this message translates to:
+  /// **'导入数据'**
+  String get settingsImport;
+
+  /// No description provided for @settingsImportHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'从 .timetrack.json 恢复，导入的数据将与现有数据合并'**
+  String get settingsImportHint;
+
+  /// No description provided for @settingsImportBtn.
+  ///
+  /// In zh, this message translates to:
+  /// **'导入'**
+  String get settingsImportBtn;
+
+  /// No description provided for @settingsDangerTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'清除全部数据'**
+  String get settingsDangerTitle;
+
+  /// No description provided for @settingsDangerMessage.
+  ///
+  /// In zh, this message translates to:
+  /// **'永久删除本机全部时间条目、活动与设置，且不可撤销。执行前必须先导出备份。'**
+  String get settingsDangerMessage;
+
+  /// No description provided for @settingsDangerBtn.
+  ///
+  /// In zh, this message translates to:
+  /// **'清除全部数据'**
+  String get settingsDangerBtn;
+
+  /// No description provided for @settingsWipeDialogTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'清除全部数据'**
+  String get settingsWipeDialogTitle;
+
+  /// No description provided for @settingsWipeDialogBody.
+  ///
+  /// In zh, this message translates to:
+  /// **'此操作将永久删除全部时间条目、活动与设置，无法撤销。清除前请先导出备份，以免数据丢失。'**
+  String get settingsWipeDialogBody;
+
+  /// No description provided for @settingsWipeCancel.
+  ///
+  /// In zh, this message translates to:
+  /// **'取消'**
+  String get settingsWipeCancel;
+
+  /// No description provided for @settingsWipeExportFirst.
+  ///
+  /// In zh, this message translates to:
+  /// **'先导出备份'**
+  String get settingsWipeExportFirst;
+
+  /// No description provided for @settingsWipeConfirm.
+  ///
+  /// In zh, this message translates to:
+  /// **'仍然清除'**
+  String get settingsWipeConfirm;
+
+  /// No description provided for @settingsWipeDone.
+  ///
+  /// In zh, this message translates to:
+  /// **'已清除全部数据'**
+  String get settingsWipeDone;
+
+  /// No description provided for @settingsWipeFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'清除失败'**
+  String get settingsWipeFailed;
+
+  /// No description provided for @settingsExportDone.
+  ///
+  /// In zh, this message translates to:
+  /// **'已导出到 {path}'**
+  String settingsExportDone(String path);
+
+  /// No description provided for @settingsImportDone.
+  ///
+  /// In zh, this message translates to:
+  /// **'已导入 {count} 条记录'**
+  String settingsImportDone(int count);
+
+  /// No description provided for @settingsOpFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'操作失败：{message}'**
+  String settingsOpFailed(String message);
+
+  /// No description provided for @settingsSyncConfigured.
+  ///
+  /// In zh, this message translates to:
+  /// **'已配置 Supabase'**
+  String get settingsSyncConfigured;
+
+  /// No description provided for @settingsSyncNotConfigured.
+  ///
+  /// In zh, this message translates to:
+  /// **'未配置云服务'**
+  String get settingsSyncNotConfigured;
+
+  /// No description provided for @settingsSyncNotConfiguredHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'编译期未注入 SUPABASE_URL，应用以离线模式运行'**
+  String get settingsSyncNotConfiguredHint;
+
+  /// No description provided for @settingsSyncOnline.
+  ///
+  /// In zh, this message translates to:
+  /// **'在线'**
+  String get settingsSyncOnline;
+
+  /// No description provided for @settingsSyncOffline.
+  ///
+  /// In zh, this message translates to:
+  /// **'离线'**
+  String get settingsSyncOffline;
+
+  /// No description provided for @settingsSyncLoggedInAs.
+  ///
+  /// In zh, this message translates to:
+  /// **'已登录 {email}'**
+  String settingsSyncLoggedInAs(String email);
+
+  /// No description provided for @settingsSyncNotLoggedIn.
+  ///
+  /// In zh, this message translates to:
+  /// **'未登录'**
+  String get settingsSyncNotLoggedIn;
+
+  /// No description provided for @settingsSyncLastAt.
+  ///
+  /// In zh, this message translates to:
+  /// **'上次同步'**
+  String get settingsSyncLastAt;
+
+  /// No description provided for @settingsSyncJustNow.
+  ///
+  /// In zh, this message translates to:
+  /// **'刚刚'**
+  String get settingsSyncJustNow;
+
+  /// No description provided for @settingsSyncNever.
+  ///
+  /// In zh, this message translates to:
+  /// **'从未'**
+  String get settingsSyncNever;
+
+  /// No description provided for @settingsSyncPulled.
+  ///
+  /// In zh, this message translates to:
+  /// **'拉取 {count} 条'**
+  String settingsSyncPulled(int count);
+
+  /// No description provided for @settingsSyncPushed.
+  ///
+  /// In zh, this message translates to:
+  /// **'推送 {count} 条'**
+  String settingsSyncPushed(int count);
+
+  /// No description provided for @settingsSyncNow.
+  ///
+  /// In zh, this message translates to:
+  /// **'立即同步'**
+  String get settingsSyncNow;
+
+  /// No description provided for @settingsSyncSignOut.
+  ///
+  /// In zh, this message translates to:
+  /// **'登出'**
+  String get settingsSyncSignOut;
+
+  /// No description provided for @settingsLoginTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'登录'**
+  String get settingsLoginTitle;
+
+  /// No description provided for @settingsLoginSubtitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'输入邮箱，通过验证码登录以同步数据到云端'**
+  String get settingsLoginSubtitle;
+
+  /// No description provided for @settingsLoginEmail.
+  ///
+  /// In zh, this message translates to:
+  /// **'邮箱'**
+  String get settingsLoginEmail;
+
+  /// No description provided for @settingsLoginSendCode.
+  ///
+  /// In zh, this message translates to:
+  /// **'发送验证码'**
+  String get settingsLoginSendCode;
+
+  /// No description provided for @settingsLoginSending.
+  ///
+  /// In zh, this message translates to:
+  /// **'发送中…'**
+  String get settingsLoginSending;
+
+  /// No description provided for @settingsLoginCodeSent.
+  ///
+  /// In zh, this message translates to:
+  /// **'验证码已发送，请查收邮箱'**
+  String get settingsLoginCodeSent;
+
+  /// No description provided for @settingsLoginCode.
+  ///
+  /// In zh, this message translates to:
+  /// **'6 位验证码'**
+  String get settingsLoginCode;
+
+  /// No description provided for @settingsLoginVerify.
+  ///
+  /// In zh, this message translates to:
+  /// **'验证并登录'**
+  String get settingsLoginVerify;
+
+  /// No description provided for @settingsLoginVerifying.
+  ///
+  /// In zh, this message translates to:
+  /// **'登录中…'**
+  String get settingsLoginVerifying;
+
+  /// No description provided for @settingsLoginFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'登录失败：{message}'**
+  String settingsLoginFailed(String message);
+
+  /// No description provided for @settingsLoginCancel.
+  ///
+  /// In zh, this message translates to:
+  /// **'取消'**
+  String get settingsLoginCancel;
+
+  /// No description provided for @settingsSignedOut.
+  ///
+  /// In zh, this message translates to:
+  /// **'已登出'**
+  String get settingsSignedOut;
+
+  /// No description provided for @settingsSyncFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'同步失败：{message}'**
+  String settingsSyncFailed(String message);
+
+  /// No description provided for @settingsAiPhase2Note.
+  ///
+  /// In zh, this message translates to:
+  /// **'AI 配置将在二期开放：API 密钥（安全存储）、OpenAI 兼容端点/模型、测试连接与数据出境披露。一期统计页已预留 AI 入口引导。'**
+  String get settingsAiPhase2Note;
+
+  /// No description provided for @settingsBgWindowsTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'Windows 版 · 后台驻留'**
+  String get settingsBgWindowsTitle;
+
+  /// No description provided for @settingsBgWindowsBody.
+  ///
+  /// In zh, this message translates to:
+  /// **'关闭主窗口时默认最小化到系统托盘；托盘右键菜单可显示主窗口、暂停记录或退出。'**
+  String get settingsBgWindowsBody;
+
+  /// No description provided for @settingsBgDetectorState.
+  ///
+  /// In zh, this message translates to:
+  /// **'检测状态：{state}'**
+  String settingsBgDetectorState(String state);
+
+  /// No description provided for @settingsBgDetectorRunning.
+  ///
+  /// In zh, this message translates to:
+  /// **'运行中'**
+  String get settingsBgDetectorRunning;
+
+  /// No description provided for @settingsBgDetectorPending.
+  ///
+  /// In zh, this message translates to:
+  /// **'待平台层接入（批次 6）'**
+  String get settingsBgDetectorPending;
+
+  /// No description provided for @settingsBgLastMatch.
+  ///
+  /// In zh, this message translates to:
+  /// **'最近命中：{note}'**
+  String settingsBgLastMatch(String note);
+
+  /// No description provided for @settingsBgMasterSwitch.
+  ///
+  /// In zh, this message translates to:
+  /// **'后台自动记录'**
+  String get settingsBgMasterSwitch;
+
+  /// No description provided for @settingsBgMasterHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'按规则自动计时；未匹配任何规则时不产生条目'**
+  String get settingsBgMasterHint;
+
+  /// No description provided for @settingsBgRules.
+  ///
+  /// In zh, this message translates to:
+  /// **'规则'**
+  String get settingsBgRules;
+
+  /// No description provided for @settingsBgRulesCount.
+  ///
+  /// In zh, this message translates to:
+  /// **'匹配模式 → 目标活动 · 共 {count} 条规则'**
+  String settingsBgRulesCount(int count);
+
+  /// No description provided for @settingsBgNewRule.
+  ///
+  /// In zh, this message translates to:
+  /// **'新建规则'**
+  String get settingsBgNewRule;
+
+  /// No description provided for @settingsBgEmptyRules.
+  ///
+  /// In zh, this message translates to:
+  /// **'暂无规则。新建规则后，匹配到对应进程或窗口标题时会自动开始计时。'**
+  String get settingsBgEmptyRules;
+
+  /// No description provided for @settingsBgKindProcess.
+  ///
+  /// In zh, this message translates to:
+  /// **'进程名'**
+  String get settingsBgKindProcess;
+
+  /// No description provided for @settingsBgKindTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'窗口标题'**
+  String get settingsBgKindTitle;
+
+  /// No description provided for @settingsBgSyncToggle.
+  ///
+  /// In zh, this message translates to:
+  /// **'云同步'**
+  String get settingsBgSyncToggle;
+
+  /// No description provided for @settingsBgEnabledToggle.
+  ///
+  /// In zh, this message translates to:
+  /// **'启用'**
+  String get settingsBgEnabledToggle;
+
+  /// No description provided for @settingsBgEdit.
+  ///
+  /// In zh, this message translates to:
+  /// **'编辑规则'**
+  String get settingsBgEdit;
+
+  /// No description provided for @settingsBgDelete.
+  ///
+  /// In zh, this message translates to:
+  /// **'删除规则'**
+  String get settingsBgDelete;
+
+  /// No description provided for @settingsBgRuleFormTitleNew.
+  ///
+  /// In zh, this message translates to:
+  /// **'新建规则'**
+  String get settingsBgRuleFormTitleNew;
+
+  /// No description provided for @settingsBgRuleFormTitleEdit.
+  ///
+  /// In zh, this message translates to:
+  /// **'编辑规则'**
+  String get settingsBgRuleFormTitleEdit;
+
+  /// No description provided for @settingsBgPattern.
+  ///
+  /// In zh, this message translates to:
+  /// **'匹配模式'**
+  String get settingsBgPattern;
+
+  /// No description provided for @settingsBgPatternHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'进程名（如 code.exe）或标题模式（如 *微信*）'**
+  String get settingsBgPatternHint;
+
+  /// No description provided for @settingsBgMatchKind.
+  ///
+  /// In zh, this message translates to:
+  /// **'匹配类型'**
+  String get settingsBgMatchKind;
+
+  /// No description provided for @settingsBgTargetActivity.
+  ///
+  /// In zh, this message translates to:
+  /// **'目标活动'**
+  String get settingsBgTargetActivity;
+
+  /// No description provided for @settingsBgPickActivity.
+  ///
+  /// In zh, this message translates to:
+  /// **'打开活动选择器'**
+  String get settingsBgPickActivity;
+
+  /// No description provided for @settingsBgSyncThisRule.
+  ///
+  /// In zh, this message translates to:
+  /// **'云同步此规则'**
+  String get settingsBgSyncThisRule;
+
+  /// No description provided for @settingsBgPriorityNote.
+  ///
+  /// In zh, this message translates to:
+  /// **'匹配优先级：精确 > 通配 > 标题。请避免过宽的匹配模式以减少误匹配。'**
+  String get settingsBgPriorityNote;
+
+  /// No description provided for @settingsBgSave.
+  ///
+  /// In zh, this message translates to:
+  /// **'保存'**
+  String get settingsBgSave;
+
+  /// No description provided for @settingsBgCancel.
+  ///
+  /// In zh, this message translates to:
+  /// **'取消'**
+  String get settingsBgCancel;
+
+  /// No description provided for @settingsBgRuleSaved.
+  ///
+  /// In zh, this message translates to:
+  /// **'规则已保存'**
+  String get settingsBgRuleSaved;
+
+  /// No description provided for @settingsBgRuleDeleted.
+  ///
+  /// In zh, this message translates to:
+  /// **'规则已删除'**
+  String get settingsBgRuleDeleted;
+
+  /// No description provided for @settingsBgFormInvalid.
+  ///
+  /// In zh, this message translates to:
+  /// **'请填写匹配模式并选择目标活动'**
+  String get settingsBgFormInvalid;
+
+  /// No description provided for @settingsLanHost.
+  ///
+  /// In zh, this message translates to:
+  /// **'LAN 主机'**
+  String get settingsLanHost;
+
+  /// No description provided for @settingsLanHostHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'允许局域网内其他设备经配对码连接并同步'**
+  String get settingsLanHostHint;
+
+  /// No description provided for @settingsLanStart.
+  ///
+  /// In zh, this message translates to:
+  /// **'启动主机'**
+  String get settingsLanStart;
+
+  /// No description provided for @settingsLanStop.
+  ///
+  /// In zh, this message translates to:
+  /// **'停止'**
+  String get settingsLanStop;
+
+  /// No description provided for @settingsLanRunning.
+  ///
+  /// In zh, this message translates to:
+  /// **'运行中'**
+  String get settingsLanRunning;
+
+  /// No description provided for @settingsLanStopped.
+  ///
+  /// In zh, this message translates to:
+  /// **'已停止'**
+  String get settingsLanStopped;
+
+  /// No description provided for @settingsLanPort.
+  ///
+  /// In zh, this message translates to:
+  /// **'端口'**
+  String get settingsLanPort;
+
+  /// No description provided for @settingsLanPairingCode.
+  ///
+  /// In zh, this message translates to:
+  /// **'配对码'**
+  String get settingsLanPairingCode;
+
+  /// No description provided for @settingsLanCodeOnce.
+  ///
+  /// In zh, this message translates to:
+  /// **'配对码单次有效，过期或使用后需重新生成'**
+  String get settingsLanCodeOnce;
+
+  /// No description provided for @settingsLanClient.
+  ///
+  /// In zh, this message translates to:
+  /// **'LAN 客户端'**
+  String get settingsLanClient;
+
+  /// No description provided for @settingsLanClientHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'连接其他设备开启的主机'**
+  String get settingsLanClientHint;
+
+  /// No description provided for @settingsLanHostInput.
+  ///
+  /// In zh, this message translates to:
+  /// **'主机地址（如 192.168.1.5 或 192.168.1.5:8787）'**
+  String get settingsLanHostInput;
+
+  /// No description provided for @settingsLanCodeInput.
+  ///
+  /// In zh, this message translates to:
+  /// **'6 位配对码'**
+  String get settingsLanCodeInput;
+
+  /// No description provided for @settingsLanPair.
+  ///
+  /// In zh, this message translates to:
+  /// **'配对'**
+  String get settingsLanPair;
+
+  /// No description provided for @settingsLanPairedAs.
+  ///
+  /// In zh, this message translates to:
+  /// **'已配对：{name}'**
+  String settingsLanPairedAs(String name);
+
+  /// No description provided for @settingsLanSyncNow.
+  ///
+  /// In zh, this message translates to:
+  /// **'立即同步'**
+  String get settingsLanSyncNow;
+
+  /// No description provided for @settingsLanManualOnly.
+  ///
+  /// In zh, this message translates to:
+  /// **'主机仅手动启动，无任何自动开启路径。'**
+  String get settingsLanManualOnly;
+
+  /// No description provided for @settingsLanFileInterop.
+  ///
+  /// In zh, this message translates to:
+  /// **'文件互通'**
+  String get settingsLanFileInterop;
+
+  /// No description provided for @settingsLanFileInteropHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'通过 .timetrack.json 在设备间手动转移数据'**
+  String get settingsLanFileInteropHint;
+
+  /// No description provided for @settingsUpdateCurrent.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前版本'**
+  String get settingsUpdateCurrent;
+
+  /// No description provided for @settingsUpdateLatest.
+  ///
+  /// In zh, this message translates to:
+  /// **'最新版本'**
+  String get settingsUpdateLatest;
+
+  /// No description provided for @settingsUpdateState.
+  ///
+  /// In zh, this message translates to:
+  /// **'状态'**
+  String get settingsUpdateState;
+
+  /// No description provided for @settingsUpdateCheck.
+  ///
+  /// In zh, this message translates to:
+  /// **'检查更新'**
+  String get settingsUpdateCheck;
+
+  /// No description provided for @settingsUpdateChecking.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在检查新版本…'**
+  String get settingsUpdateChecking;
+
+  /// No description provided for @settingsUpdateUpToDate.
+  ///
+  /// In zh, this message translates to:
+  /// **'已是最新版本'**
+  String get settingsUpdateUpToDate;
+
+  /// No description provided for @settingsUpdateAvailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'发现新版本'**
+  String get settingsUpdateAvailable;
+
+  /// No description provided for @settingsUpdateDownload.
+  ///
+  /// In zh, this message translates to:
+  /// **'下载更新'**
+  String get settingsUpdateDownload;
+
+  /// No description provided for @settingsUpdateDownloading.
+  ///
+  /// In zh, this message translates to:
+  /// **'下载中…'**
+  String get settingsUpdateDownloading;
+
+  /// No description provided for @settingsUpdateVerifying.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在校验 SHA-256…'**
+  String get settingsUpdateVerifying;
+
+  /// No description provided for @settingsUpdateInstalling.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在安装更新…'**
+  String get settingsUpdateInstalling;
+
+  /// No description provided for @settingsUpdateRestartRequired.
+  ///
+  /// In zh, this message translates to:
+  /// **'重启后生效'**
+  String get settingsUpdateRestartRequired;
+
+  /// No description provided for @settingsUpdateRestartBody.
+  ///
+  /// In zh, this message translates to:
+  /// **'安装完成，下次启动应用时生效'**
+  String get settingsUpdateRestartBody;
+
+  /// No description provided for @settingsUpdateRestartNow.
+  ///
+  /// In zh, this message translates to:
+  /// **'立即重启'**
+  String get settingsUpdateRestartNow;
+
+  /// No description provided for @settingsUpdateFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'更新失败'**
+  String get settingsUpdateFailed;
+
+  /// No description provided for @settingsUpdateIgnoreVersion.
+  ///
+  /// In zh, this message translates to:
+  /// **'忽略此版本'**
+  String get settingsUpdateIgnoreVersion;
+
+  /// No description provided for @settingsUpdateLater.
+  ///
+  /// In zh, this message translates to:
+  /// **'稍后提醒'**
+  String get settingsUpdateLater;
+
+  /// No description provided for @settingsUpdateInstallNote.
+  ///
+  /// In zh, this message translates to:
+  /// **'安装差异：Windows 下载校验通过后提示「重启后生效」，更新在下次启动应用时应用；Android 拉起系统安装器，未授权「安装未知应用」时引导前往系统设置开启。'**
+  String get settingsUpdateInstallNote;
+
+  /// No description provided for @settingsUpdateVerifyNote.
+  ///
+  /// In zh, this message translates to:
+  /// **'下载完成后自动校验 SHA-256，校验一致才安装'**
+  String get settingsUpdateVerifyNote;
+
+  /// No description provided for @settingsUpdateNoArtifact.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前平台无可用更新包'**
+  String get settingsUpdateNoArtifact;
+
+  /// No description provided for @settingsUpdateIgnoredDone.
+  ///
+  /// In zh, this message translates to:
+  /// **'已忽略此版本'**
+  String get settingsUpdateIgnoredDone;
+
+  /// No description provided for @settingsUpdateIdle.
+  ///
+  /// In zh, this message translates to:
+  /// **'已就绪'**
+  String get settingsUpdateIdle;
+
+  /// No description provided for @settingsAboutTagline.
+  ///
+  /// In zh, this message translates to:
+  /// **'离线优先 · 个人时间追踪'**
+  String get settingsAboutTagline;
+
+  /// No description provided for @settingsAboutVersion.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前版本'**
+  String get settingsAboutVersion;
+
+  /// No description provided for @settingsAboutOpenSource.
+  ///
+  /// In zh, this message translates to:
+  /// **'开源信息'**
+  String get settingsAboutOpenSource;
+
+  /// No description provided for @settingsAboutOpenSourceHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'本项目基于 MIT License 开源，欢迎参与贡献'**
+  String get settingsAboutOpenSourceHint;
+
+  /// No description provided for @settingsAboutLicense.
+  ///
+  /// In zh, this message translates to:
+  /// **'许可'**
+  String get settingsAboutLicense;
+
+  /// No description provided for @settingsAboutLicenseHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'MIT License · 含第三方依赖许可'**
+  String get settingsAboutLicenseHint;
+
+  /// No description provided for @settingsAboutCheckUpdate.
+  ///
+  /// In zh, this message translates to:
+  /// **'检查更新'**
+  String get settingsAboutCheckUpdate;
+
+  /// No description provided for @settingsInstantHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'所有设置即时生效并自动保存，更改后相关页面即时一致。'**
+  String get settingsInstantHint;
 }
 
 class _AppLocalizationsDelegate

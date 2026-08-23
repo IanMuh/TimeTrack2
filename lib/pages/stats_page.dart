@@ -47,7 +47,10 @@ class _StatsPageState extends State<StatsPage> {
   (DateTime, DateTime) get _range {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
-    final weekDay = today.weekday - 1; // 周一始
+    // 周始随用户偏好（ISO：1=周一…7=周日；Dart % 恒非负，周日始=7 时
+    // (weekday-7)%7 ∈ 0..6 正确回退）。默认周一。
+    final weekStart = app.settings.current?.weekStartDay ?? 1;
+    final weekDay = (today.weekday - weekStart) % 7;
     switch (_rangeIndex) {
       case 0:
         return (today, today.add(const Duration(days: 1)));

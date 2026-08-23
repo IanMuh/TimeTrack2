@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../l10n/app_localizations.dart';
+import '../utils/time_format.dart';
 import '../viewmodels/time_entry.dart';
 import 'controls.dart' show AppToggle;
 import 'feedback.dart';
@@ -48,6 +49,7 @@ Future<void> showEntryEditorDialog(
   Future<bool> Function(String entryId, String direction)? onMerge,
   Future<bool> Function(String entryId, DateTime at)? onSplit,
   Future<bool> Function(String entryId)? onExtendToNow,
+  bool use24 = true,
 }) {
   return showDialog<void>(
     context: context,
@@ -63,12 +65,14 @@ Future<void> showEntryEditorDialog(
       onMerge: onMerge,
       onSplit: onSplit,
       onExtendToNow: onExtendToNow,
+      use24: use24,
     ),
   );
 }
 
 class _EntryEditorDialog extends StatefulWidget {
   const _EntryEditorDialog({
+    this.use24 = true,
     required this.entry,
     required this.currentActivityId,
     required this.currentActivityName,
@@ -83,6 +87,9 @@ class _EntryEditorDialog extends StatefulWidget {
   });
 
   final TimeEntry? entry;
+
+  /// 24 小时制（用户偏好，时刻字段显示形态）。
+  final bool use24;
   final String? currentActivityId;
   final String currentActivityName;
   final int currentActivityColor;
@@ -267,6 +274,7 @@ class _EntryEditorDialogState extends State<_EntryEditorDialog> {
                     child: _DateTimeField(
                       label: l10n.entryStartAt,
                       value: _start,
+                      use24: widget.use24,
                       onChanged: (v) => setState(() => _start = v),
                     ),
                   ),
@@ -407,6 +415,7 @@ class _EntryEditorDialogState extends State<_EntryEditorDialog> {
 /// 日期+时间组合输入（简化：日期 showDatePicker + 时间 showTimePicker）。
 class _DateTimeField extends StatelessWidget {
   const _DateTimeField({
+    this.use24 = true,
     required this.label,
     required this.value,
     required this.onChanged,
@@ -417,6 +426,9 @@ class _DateTimeField extends StatelessWidget {
   final DateTime value;
   final ValueChanged<DateTime> onChanged;
   final bool enabled;
+
+  /// 24 小时制（显示形态）。
+  final bool use24;
 
   @override
   Widget build(BuildContext context) {
@@ -429,8 +441,7 @@ class _DateTimeField extends StatelessWidget {
         ),
         child: Text(
           '${value.month}/${value.day} '
-          '${value.hour.toString().padLeft(2, '0')}:'
-          '${value.minute.toString().padLeft(2, '0')}',
+          '${formatClockOf(value, use24: use24)}',
           style: TextStyle(
             fontSize: 13,
             color: enabled ? null : Theme.of(context).disabledColor,

@@ -47,7 +47,7 @@ class TrackingStore extends ChangeNotifier {
     this.pollInterval = const Duration(seconds: 5),
     DateTime Function()? now,
     this.trackingEnabled,
-  })  : detector = detector ?? _NoopDetector(),
+  })  : detector = detector ?? NoopForegroundDetector(),
         _now = now ?? DateTime.now {
     clock.addListener(_onTick);
   }
@@ -234,8 +234,9 @@ class TrackingStore extends ChangeNotifier {
   }
 }
 
-/// 无平台实现时的空检测器（阶段 4 前自动记录不动作）。
-class _NoopDetector implements ForegroundDetector {
+/// 无平台实现时的空检测器（阶段 4 前自动记录不动作；公开类供 UI 判定
+/// "检测器是否已接平台层"——批次 6 FFI 接入后装配真实实现）。
+class NoopForegroundDetector implements ForegroundDetector {
   @override
   String? get processName => null;
   @override

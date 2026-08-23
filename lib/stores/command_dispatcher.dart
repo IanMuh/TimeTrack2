@@ -231,11 +231,18 @@ class CommandDispatcher {
         if (kind == TrackingRuleMatchKind.unknown) {
           return const CommandFailure('非法匹配类型：--kind=process|title');
         }
+        // --sync 可选（批次 4）：未提供默认 true（规则默认进云同步，契约
+        // §9.6）；提供时校验取值（与 update 分支同款严格性）。
+        final syncRaw = invocation.options['sync'];
+        if (syncRaw != null && syncRaw != 'true' && syncRaw != 'false') {
+          return const CommandFailure('非法同步开关值：--sync=true|false');
+        }
         final rule = TrackingRule(
           id: const Uuid().v4(),
           pattern: invocation.args.first,
           matchKind: kind,
           activityId: resolvedRule.id!,
+          syncEnabled: syncRaw == null ? true : syncRaw == 'true',
           updatedAt: DateTime.now(),
         );
         final result = await tracking.saveRule(rule);
@@ -254,11 +261,16 @@ class CommandDispatcher {
           }
           kindRaw = parsedKind.storageValue;
         }
-        // --sync 布尔取值校验（与 --direction 取值校验一致）：非法值明确
-        // 报错，不静默回退（静默回退会让用户"看似成功实则未生效"）。
+        // --sync / --enabled 布尔取值校验（与 --direction 取值校验一致）：
+        // 非法值明确报错，不静默回退（静默回退会让用户"看似成功实则未生效"）。
         final syncRaw = invocation.options['sync'];
         if (syncRaw != null && syncRaw != 'true' && syncRaw != 'false') {
           return const CommandFailure('非法同步开关值：--sync=true|false');
+        }
+        // --enabled（批次 4 schema v3）：规则启停，false = 保留不匹配。
+        final enabledRaw = invocation.options['enabled'];
+        if (enabledRaw != null && enabledRaw != 'true' && enabledRaw != 'false') {
+          return const CommandFailure('非法启停开关值：--enabled=true|false');
         }
         String? activityId;
         final activityName = invocation.options['activity'];
@@ -278,6 +290,7 @@ class CommandDispatcher {
           syncEnabled: syncRaw == null
               ? existing.syncEnabled
               : syncRaw == 'true',
+          enabled: enabledRaw == null ? existing.enabled : enabledRaw == 'true',
           updatedAt: DateTime.now(),
         );
         final result = await tracking.saveRule(updated);

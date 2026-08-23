@@ -154,7 +154,7 @@ final List<CommandDefinition> commandDefinitions = [
     aliases: ['新建映射规则'],
     minPositionalArgs: 1,
     maxPositionalArgs: 1,
-    allowedOptions: {'kind', 'activity'},
+    allowedOptions: {'kind', 'activity', 'sync'},
     requiredOptions: {'kind', 'activity'},
     description:
         '新建映射规则：tracking_rule_create <pattern> --kind=process|title --activity=<活动名>',
@@ -164,7 +164,7 @@ final List<CommandDefinition> commandDefinitions = [
     aliases: ['修改映射规则'],
     minPositionalArgs: 1,
     maxPositionalArgs: 1,
-    allowedOptions: {'kind', 'pattern', 'activity', 'sync'},
+    allowedOptions: {'kind', 'pattern', 'activity', 'sync', 'enabled'},
     description:
         '修改映射规则：tracking_rule_update <id> [--kind=...] [--pattern=...] [--activity=...] [--sync=true|false]',
   ),

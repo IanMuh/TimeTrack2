@@ -1360,4 +1360,623 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get stPickEnd => 'Pick end date';
+
+  @override
+  String get settingsSecGeneral => 'General';
+
+  @override
+  String get settingsSecGeneralSub =>
+      'Appearance, time display and global defaults';
+
+  @override
+  String get settingsSecBackup => 'Backup & export';
+
+  @override
+  String get settingsSecBackupSub =>
+      'The only channel for data migration and new-device restore';
+
+  @override
+  String get settingsSecReminder => 'Reminders';
+
+  @override
+  String get settingsSecReminderSub => 'When to remind, how often, and how';
+
+  @override
+  String get settingsSecTimeline => 'Timeline';
+
+  @override
+  String get settingsSecTimelineSub => 'Merge threshold for adjacent entries';
+
+  @override
+  String get settingsSecSync => 'Cloud sync';
+
+  @override
+  String get settingsSecSyncSub =>
+      'Two-way sync across devices, local-first and async';
+
+  @override
+  String get settingsSecAi => 'AI settings';
+
+  @override
+  String get settingsSecAiSub =>
+      'Summaries and natural-language logging (phase 2)';
+
+  @override
+  String get settingsAiBadge => 'Phase 2';
+
+  @override
+  String get settingsSecBackground => 'Background tracking';
+
+  @override
+  String get settingsSecBackgroundSub =>
+      'Auto track by rules; auto entries are tagged and excludable';
+
+  @override
+  String get settingsSecDevice => 'Device interop';
+
+  @override
+  String get settingsSecDeviceSub => 'Sync and file exchange within your LAN';
+
+  @override
+  String get settingsSecUpdate => 'Updates';
+
+  @override
+  String get settingsSecUpdateSub =>
+      'Install only after checksum passes · degrade on failure · forced updates cannot be skipped';
+
+  @override
+  String get settingsSecAbout => 'About';
+
+  @override
+  String get settingsSecAboutSub => 'Version, open-source info and licenses';
+
+  @override
+  String get settingsAppearance => 'Appearance';
+
+  @override
+  String get settingsAppearanceHint =>
+      'Light by default, dark or follow-system available';
+
+  @override
+  String get settingsThemeLight => 'Light';
+
+  @override
+  String get settingsThemeDark => 'Dark';
+
+  @override
+  String get settingsThemeSystem => 'Follow system';
+
+  @override
+  String get settingsWeekStart => 'Week starts on';
+
+  @override
+  String get settingsWeekStartHint =>
+      'Where the Stats page \"this week\" begins';
+
+  @override
+  String get settingsWeekMonday => 'Monday';
+
+  @override
+  String get settingsWeekSunday => 'Sunday';
+
+  @override
+  String get settingsWeekSaturday => 'Saturday';
+
+  @override
+  String get settingsTimeFormat => 'Time format';
+
+  @override
+  String get settingsTimeFormatHint =>
+      'Display format for timeline entries and timer';
+
+  @override
+  String get settingsHour12 => '12-hour';
+
+  @override
+  String get settingsHour24 => '24-hour';
+
+  @override
+  String get settingsDefaultDuration => 'Default duration';
+
+  @override
+  String get settingsDefaultDurationHint =>
+      'Default length for quick starts like one-off activities';
+
+  @override
+  String get settingsQuickReminder => 'Quick reminder';
+
+  @override
+  String get settingsQuickReminderHint =>
+      'Remind to start tracking at the trigger time (see Reminders)';
+
+  @override
+  String settingsMinutesShort(int minutes) {
+    return '$minutes min';
+  }
+
+  @override
+  String get settingsTriggerTime => 'Trigger time';
+
+  @override
+  String get settingsTriggerTimeHint =>
+      'Remind to start tracking daily at this time';
+
+  @override
+  String get settingsDurationThreshold => 'Duration threshold';
+
+  @override
+  String get settingsDurationThresholdHint =>
+      'Remind once a session runs this long';
+
+  @override
+  String get settingsRepeatInterval => 'Repeat interval';
+
+  @override
+  String get settingsRepeatIntervalHint =>
+      'Re-remind at this interval until the session ends';
+
+  @override
+  String get settingsReminderMethod => 'Reminder style';
+
+  @override
+  String get settingsMethodDialog => 'Dialog';
+
+  @override
+  String get settingsMethodDialogDesc => 'Decision';
+
+  @override
+  String get settingsMethodBanner => 'Banner';
+
+  @override
+  String get settingsMethodBannerDesc => 'Subtle';
+
+  @override
+  String get settingsMethodSilent => 'Silent';
+
+  @override
+  String get settingsMethodSilentDesc => 'Nodisturb';
+
+  @override
+  String get settingsMergeThreshold => 'Adjacent merge threshold';
+
+  @override
+  String get settingsMergeThresholdHint =>
+      'Auto-merge when the gap is below this threshold';
+
+  @override
+  String get settingsUnassignedNote =>
+      'There is exactly one \"Unassigned\" activity. Adjacent unassigned entries on the timeline merge into one continuous record when the gap is below this threshold.';
+
+  @override
+  String get settingsExport => 'Export backup';
+
+  @override
+  String get settingsExportHint =>
+      'Export everything to a single .timetrack.json file';
+
+  @override
+  String get settingsExportBtn => 'Export';
+
+  @override
+  String get settingsImport => 'Import data';
+
+  @override
+  String get settingsImportHint =>
+      'Restore from .timetrack.json; imported data merges with existing';
+
+  @override
+  String get settingsImportBtn => 'Import';
+
+  @override
+  String get settingsDangerTitle => 'Erase all data';
+
+  @override
+  String get settingsDangerMessage =>
+      'Permanently deletes all local entries, activities and settings. Export a backup first — this cannot be undone.';
+
+  @override
+  String get settingsDangerBtn => 'Erase all data';
+
+  @override
+  String get settingsWipeDialogTitle => 'Erase all data';
+
+  @override
+  String get settingsWipeDialogBody =>
+      'This permanently deletes all entries, activities and settings and cannot be undone. Export a backup first to avoid data loss.';
+
+  @override
+  String get settingsWipeCancel => 'Cancel';
+
+  @override
+  String get settingsWipeExportFirst => 'Export first';
+
+  @override
+  String get settingsWipeConfirm => 'Erase anyway';
+
+  @override
+  String get settingsWipeDone => 'All data erased';
+
+  @override
+  String get settingsWipeFailed => 'Erase failed';
+
+  @override
+  String settingsExportDone(String path) {
+    return 'Exported to $path';
+  }
+
+  @override
+  String settingsImportDone(int count) {
+    return 'Imported $count records';
+  }
+
+  @override
+  String settingsOpFailed(String message) {
+    return 'Operation failed: $message';
+  }
+
+  @override
+  String get settingsSyncConfigured => 'Supabase configured';
+
+  @override
+  String get settingsSyncNotConfigured => 'Cloud service not configured';
+
+  @override
+  String get settingsSyncNotConfiguredHint =>
+      'SUPABASE_URL was not injected at build time; the app runs offline';
+
+  @override
+  String get settingsSyncOnline => 'Online';
+
+  @override
+  String get settingsSyncOffline => 'Offline';
+
+  @override
+  String settingsSyncLoggedInAs(String email) {
+    return 'Signed in as $email';
+  }
+
+  @override
+  String get settingsSyncNotLoggedIn => 'Not signed in';
+
+  @override
+  String get settingsSyncLastAt => 'Last sync';
+
+  @override
+  String get settingsSyncJustNow => 'Just now';
+
+  @override
+  String get settingsSyncNever => 'Never';
+
+  @override
+  String settingsSyncPulled(int count) {
+    return 'Pulled $count';
+  }
+
+  @override
+  String settingsSyncPushed(int count) {
+    return 'Pushed $count';
+  }
+
+  @override
+  String get settingsSyncNow => 'Sync now';
+
+  @override
+  String get settingsSyncSignOut => 'Sign out';
+
+  @override
+  String get settingsLoginTitle => 'Sign in';
+
+  @override
+  String get settingsLoginSubtitle =>
+      'Enter your email and verify with a code to sync to the cloud';
+
+  @override
+  String get settingsLoginEmail => 'Email';
+
+  @override
+  String get settingsLoginSendCode => 'Send code';
+
+  @override
+  String get settingsLoginSending => 'Sending…';
+
+  @override
+  String get settingsLoginCodeSent => 'Code sent, check your inbox';
+
+  @override
+  String get settingsLoginCode => '6-digit code';
+
+  @override
+  String get settingsLoginVerify => 'Verify and sign in';
+
+  @override
+  String get settingsLoginVerifying => 'Signing in…';
+
+  @override
+  String settingsLoginFailed(String message) {
+    return 'Sign-in failed: $message';
+  }
+
+  @override
+  String get settingsLoginCancel => 'Cancel';
+
+  @override
+  String get settingsSignedOut => 'Signed out';
+
+  @override
+  String settingsSyncFailed(String message) {
+    return 'Sync failed: $message';
+  }
+
+  @override
+  String get settingsAiPhase2Note =>
+      'AI settings arrive in phase 2: API key (secure storage), OpenAI-compatible endpoint/model, test connection and data-transfer disclosure. The Stats page already has a phase-2 entry placeholder.';
+
+  @override
+  String get settingsBgWindowsTitle => 'Windows · background resident';
+
+  @override
+  String get settingsBgWindowsBody =>
+      'Closing the window minimizes to tray by default; tray menu offers show/pause/quit.';
+
+  @override
+  String settingsBgDetectorState(String state) {
+    return 'Detector: $state';
+  }
+
+  @override
+  String get settingsBgDetectorRunning => 'running';
+
+  @override
+  String get settingsBgDetectorPending => 'pending platform layer (batch 6)';
+
+  @override
+  String settingsBgLastMatch(String note) {
+    return 'Last match: $note';
+  }
+
+  @override
+  String get settingsBgMasterSwitch => 'Background auto tracking';
+
+  @override
+  String get settingsBgMasterHint =>
+      'Track automatically by rules; no entry when nothing matches';
+
+  @override
+  String get settingsBgRules => 'Rules';
+
+  @override
+  String settingsBgRulesCount(int count) {
+    return 'Pattern → activity · $count rules';
+  }
+
+  @override
+  String get settingsBgNewRule => 'New rule';
+
+  @override
+  String get settingsBgEmptyRules =>
+      'No rules yet. Create one to auto-track matching processes or window titles.';
+
+  @override
+  String get settingsBgKindProcess => 'Process name';
+
+  @override
+  String get settingsBgKindTitle => 'Window title';
+
+  @override
+  String get settingsBgSyncToggle => 'Cloud sync';
+
+  @override
+  String get settingsBgEnabledToggle => 'Enabled';
+
+  @override
+  String get settingsBgEdit => 'Edit rule';
+
+  @override
+  String get settingsBgDelete => 'Delete rule';
+
+  @override
+  String get settingsBgRuleFormTitleNew => 'New rule';
+
+  @override
+  String get settingsBgRuleFormTitleEdit => 'Edit rule';
+
+  @override
+  String get settingsBgPattern => 'Pattern';
+
+  @override
+  String get settingsBgPatternHint =>
+      'Process name (e.g. code.exe) or title pattern (e.g. *code*)';
+
+  @override
+  String get settingsBgMatchKind => 'Match type';
+
+  @override
+  String get settingsBgTargetActivity => 'Target activity';
+
+  @override
+  String get settingsBgPickActivity => 'Open activity picker';
+
+  @override
+  String get settingsBgSyncThisRule => 'Sync this rule';
+
+  @override
+  String get settingsBgPriorityNote =>
+      'Priority: exact > wildcard > title. Avoid overly broad patterns to reduce mismatches.';
+
+  @override
+  String get settingsBgSave => 'Save';
+
+  @override
+  String get settingsBgCancel => 'Cancel';
+
+  @override
+  String get settingsBgRuleSaved => 'Rule saved';
+
+  @override
+  String get settingsBgRuleDeleted => 'Rule deleted';
+
+  @override
+  String get settingsBgFormInvalid =>
+      'Enter a pattern and choose a target activity';
+
+  @override
+  String get settingsLanHost => 'LAN host';
+
+  @override
+  String get settingsLanHostHint =>
+      'Let other devices on the LAN connect and sync with a pairing code';
+
+  @override
+  String get settingsLanStart => 'Start host';
+
+  @override
+  String get settingsLanStop => 'Stop';
+
+  @override
+  String get settingsLanRunning => 'Running';
+
+  @override
+  String get settingsLanStopped => 'Stopped';
+
+  @override
+  String get settingsLanPort => 'Port';
+
+  @override
+  String get settingsLanPairingCode => 'Pairing code';
+
+  @override
+  String get settingsLanCodeOnce =>
+      'Codes are single-use; regenerate after use or expiry';
+
+  @override
+  String get settingsLanClient => 'LAN client';
+
+  @override
+  String get settingsLanClientHint =>
+      'Connect to a host started on another device';
+
+  @override
+  String get settingsLanHostInput =>
+      'Host address (e.g. 192.168.1.5 or 192.168.1.5:8787)';
+
+  @override
+  String get settingsLanCodeInput => '6-digit code';
+
+  @override
+  String get settingsLanPair => 'Pair';
+
+  @override
+  String settingsLanPairedAs(String name) {
+    return 'Paired with $name';
+  }
+
+  @override
+  String get settingsLanSyncNow => 'Sync now';
+
+  @override
+  String get settingsLanManualOnly =>
+      'The host starts manually only; there is no auto-start path.';
+
+  @override
+  String get settingsLanFileInterop => 'File exchange';
+
+  @override
+  String get settingsLanFileInteropHint =>
+      'Move data between devices manually via .timetrack.json';
+
+  @override
+  String get settingsUpdateCurrent => 'Current version';
+
+  @override
+  String get settingsUpdateLatest => 'Latest version';
+
+  @override
+  String get settingsUpdateState => 'Status';
+
+  @override
+  String get settingsUpdateCheck => 'Check for updates';
+
+  @override
+  String get settingsUpdateChecking => 'Checking for updates…';
+
+  @override
+  String get settingsUpdateUpToDate => 'Up to date';
+
+  @override
+  String get settingsUpdateAvailable => 'Update available';
+
+  @override
+  String get settingsUpdateDownload => 'Download';
+
+  @override
+  String get settingsUpdateDownloading => 'Downloading…';
+
+  @override
+  String get settingsUpdateVerifying => 'Verifying SHA-256…';
+
+  @override
+  String get settingsUpdateInstalling => 'Installing…';
+
+  @override
+  String get settingsUpdateRestartRequired => 'Restart required';
+
+  @override
+  String get settingsUpdateRestartBody =>
+      'Installed. It takes effect on next launch';
+
+  @override
+  String get settingsUpdateRestartNow => 'Restart now';
+
+  @override
+  String get settingsUpdateFailed => 'Update failed';
+
+  @override
+  String get settingsUpdateIgnoreVersion => 'Ignore this version';
+
+  @override
+  String get settingsUpdateLater => 'Remind later';
+
+  @override
+  String get settingsUpdateInstallNote =>
+      'Install differs by platform: Windows prompts \"restart to apply\" after checksum passes; Android launches the system installer and guides to settings when unknown-app installs are not allowed.';
+
+  @override
+  String get settingsUpdateVerifyNote =>
+      'SHA-256 is verified after download; install only when it matches';
+
+  @override
+  String get settingsUpdateNoArtifact => 'No update package for this platform';
+
+  @override
+  String get settingsUpdateIgnoredDone => 'Version ignored';
+
+  @override
+  String get settingsUpdateIdle => 'Ready';
+
+  @override
+  String get settingsAboutTagline => 'Offline-first · personal time tracking';
+
+  @override
+  String get settingsAboutVersion => 'Current version';
+
+  @override
+  String get settingsAboutOpenSource => 'Open source';
+
+  @override
+  String get settingsAboutOpenSourceHint =>
+      'MIT Licensed. Contributions welcome';
+
+  @override
+  String get settingsAboutLicense => 'License';
+
+  @override
+  String get settingsAboutLicenseHint =>
+      'MIT License · third-party licenses included';
+
+  @override
+  String get settingsAboutCheckUpdate => 'Check for updates';
+
+  @override
+  String get settingsInstantHint =>
+      'All settings apply instantly and persist; pages stay consistent after changes.';
 }

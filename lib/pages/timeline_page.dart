@@ -35,6 +35,9 @@ class TimelinePage extends StatefulWidget {
 
 class _TimelinePageState extends State<TimelinePage> {
   AppStore get app => widget.app;
+
+  /// 时制偏好（设置即时生效——settings 监听驱动重建）。
+  bool get _use24 => app.settings.current?.use24HourFormat ?? true;
   AppLocalizations get l10n => AppLocalizations.of(context)!;
 
   static const _spans = [1, 3, 7]; // 今天/三天/本周（天）
@@ -73,11 +76,14 @@ class _TimelinePageState extends State<TimelinePage> {
     app.timeline.addListener(_onChange);
     app.clock.addListener(_onChange);
     app.dataRevision.addListener(_onChange);
+    // 时制等偏好变更即时一致（不变式 7）：设置保存后 SettingsStore notify。
+    app.settings.addListener(_onChange);
   }
 
   @override
   void dispose() {
     _disposed = true;
+    app.settings.removeListener(_onChange);
     app.timeline.removeListener(_onChange);
     app.clock.removeListener(_onChange);
     app.dataRevision.removeListener(_onChange);
@@ -194,6 +200,7 @@ class _TimelinePageState extends State<TimelinePage> {
         : (_activityById(entry.activityId) ?? _activities.first);
     await showEntryEditorDialog(
       context,
+      use24: _use24,
       entry: entry,
       currentActivityId: selected.id,
       currentActivityName: selected.name,
@@ -437,6 +444,7 @@ class _TimelinePageState extends State<TimelinePage> {
       const SizedBox(height: 12),
       if (_axisTab == 0)
         TlVerticalTimeline(
+          use24: _use24,
           entries: _entries,
           unassignedActivityId: _unassignedId,
           now: DateTime.now(),
@@ -509,6 +517,7 @@ class _TimelinePageState extends State<TimelinePage> {
           children: [
             for (final e in _entries)
               TlEntryListRow(
+                use24: _use24,
                 entry: e,
                 now: DateTime.now(),
                 onTap: () => _openEditor(entry: e),

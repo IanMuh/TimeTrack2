@@ -51,6 +51,7 @@ class _TestHarness {
       detector: detector,
       pollInterval: const Duration(seconds: 5), // 显式传（防隐式默认耦合）
       now: () => _fixedNow,
+      trackingEnabled: () => gateEnabled,
     );
   }
 
@@ -66,6 +67,9 @@ class _TestHarness {
   late final TimerStore timer;
   late final _FakeDetector detector;
   late final TrackingStore tracking;
+
+  /// 总开关（批次 4）：false 时 poll 前置闸门拦截。
+  bool gateEnabled = true;
 
   DateTime _fixedNow = DateTime(2026, 8, 14, 12);
 
@@ -271,6 +275,56 @@ void main() {
       expect(h.revision.value, before + 1); // 规则变更 bump
       await h.tracking.deleteRule(saved);
       expect(h.revision.value, before + 2);
+    });
+
+    test('总开关关闭：命中规则也不切换（批次 4 闸门）', () async {
+      final h = _TestHarness();
+      addTearDown(h.close);
+      final a =
+          (await h.activities.createActivity(name: 'A', color: 0)).requireValue();
+      await h.seedRule(process: 'chrome.exe', activityId: a.id);
+      h.gateEnabled = false; // 设置页后台记录总开关关闭
+
+      h.detector.processName = 'chrome.exe';
+      await h.tracking.poll();
+      final running = await h.entries.runningEntry();
+      expect(running, isNull, reason: '总开关关闭时不产生自动切换');
+    });
+
+    test('停用规则（enabled=false）不参与匹配（schema v3）', () async {
+      final h = _TestHarness();
+      addTearDown(h.close);
+      final a =
+          (await h.activities.createActivity(name: 'A', color: 0)).requireValue();
+      final b =
+          (await h.activities.createActivity(name: 'B', color: 1)).requireValue();
+      final disabled = await h.seedRule(process: 'chrome.exe', activityId: a.id);
+      await h.rules.saveRule(disabled.copyWith(enabled: false));
+      await h.seedRule(process: 'chrome.exe', activityId: b.id);
+
+      h.detector.processName = 'chrome.exe';
+      await h.tracking.poll();
+      final running = await h.entries.runningEntry();
+      expect(running?.activityId, b.id,
+          reason: '停用规则跳过，后续规则继续命中');
+    });
+
+    test('reloadRules/ruleList：CRUD 后列表自动刷新', () async {
+      final h = _TestHarness();
+      addTearDown(h.close);
+      final a =
+          (await h.activities.createActivity(name: 'A', color: 0)).requireValue();
+      expect(h.tracking.ruleList, isEmpty);
+      await h.tracking.saveRule(TrackingRule(
+        id: 'r-x',
+        pattern: 'code.exe',
+        matchKind: TrackingRuleMatchKind.process,
+        activityId: a.id,
+        updatedAt: DateTime(2026, 8, 14),
+      ));
+      expect(h.tracking.ruleList, hasLength(1), reason: 'saveRule 后自动 reload');
+      await h.tracking.deleteRule(h.tracking.ruleList.first);
+      expect(h.tracking.ruleList, isEmpty, reason: 'deleteRule 后自动 reload');
     });
   });
 }

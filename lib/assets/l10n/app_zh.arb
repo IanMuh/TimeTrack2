@@ -428,5 +428,280 @@
   "stBucketXl": "3 时以上",
   "stCountShort": "{n} 次",
   "stPickStart": "选择开始日期",
-  "stPickEnd": "选择结束日期"
+  "stPickEnd": "选择结束日期",
+  "settingsSecGeneral": "通用",
+  "settingsSecGeneralSub": "外观、时间显示与全局默认值",
+  "settingsSecBackup": "备份与导出",
+  "settingsSecBackupSub": "数据迁移与新设备恢复的唯一通道",
+  "settingsSecReminder": "提醒",
+  "settingsSecReminderSub": "何时提醒、多久一次、用什么方式",
+  "settingsSecTimeline": "时间线",
+  "settingsSecTimelineSub": "相邻条目自动合并的判定阈值",
+  "settingsSecSync": "云同步",
+  "settingsSecSyncSub": "多设备数据双向同步，本地优先、异步进行",
+  "settingsSecAi": "AI 配置",
+  "settingsSecAiSub": "总结与自然语言记录（一期仅预留入口位）",
+  "settingsAiBadge": "二期",
+  "settingsSecBackground": "后台记录",
+  "settingsSecBackgroundSub": "按规则自动计时；自动条目带「自动」标识，可识别、可排除",
+  "settingsSecDevice": "设备互通",
+  "settingsSecDeviceSub": "同一局域网内的设备间同步与文件互通",
+  "settingsSecUpdate": "版本更新",
+  "settingsSecUpdateSub": "下载校验一致才安装 · 失败逐层降级 · 强制更新不可跳过",
+  "settingsSecAbout": "关于",
+  "settingsSecAboutSub": "版本、开源信息与许可",
+  "settingsAppearance": "外观",
+  "settingsAppearanceHint": "默认浅色，可切深色或跟随系统",
+  "settingsThemeLight": "浅色",
+  "settingsThemeDark": "深色",
+  "settingsThemeSystem": "跟随系统",
+  "settingsWeekStart": "每周起始日",
+  "settingsWeekStartHint": "统计页「本周」从哪天开始",
+  "settingsWeekMonday": "周一",
+  "settingsWeekSunday": "周日",
+  "settingsWeekSaturday": "周六",
+  "settingsTimeFormat": "时间格式",
+  "settingsTimeFormatHint": "时间线条目与计时的显示格式",
+  "settingsHour12": "12 小时",
+  "settingsHour24": "24 小时",
+  "settingsDefaultDuration": "默认记录时长",
+  "settingsDefaultDurationHint": "「临时活动」等快捷启动的默认时长",
+  "settingsQuickReminder": "快速提醒",
+  "settingsQuickReminderHint": "到触发时刻提醒开始记录（见「提醒」分区）",
+  "settingsMinutesShort": "{minutes} 分钟",
+  "@settingsMinutesShort": {
+    "placeholders": {
+      "minutes": {
+        "type": "int"
+      }
+    }
+  },
+  "settingsTriggerTime": "触发时刻",
+  "settingsTriggerTimeHint": "每日到设定时间后提醒开始记录",
+  "settingsDurationThreshold": "持续时长阈值",
+  "settingsDurationThresholdHint": "会话运行达到该时长后触发提醒",
+  "settingsRepeatInterval": "重复间隔",
+  "settingsRepeatIntervalHint": "提醒后每隔该时长再次提醒，直到手动结束会话",
+  "settingsReminderMethod": "提醒方式",
+  "settingsMethodDialog": "对话框",
+  "settingsMethodDialogDesc": "需决策",
+  "settingsMethodBanner": "横幅",
+  "settingsMethodBannerDesc": "轻打扰",
+  "settingsMethodSilent": "静音",
+  "settingsMethodSilentDesc": "不打扰",
+  "settingsMergeThreshold": "相邻条目合并阈值",
+  "settingsMergeThresholdHint": "间隔小于该阈值时自动合并",
+  "settingsUnassignedNote": "系统有且仅有一个「未分配」活动。时间线上与它相邻的未分配条目，在间隔小于该阈值时会自动合并为一条连续记录，避免碎片化。",
+  "settingsExport": "导出备份",
+  "settingsExportHint": "导出为 .timetrack.json 单个文件，包含全部时间条目、活动与设置",
+  "settingsExportBtn": "导出",
+  "settingsImport": "导入数据",
+  "settingsImportHint": "从 .timetrack.json 恢复，导入的数据将与现有数据合并",
+  "settingsImportBtn": "导入",
+  "settingsDangerTitle": "清除全部数据",
+  "settingsDangerMessage": "永久删除本机全部时间条目、活动与设置，且不可撤销。执行前必须先导出备份。",
+  "settingsDangerBtn": "清除全部数据",
+  "settingsWipeDialogTitle": "清除全部数据",
+  "settingsWipeDialogBody": "此操作将永久删除全部时间条目、活动与设置，无法撤销。清除前请先导出备份，以免数据丢失。",
+  "settingsWipeCancel": "取消",
+  "settingsWipeExportFirst": "先导出备份",
+  "settingsWipeConfirm": "仍然清除",
+  "settingsWipeDone": "已清除全部数据",
+  "settingsWipeFailed": "清除失败",
+  "settingsExportDone": "已导出到 {path}",
+  "@settingsExportDone": {
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsImportDone": "已导入 {count} 条记录",
+  "@settingsImportDone": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "settingsOpFailed": "操作失败：{message}",
+  "@settingsOpFailed": {
+    "placeholders": {
+      "message": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsSyncConfigured": "已配置 Supabase",
+  "settingsSyncNotConfigured": "未配置云服务",
+  "settingsSyncNotConfiguredHint": "编译期未注入 SUPABASE_URL，应用以离线模式运行",
+  "settingsSyncOnline": "在线",
+  "settingsSyncOffline": "离线",
+  "settingsSyncLoggedInAs": "已登录 {email}",
+  "@settingsSyncLoggedInAs": {
+    "placeholders": {
+      "email": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsSyncNotLoggedIn": "未登录",
+  "settingsSyncLastAt": "上次同步",
+  "settingsSyncJustNow": "刚刚",
+  "settingsSyncNever": "从未",
+  "settingsSyncPulled": "拉取 {count} 条",
+  "@settingsSyncPulled": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "settingsSyncPushed": "推送 {count} 条",
+  "@settingsSyncPushed": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "settingsSyncNow": "立即同步",
+  "settingsSyncSignOut": "登出",
+  "settingsLoginTitle": "登录",
+  "settingsLoginSubtitle": "输入邮箱，通过验证码登录以同步数据到云端",
+  "settingsLoginEmail": "邮箱",
+  "settingsLoginSendCode": "发送验证码",
+  "settingsLoginSending": "发送中…",
+  "settingsLoginCodeSent": "验证码已发送，请查收邮箱",
+  "settingsLoginCode": "6 位验证码",
+  "settingsLoginVerify": "验证并登录",
+  "settingsLoginVerifying": "登录中…",
+  "settingsLoginFailed": "登录失败：{message}",
+  "@settingsLoginFailed": {
+    "placeholders": {
+      "message": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsLoginCancel": "取消",
+  "settingsSignedOut": "已登出",
+  "settingsSyncFailed": "同步失败：{message}",
+  "@settingsSyncFailed": {
+    "placeholders": {
+      "message": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsAiPhase2Note": "AI 配置将在二期开放：API 密钥（安全存储）、OpenAI 兼容端点/模型、测试连接与数据出境披露。一期统计页已预留 AI 入口引导。",
+  "settingsBgWindowsTitle": "Windows 版 · 后台驻留",
+  "settingsBgWindowsBody": "关闭主窗口时默认最小化到系统托盘；托盘右键菜单可显示主窗口、暂停记录或退出。",
+  "settingsBgDetectorState": "检测状态：{state}",
+  "@settingsBgDetectorState": {
+    "placeholders": {
+      "state": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsBgDetectorRunning": "运行中",
+  "settingsBgDetectorPending": "待平台层接入（批次 6）",
+  "settingsBgLastMatch": "最近命中：{note}",
+  "@settingsBgLastMatch": {
+    "placeholders": {
+      "note": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsBgMasterSwitch": "后台自动记录",
+  "settingsBgMasterHint": "按规则自动计时；未匹配任何规则时不产生条目",
+  "settingsBgRules": "规则",
+  "settingsBgRulesCount": "匹配模式 → 目标活动 · 共 {count} 条规则",
+  "@settingsBgRulesCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "settingsBgNewRule": "新建规则",
+  "settingsBgEmptyRules": "暂无规则。新建规则后，匹配到对应进程或窗口标题时会自动开始计时。",
+  "settingsBgKindProcess": "进程名",
+  "settingsBgKindTitle": "窗口标题",
+  "settingsBgSyncToggle": "云同步",
+  "settingsBgEnabledToggle": "启用",
+  "settingsBgEdit": "编辑规则",
+  "settingsBgDelete": "删除规则",
+  "settingsBgRuleFormTitleNew": "新建规则",
+  "settingsBgRuleFormTitleEdit": "编辑规则",
+  "settingsBgPattern": "匹配模式",
+  "settingsBgPatternHint": "进程名（如 code.exe）或标题模式（如 *微信*）",
+  "settingsBgMatchKind": "匹配类型",
+  "settingsBgTargetActivity": "目标活动",
+  "settingsBgPickActivity": "打开活动选择器",
+  "settingsBgSyncThisRule": "云同步此规则",
+  "settingsBgPriorityNote": "匹配优先级：精确 > 通配 > 标题。请避免过宽的匹配模式以减少误匹配。",
+  "settingsBgSave": "保存",
+  "settingsBgCancel": "取消",
+  "settingsBgRuleSaved": "规则已保存",
+  "settingsBgRuleDeleted": "规则已删除",
+  "settingsBgFormInvalid": "请填写匹配模式并选择目标活动",
+  "settingsLanHost": "LAN 主机",
+  "settingsLanHostHint": "允许局域网内其他设备经配对码连接并同步",
+  "settingsLanStart": "启动主机",
+  "settingsLanStop": "停止",
+  "settingsLanRunning": "运行中",
+  "settingsLanStopped": "已停止",
+  "settingsLanPort": "端口",
+  "settingsLanPairingCode": "配对码",
+  "settingsLanCodeOnce": "配对码单次有效，过期或使用后需重新生成",
+  "settingsLanClient": "LAN 客户端",
+  "settingsLanClientHint": "连接其他设备开启的主机",
+  "settingsLanHostInput": "主机地址（如 192.168.1.5 或 192.168.1.5:8787）",
+  "settingsLanCodeInput": "6 位配对码",
+  "settingsLanPair": "配对",
+  "settingsLanPairedAs": "已配对：{name}",
+  "@settingsLanPairedAs": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsLanSyncNow": "立即同步",
+  "settingsLanManualOnly": "主机仅手动启动，无任何自动开启路径。",
+  "settingsLanFileInterop": "文件互通",
+  "settingsLanFileInteropHint": "通过 .timetrack.json 在设备间手动转移数据",
+  "settingsUpdateCurrent": "当前版本",
+  "settingsUpdateLatest": "最新版本",
+  "settingsUpdateState": "状态",
+  "settingsUpdateCheck": "检查更新",
+  "settingsUpdateChecking": "正在检查新版本…",
+  "settingsUpdateUpToDate": "已是最新版本",
+  "settingsUpdateAvailable": "发现新版本",
+  "settingsUpdateDownload": "下载更新",
+  "settingsUpdateDownloading": "下载中…",
+  "settingsUpdateVerifying": "正在校验 SHA-256…",
+  "settingsUpdateInstalling": "正在安装更新…",
+  "settingsUpdateRestartRequired": "重启后生效",
+  "settingsUpdateRestartBody": "安装完成，下次启动应用时生效",
+  "settingsUpdateRestartNow": "立即重启",
+  "settingsUpdateFailed": "更新失败",
+  "settingsUpdateIgnoreVersion": "忽略此版本",
+  "settingsUpdateLater": "稍后提醒",
+  "settingsUpdateInstallNote": "安装差异：Windows 下载校验通过后提示「重启后生效」，更新在下次启动应用时应用；Android 拉起系统安装器，未授权「安装未知应用」时引导前往系统设置开启。",
+  "settingsUpdateVerifyNote": "下载完成后自动校验 SHA-256，校验一致才安装",
+  "settingsUpdateNoArtifact": "当前平台无可用更新包",
+  "settingsUpdateIgnoredDone": "已忽略此版本",
+  "settingsUpdateIdle": "已就绪",
+  "settingsAboutTagline": "离线优先 · 个人时间追踪",
+  "settingsAboutVersion": "当前版本",
+  "settingsAboutOpenSource": "开源信息",
+  "settingsAboutOpenSourceHint": "本项目基于 MIT License 开源，欢迎参与贡献",
+  "settingsAboutLicense": "许可",
+  "settingsAboutLicenseHint": "MIT License · 含第三方依赖许可",
+  "settingsAboutCheckUpdate": "检查更新",
+  "settingsInstantHint": "所有设置即时生效并自动保存，更改后相关页面即时一致。"
 }

@@ -428,5 +428,280 @@
   "stBucketXl": "3h+",
   "stCountShort": "{n} entries",
   "stPickStart": "Pick start date",
-  "stPickEnd": "Pick end date"
+  "stPickEnd": "Pick end date",
+  "settingsSecGeneral": "General",
+  "settingsSecGeneralSub": "Appearance, time display and global defaults",
+  "settingsSecBackup": "Backup & export",
+  "settingsSecBackupSub": "The only channel for data migration and new-device restore",
+  "settingsSecReminder": "Reminders",
+  "settingsSecReminderSub": "When to remind, how often, and how",
+  "settingsSecTimeline": "Timeline",
+  "settingsSecTimelineSub": "Merge threshold for adjacent entries",
+  "settingsSecSync": "Cloud sync",
+  "settingsSecSyncSub": "Two-way sync across devices, local-first and async",
+  "settingsSecAi": "AI settings",
+  "settingsSecAiSub": "Summaries and natural-language logging (phase 2)",
+  "settingsAiBadge": "Phase 2",
+  "settingsSecBackground": "Background tracking",
+  "settingsSecBackgroundSub": "Auto track by rules; auto entries are tagged and excludable",
+  "settingsSecDevice": "Device interop",
+  "settingsSecDeviceSub": "Sync and file exchange within your LAN",
+  "settingsSecUpdate": "Updates",
+  "settingsSecUpdateSub": "Install only after checksum passes · degrade on failure · forced updates cannot be skipped",
+  "settingsSecAbout": "About",
+  "settingsSecAboutSub": "Version, open-source info and licenses",
+  "settingsAppearance": "Appearance",
+  "settingsAppearanceHint": "Light by default, dark or follow-system available",
+  "settingsThemeLight": "Light",
+  "settingsThemeDark": "Dark",
+  "settingsThemeSystem": "Follow system",
+  "settingsWeekStart": "Week starts on",
+  "settingsWeekStartHint": "Where the Stats page \"this week\" begins",
+  "settingsWeekMonday": "Monday",
+  "settingsWeekSunday": "Sunday",
+  "settingsWeekSaturday": "Saturday",
+  "settingsTimeFormat": "Time format",
+  "settingsTimeFormatHint": "Display format for timeline entries and timer",
+  "settingsHour12": "12-hour",
+  "settingsHour24": "24-hour",
+  "settingsDefaultDuration": "Default duration",
+  "settingsDefaultDurationHint": "Default length for quick starts like one-off activities",
+  "settingsQuickReminder": "Quick reminder",
+  "settingsQuickReminderHint": "Remind to start tracking at the trigger time (see Reminders)",
+  "settingsMinutesShort": "{minutes} min",
+  "@settingsMinutesShort": {
+    "placeholders": {
+      "minutes": {
+        "type": "int"
+      }
+    }
+  },
+  "settingsTriggerTime": "Trigger time",
+  "settingsTriggerTimeHint": "Remind to start tracking daily at this time",
+  "settingsDurationThreshold": "Duration threshold",
+  "settingsDurationThresholdHint": "Remind once a session runs this long",
+  "settingsRepeatInterval": "Repeat interval",
+  "settingsRepeatIntervalHint": "Re-remind at this interval until the session ends",
+  "settingsReminderMethod": "Reminder style",
+  "settingsMethodDialog": "Dialog",
+  "settingsMethodDialogDesc": "Decision",
+  "settingsMethodBanner": "Banner",
+  "settingsMethodBannerDesc": "Subtle",
+  "settingsMethodSilent": "Silent",
+  "settingsMethodSilentDesc": "Nodisturb",
+  "settingsMergeThreshold": "Adjacent merge threshold",
+  "settingsMergeThresholdHint": "Auto-merge when the gap is below this threshold",
+  "settingsUnassignedNote": "There is exactly one \"Unassigned\" activity. Adjacent unassigned entries on the timeline merge into one continuous record when the gap is below this threshold.",
+  "settingsExport": "Export backup",
+  "settingsExportHint": "Export everything to a single .timetrack.json file",
+  "settingsExportBtn": "Export",
+  "settingsImport": "Import data",
+  "settingsImportHint": "Restore from .timetrack.json; imported data merges with existing",
+  "settingsImportBtn": "Import",
+  "settingsDangerTitle": "Erase all data",
+  "settingsDangerMessage": "Permanently deletes all local entries, activities and settings. Export a backup first — this cannot be undone.",
+  "settingsDangerBtn": "Erase all data",
+  "settingsWipeDialogTitle": "Erase all data",
+  "settingsWipeDialogBody": "This permanently deletes all entries, activities and settings and cannot be undone. Export a backup first to avoid data loss.",
+  "settingsWipeCancel": "Cancel",
+  "settingsWipeExportFirst": "Export first",
+  "settingsWipeConfirm": "Erase anyway",
+  "settingsWipeDone": "All data erased",
+  "settingsWipeFailed": "Erase failed",
+  "settingsExportDone": "Exported to {path}",
+  "@settingsExportDone": {
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsImportDone": "Imported {count} records",
+  "@settingsImportDone": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "settingsOpFailed": "Operation failed: {message}",
+  "@settingsOpFailed": {
+    "placeholders": {
+      "message": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsSyncConfigured": "Supabase configured",
+  "settingsSyncNotConfigured": "Cloud service not configured",
+  "settingsSyncNotConfiguredHint": "SUPABASE_URL was not injected at build time; the app runs offline",
+  "settingsSyncOnline": "Online",
+  "settingsSyncOffline": "Offline",
+  "settingsSyncLoggedInAs": "Signed in as {email}",
+  "@settingsSyncLoggedInAs": {
+    "placeholders": {
+      "email": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsSyncNotLoggedIn": "Not signed in",
+  "settingsSyncLastAt": "Last sync",
+  "settingsSyncJustNow": "Just now",
+  "settingsSyncNever": "Never",
+  "settingsSyncPulled": "Pulled {count}",
+  "@settingsSyncPulled": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "settingsSyncPushed": "Pushed {count}",
+  "@settingsSyncPushed": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "settingsSyncNow": "Sync now",
+  "settingsSyncSignOut": "Sign out",
+  "settingsLoginTitle": "Sign in",
+  "settingsLoginSubtitle": "Enter your email and verify with a code to sync to the cloud",
+  "settingsLoginEmail": "Email",
+  "settingsLoginSendCode": "Send code",
+  "settingsLoginSending": "Sending…",
+  "settingsLoginCodeSent": "Code sent, check your inbox",
+  "settingsLoginCode": "6-digit code",
+  "settingsLoginVerify": "Verify and sign in",
+  "settingsLoginVerifying": "Signing in…",
+  "settingsLoginFailed": "Sign-in failed: {message}",
+  "@settingsLoginFailed": {
+    "placeholders": {
+      "message": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsLoginCancel": "Cancel",
+  "settingsSignedOut": "Signed out",
+  "settingsSyncFailed": "Sync failed: {message}",
+  "@settingsSyncFailed": {
+    "placeholders": {
+      "message": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsAiPhase2Note": "AI settings arrive in phase 2: API key (secure storage), OpenAI-compatible endpoint/model, test connection and data-transfer disclosure. The Stats page already has a phase-2 entry placeholder.",
+  "settingsBgWindowsTitle": "Windows · background resident",
+  "settingsBgWindowsBody": "Closing the window minimizes to tray by default; tray menu offers show/pause/quit.",
+  "settingsBgDetectorState": "Detector: {state}",
+  "@settingsBgDetectorState": {
+    "placeholders": {
+      "state": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsBgDetectorRunning": "running",
+  "settingsBgDetectorPending": "pending platform layer (batch 6)",
+  "settingsBgLastMatch": "Last match: {note}",
+  "@settingsBgLastMatch": {
+    "placeholders": {
+      "note": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsBgMasterSwitch": "Background auto tracking",
+  "settingsBgMasterHint": "Track automatically by rules; no entry when nothing matches",
+  "settingsBgRules": "Rules",
+  "settingsBgRulesCount": "Pattern → activity · {count} rules",
+  "@settingsBgRulesCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "settingsBgNewRule": "New rule",
+  "settingsBgEmptyRules": "No rules yet. Create one to auto-track matching processes or window titles.",
+  "settingsBgKindProcess": "Process name",
+  "settingsBgKindTitle": "Window title",
+  "settingsBgSyncToggle": "Cloud sync",
+  "settingsBgEnabledToggle": "Enabled",
+  "settingsBgEdit": "Edit rule",
+  "settingsBgDelete": "Delete rule",
+  "settingsBgRuleFormTitleNew": "New rule",
+  "settingsBgRuleFormTitleEdit": "Edit rule",
+  "settingsBgPattern": "Pattern",
+  "settingsBgPatternHint": "Process name (e.g. code.exe) or title pattern (e.g. *code*)",
+  "settingsBgMatchKind": "Match type",
+  "settingsBgTargetActivity": "Target activity",
+  "settingsBgPickActivity": "Open activity picker",
+  "settingsBgSyncThisRule": "Sync this rule",
+  "settingsBgPriorityNote": "Priority: exact > wildcard > title. Avoid overly broad patterns to reduce mismatches.",
+  "settingsBgSave": "Save",
+  "settingsBgCancel": "Cancel",
+  "settingsBgRuleSaved": "Rule saved",
+  "settingsBgRuleDeleted": "Rule deleted",
+  "settingsBgFormInvalid": "Enter a pattern and choose a target activity",
+  "settingsLanHost": "LAN host",
+  "settingsLanHostHint": "Let other devices on the LAN connect and sync with a pairing code",
+  "settingsLanStart": "Start host",
+  "settingsLanStop": "Stop",
+  "settingsLanRunning": "Running",
+  "settingsLanStopped": "Stopped",
+  "settingsLanPort": "Port",
+  "settingsLanPairingCode": "Pairing code",
+  "settingsLanCodeOnce": "Codes are single-use; regenerate after use or expiry",
+  "settingsLanClient": "LAN client",
+  "settingsLanClientHint": "Connect to a host started on another device",
+  "settingsLanHostInput": "Host address (e.g. 192.168.1.5 or 192.168.1.5:8787)",
+  "settingsLanCodeInput": "6-digit code",
+  "settingsLanPair": "Pair",
+  "settingsLanPairedAs": "Paired with {name}",
+  "@settingsLanPairedAs": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsLanSyncNow": "Sync now",
+  "settingsLanManualOnly": "The host starts manually only; there is no auto-start path.",
+  "settingsLanFileInterop": "File exchange",
+  "settingsLanFileInteropHint": "Move data between devices manually via .timetrack.json",
+  "settingsUpdateCurrent": "Current version",
+  "settingsUpdateLatest": "Latest version",
+  "settingsUpdateState": "Status",
+  "settingsUpdateCheck": "Check for updates",
+  "settingsUpdateChecking": "Checking for updates…",
+  "settingsUpdateUpToDate": "Up to date",
+  "settingsUpdateAvailable": "Update available",
+  "settingsUpdateDownload": "Download",
+  "settingsUpdateDownloading": "Downloading…",
+  "settingsUpdateVerifying": "Verifying SHA-256…",
+  "settingsUpdateInstalling": "Installing…",
+  "settingsUpdateRestartRequired": "Restart required",
+  "settingsUpdateRestartBody": "Installed. It takes effect on next launch",
+  "settingsUpdateRestartNow": "Restart now",
+  "settingsUpdateFailed": "Update failed",
+  "settingsUpdateIgnoreVersion": "Ignore this version",
+  "settingsUpdateLater": "Remind later",
+  "settingsUpdateInstallNote": "Install differs by platform: Windows prompts \"restart to apply\" after checksum passes; Android launches the system installer and guides to settings when unknown-app installs are not allowed.",
+  "settingsUpdateVerifyNote": "SHA-256 is verified after download; install only when it matches",
+  "settingsUpdateNoArtifact": "No update package for this platform",
+  "settingsUpdateIgnoredDone": "Version ignored",
+  "settingsUpdateIdle": "Ready",
+  "settingsAboutTagline": "Offline-first · personal time tracking",
+  "settingsAboutVersion": "Current version",
+  "settingsAboutOpenSource": "Open source",
+  "settingsAboutOpenSourceHint": "MIT Licensed. Contributions welcome",
+  "settingsAboutLicense": "License",
+  "settingsAboutLicenseHint": "MIT License · third-party licenses included",
+  "settingsAboutCheckUpdate": "Check for updates",
+  "settingsInstantHint": "All settings apply instantly and persist; pages stay consistent after changes."
 }

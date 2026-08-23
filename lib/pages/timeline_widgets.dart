@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../components/activity_color_dot.dart';
 import '../components/tnum_text.dart';
 import '../l10n/app_localizations.dart';
+import '../utils/time_format.dart';
 import '../utils/day_metrics.dart' show formatHm;
 import '../viewmodels/time_entry.dart';
 
@@ -63,6 +64,7 @@ class TlSummaryStrip extends StatelessWidget {
 /// 竖向时间轴（主视图）：左列时刻+时长 / 中列彩色节点竖轴 / 右列浅染卡。
 class TlVerticalTimeline extends StatelessWidget {
   const TlVerticalTimeline({
+    this.use24 = true,
     super.key,
     required this.entries,
     required this.unassignedActivityId,
@@ -70,6 +72,9 @@ class TlVerticalTimeline extends StatelessWidget {
     required this.onEntryTap,
     this.dayGroups = false,
   });
+
+  /// 24 小时制（用户偏好，透传行组件）。
+  final bool use24;
 
   final List<TimeEntry> entries;
   final String? unassignedActivityId;
@@ -106,6 +111,7 @@ class TlVerticalTimeline extends StatelessWidget {
       children: [
         for (var i = 0; i < list.length; i++)
           TlTimelineRow(
+            use24: use24,
             entry: list[i],
             previous: i > 0 ? list[i - 1] : null,
             unassigned: list[i].activityId == unassignedActivityId,
@@ -160,6 +166,7 @@ class TlTimelineRow extends StatelessWidget {
     required this.unassigned,
     required this.now,
     required this.onTap,
+    this.use24 = true,
   });
 
   final TimeEntry entry;
@@ -169,6 +176,9 @@ class TlTimelineRow extends StatelessWidget {
   final bool unassigned;
   final DateTime now;
   final VoidCallback onTap;
+
+  /// 24 小时制（用户偏好；12 时制显示 09:05 AM 形态）。
+  final bool use24;
 
   static const _leftColumn = 56.0;
   static const _trackWidth = 26.0;
@@ -204,7 +214,7 @@ class TlTimelineRow extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   TnumText(
-                    DateFormat('HH:mm', 'zh').format(entry.startAt),
+                    formatClockOf(entry.startAt, use24: use24),
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w500,
@@ -615,11 +625,15 @@ class TlEntryListRow extends StatelessWidget {
     required this.entry,
     required this.now,
     required this.onTap,
+    this.use24 = true,
   });
 
   final TimeEntry entry;
   final DateTime now;
   final VoidCallback onTap;
+
+  /// 24 小时制（用户偏好）。
+  final bool use24;
 
   @override
   Widget build(BuildContext context) {
@@ -636,7 +650,7 @@ class TlEntryListRow extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   TnumText(
-                    DateFormat('HH:mm', 'zh').format(entry.startAt),
+                    formatClockOf(entry.startAt, use24: use24),
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w500,

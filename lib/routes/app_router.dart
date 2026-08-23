@@ -40,7 +40,7 @@ class AppRouter {
             _branch(
               '/settings',
               'settings',
-              (context, state) => const SettingsPage(),
+              (context, state) => SettingsPage(app: app),
             ),
           ],
         ),

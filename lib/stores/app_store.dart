@@ -19,12 +19,14 @@ import '../api/update/update_downloader.dart';
 import '../api/update/update_manifest_service.dart';
 import '../api/update/update_verifier.dart';
 import '../data/cleanup/cleanup_service.dart';
+import '../data/cleanup/data_wipe_service.dart';
 import '../data/database/app_database.dart' hide ProfileSettings;
 import '../data/interop/file_interop_service.dart';
 import '../data/repositories/action_log_repository.dart';
 import '../data/repositories/activity_repository.dart';
 import '../data/repositories/category_repository.dart';
 import '../data/repositories/settings_repository.dart';
+import '../data/repositories/sync_peer_store.dart';
 import '../data/repositories/stats_repository.dart';
 import '../data/repositories/time_entry_repository.dart';
 import '../data/repositories/tracking_rule_repository.dart';
@@ -38,6 +40,7 @@ import 'data_revision.dart';
 import 'settings_store.dart';
 import 'stats_store.dart';
 import 'sync_store.dart';
+import 'lan_store.dart';
 import 'timeline_store.dart';
 import 'timer_store.dart';
 import 'today_store.dart';
@@ -63,6 +66,8 @@ class AppStore {
     required this.sync,
     required this.update,
     required this.tracking,
+    required this.lan,
+    required this.wipe,
     required this.dispatcher,
     required this.fileInterop,
   });
@@ -88,6 +93,12 @@ class AppStore {
   final SyncStore sync;
   final UpdateStore update;
   final TrackingStore tracking;
+
+  /// LAN 设备互通编排（批次 4 设置页）。
+  final LanStore lan;
+
+  /// 数据全清服务（设置页危险区）。
+  final DataWipeService wipe;
   final CommandDispatcher dispatcher;
   final FileInteropService fileInterop;
 
@@ -183,6 +194,14 @@ class AppStore {
       windowsInstaller: windowsInstaller ?? _defaultWindowsInstaller(),
       database: database,
     );
+    final lan = LanStore(
+      bundleRepository: syncBundleRepo,
+      peerStore: SyncPeerStore(database: database),
+      database: database,
+      dataRevision: revision,
+      appVersion: currentVersion,
+    );
+    final wipe = DataWipeService(database: database);
     final tracking = TrackingStore(
       rules: rules,
       timer: timer,
@@ -223,6 +242,8 @@ class AppStore {
       sync: sync,
       update: update,
       tracking: tracking,
+      lan: lan,
+      wipe: wipe,
       dispatcher: dispatcher,
       fileInterop: fileInterop,
     );
@@ -277,6 +298,7 @@ class AppStore {
 
   /// 释放全部 store（退出/测试清理）。
   void dispose() {
+    lan.dispose();
     tracking.dispose();
     update.dispose();
     sync.dispose();
