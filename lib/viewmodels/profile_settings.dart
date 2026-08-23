@@ -19,9 +19,32 @@ enum ReminderMethod {
   }
 }
 
+/// 主题模式（批次 4 持久化；存储值为小写英文）。
+///
+/// viewmodels 保持零 Flutter 依赖（不 import material 的 ThemeMode）——
+/// UI 层负责 String ↔ ThemeMode 映射（app.dart/settings_page）。
+enum ThemeModeSetting {
+  light('light'),
+  dark('dark'),
+  system('system');
+
+  const ThemeModeSetting(this.storageValue);
+
+  final String storageValue;
+
+  static ThemeModeSetting fromStorageValue(Object? value) {
+    final text = value is String ? value : null;
+    return ThemeModeSetting.values.firstWhere(
+      (mode) => mode.storageValue == text,
+      orElse: () => ThemeModeSetting.light, // 默认浅色（契约 §9.7）
+    );
+  }
+}
+
 /// 领域模型：配置文件（单例，纯类型，零 Flutter 依赖）。
 ///
-/// 本地库中为 id=1 的单行；含提醒设置与"相邻未分配条目合并阈值"。
+/// 本地库中为 id=1 的单行；含提醒设置、"相邻未分配条目合并阈值"与
+/// 通用偏好（主题/周始/时制/默认记录时长/快速提醒/后台记录总开关，批次 4）。
 class ProfileSettings {
   ProfileSettings({
     this.userId,
@@ -30,6 +53,12 @@ class ProfileSettings {
     this.reminderMethod = ReminderMethod.dialog,
     this.reminderTimeOfDayMinutes = defaultReminderTimeOfDayMinutes,
     this.mergeNeighborThresholdMinutes = defaultMergeNeighborThresholdMinutes,
+    this.themeMode = ThemeModeSetting.light,
+    this.weekStartDay = defaultWeekStartDay,
+    this.use24HourFormat = defaultUse24HourFormat,
+    this.defaultRecordMinutes = defaultDefaultRecordMinutes,
+    this.quickReminderEnabled = defaultQuickReminderEnabled,
+    this.backgroundTrackingEnabled = defaultBackgroundTrackingEnabled,
     required this.timezone,
     required this.updatedAt,
   })  : assert(reminderMinutes >= 1 && reminderMinutes <= maxReminderMinutes),
@@ -40,8 +69,7 @@ class ProfileSettings {
               reminderTimeOfDayMinutes <= maxTimeOfDayMinutes,
         ),
         assert(mergeNeighborThresholdMinutes >= 0 &&
-            mergeNeighborThresholdMinutes <=
-                maxMergeNeighborThresholdMinutes),
+            mergeNeighborThresholdMinutes <= maxMergeNeighborThresholdMinutes),
         // timezone 语义上非空（fromMap/copyWith 均有空白兜底，直接构造是唯一旁路）。
         // 与构造体硬校验条件一致（均按 trim 判空），debug/release 行为统一。
         assert(timezone.trim().isNotEmpty, 'timezone 不能为空') {
@@ -56,6 +84,24 @@ class ProfileSettings {
   static const defaultReminderIntervalMinutes = 10;
   static const defaultReminderTimeOfDayMinutes = 540; // 9 * 60
   static const defaultMergeNeighborThresholdMinutes = 1;
+
+  /// 每周起始日：ISO 数字（1=周一 … 7=周日）。UI 呈现周一/周六/周日三选。
+  static const defaultWeekStartDay = 1;
+
+  /// 时制：默认 24 小时制。
+  static const defaultUse24HourFormat = true;
+
+  /// 默认记录时长（分钟）：临时活动等快捷启动的默认时长。
+  static const defaultDefaultRecordMinutes = 25;
+
+  /// 快速提醒（到触发时刻提醒开始记录）默认开。
+  static const defaultQuickReminderEnabled = true;
+
+  /// 后台自动记录总开关：默认关（保守——用户显式开启，契约 §6.2 授权引导）。
+  static const defaultBackgroundTrackingEnabled = false;
+
+  /// 默认记录时长候选（设计稿：15/25/30/45/60）。
+  static const defaultRecordMinutesChoices = [15, 25, 30, 45, 60];
 
   /// 提醒类分钟数的合理上界（24 小时）：防止极端大值导致异常调度结果。
   static const maxReminderMinutes = 24 * 60;
@@ -74,6 +120,25 @@ class ProfileSettings {
 
   /// 相邻未分配条目合并判定阈值（分钟），见不变式 7。
   final int mergeNeighborThresholdMinutes;
+
+  /// 主题模式（设备本地偏好的用户可见表达；随行同步——跨设备一致由 LWW 决定）。
+  final ThemeModeSetting themeMode;
+
+  /// 每周起始日（ISO：1=周一 … 7=周日）——统计页「本周」范围计算用。
+  final int weekStartDay;
+
+  /// 24 小时制（true）/12 小时制（false）——时间线/编辑器等时刻显示用。
+  final bool use24HourFormat;
+
+  /// 默认记录时长（分钟）。
+  final int defaultRecordMinutes;
+
+  /// 快速提醒开关（触发时刻提醒开始记录；false 时提醒分区的调度静默）。
+  final bool quickReminderEnabled;
+
+  /// 后台自动记录总开关（未授权/关闭时不产生自动条目）。
+  final bool backgroundTrackingEnabled;
+
   /// 时区标识。注意：`DateTime.now().timeZoneName` 通常为缩写（如 CST），
   /// 非稳定 IANA 标识，跨设备/DST 还原能力有限——当前仅作展示与兼容用途，
   /// 一期不依赖它做跨时区调度；如需精确时区（IANA）留待二期随登录/多时区需求处理。
@@ -102,6 +167,12 @@ class ProfileSettings {
           reminderTimeOfDayMinutes == other.reminderTimeOfDayMinutes &&
           mergeNeighborThresholdMinutes ==
               other.mergeNeighborThresholdMinutes &&
+          themeMode == other.themeMode &&
+          weekStartDay == other.weekStartDay &&
+          use24HourFormat == other.use24HourFormat &&
+          defaultRecordMinutes == other.defaultRecordMinutes &&
+          quickReminderEnabled == other.quickReminderEnabled &&
+          backgroundTrackingEnabled == other.backgroundTrackingEnabled &&
           timezone == other.timezone &&
           updatedAt == other.updatedAt;
 
@@ -113,6 +184,12 @@ class ProfileSettings {
         reminderMethod,
         reminderTimeOfDayMinutes,
         mergeNeighborThresholdMinutes,
+        themeMode,
+        weekStartDay,
+        use24HourFormat,
+        defaultRecordMinutes,
+        quickReminderEnabled,
+        backgroundTrackingEnabled,
         timezone,
         updatedAt,
       );
@@ -130,6 +207,12 @@ class ProfileSettings {
     ReminderMethod? reminderMethod,
     int? reminderTimeOfDayMinutes,
     int? mergeNeighborThresholdMinutes,
+    ThemeModeSetting? themeMode,
+    int? weekStartDay,
+    bool? use24HourFormat,
+    int? defaultRecordMinutes,
+    bool? quickReminderEnabled,
+    bool? backgroundTrackingEnabled,
     String? timezone,
     DateTime? updatedAt,
   }) {
@@ -155,6 +238,21 @@ class ProfileSettings {
         min: 0,
         max: maxMergeNeighborThresholdMinutes,
       ),
+      themeMode: themeMode ?? this.themeMode,
+      weekStartDay: _clampMinMax(
+        weekStartDay ?? this.weekStartDay,
+        min: 1,
+        max: 7,
+      ),
+      use24HourFormat: use24HourFormat ?? this.use24HourFormat,
+      defaultRecordMinutes: _clampMinMax(
+        defaultRecordMinutes ?? this.defaultRecordMinutes,
+        min: 1,
+        max: maxReminderMinutes,
+      ),
+      quickReminderEnabled: quickReminderEnabled ?? this.quickReminderEnabled,
+      backgroundTrackingEnabled:
+          backgroundTrackingEnabled ?? this.backgroundTrackingEnabled,
       // timezone 语义上应非空：空/空白串回退当前时区（防损坏数据持久化空值）。
       timezone: _nonEmptyOrFallback(timezone ?? this.timezone,
           fallback: DateTime.now().timeZoneName),
@@ -170,6 +268,12 @@ class ProfileSettings {
       'reminder_method': reminderMethod.storageValue,
       'reminder_time_of_day_minutes': reminderTimeOfDayMinutes,
       'merge_neighbor_threshold_minutes': mergeNeighborThresholdMinutes,
+      'theme_mode': themeMode.storageValue,
+      'week_start_day': weekStartDay,
+      'use_24_hour_format': use24HourFormat,
+      'default_record_minutes': defaultRecordMinutes,
+      'quick_reminder_enabled': quickReminderEnabled,
+      'background_tracking_enabled': backgroundTrackingEnabled,
       'timezone': timezone,
       'updated_at': updatedAt.toUtc().toIso8601String(),
     };
@@ -198,6 +302,27 @@ class ProfileSettings {
               fallback: defaultMergeNeighborThresholdMinutes),
           min: 0,
           max: maxMergeNeighborThresholdMinutes),
+      themeMode: ThemeModeSetting.fromStorageValue(map['theme_mode']),
+      weekStartDay: _clampMinMax(
+          readInt(map['week_start_day'], fallback: defaultWeekStartDay),
+          min: 1,
+          max: 7),
+      // readBool 缺键恒回退 false，而 use_24_hour/quick_reminder 默认 true
+      // ——缺键（旧版本互通文件/同步行）须显式走默认值分支。
+      use24HourFormat: map['use_24_hour_format'] == null
+          ? defaultUse24HourFormat
+          : readBool(map['use_24_hour_format']),
+      defaultRecordMinutes: _clampMinMax(
+          readInt(map['default_record_minutes'],
+              fallback: defaultDefaultRecordMinutes),
+          min: 1,
+          max: maxReminderMinutes),
+      quickReminderEnabled: map['quick_reminder_enabled'] == null
+          ? defaultQuickReminderEnabled
+          : readBool(map['quick_reminder_enabled']),
+      backgroundTrackingEnabled: map['background_tracking_enabled'] == null
+          ? defaultBackgroundTrackingEnabled
+          : readBool(map['background_tracking_enabled']),
       timezone: _nonEmptyOrFallback(readString(map['timezone']),
           fallback: DateTime.now().timeZoneName),
       updatedAt: readDateTime(map['updated_at']),

@@ -151,6 +151,12 @@ class SettingsStore extends ChangeNotifier {
         a.reminderMethod == b.reminderMethod &&
         a.reminderTimeOfDayMinutes == b.reminderTimeOfDayMinutes &&
         a.mergeNeighborThresholdMinutes == b.mergeNeighborThresholdMinutes &&
+        a.themeMode == b.themeMode &&
+        a.weekStartDay == b.weekStartDay &&
+        a.use24HourFormat == b.use24HourFormat &&
+        a.defaultRecordMinutes == b.defaultRecordMinutes &&
+        a.quickReminderEnabled == b.quickReminderEnabled &&
+        a.backgroundTrackingEnabled == b.backgroundTrackingEnabled &&
         a.timezone == b.timezone;
   }
 

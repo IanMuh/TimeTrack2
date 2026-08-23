@@ -169,6 +169,12 @@ mixin RepositoryMappings {
       reminderMethod: ReminderMethod.fromStorageValue(row.reminderMethod),
       reminderTimeOfDayMinutes: row.reminderTimeOfDayMinutes,
       mergeNeighborThresholdMinutes: row.mergeNeighborThresholdMinutes,
+      themeMode: ThemeModeSetting.fromStorageValue(row.themeMode),
+      weekStartDay: row.weekStartDay,
+      use24HourFormat: row.use24HourFormat,
+      defaultRecordMinutes: row.defaultRecordMinutes,
+      quickReminderEnabled: row.quickReminderEnabled,
+      backgroundTrackingEnabled: row.backgroundTrackingEnabled,
       timezone: timezone,
       updatedAt: readUtc(row.updatedAt),
     );
@@ -184,6 +190,12 @@ mixin RepositoryMappings {
       reminderMethod: Value(settings.reminderMethod.storageValue),
       reminderTimeOfDayMinutes: Value(settings.reminderTimeOfDayMinutes),
       mergeNeighborThresholdMinutes: Value(settings.mergeNeighborThresholdMinutes),
+      themeMode: Value(settings.themeMode.storageValue),
+      weekStartDay: Value(settings.weekStartDay),
+      use24HourFormat: Value(settings.use24HourFormat),
+      defaultRecordMinutes: Value(settings.defaultRecordMinutes),
+      quickReminderEnabled: Value(settings.quickReminderEnabled),
+      backgroundTrackingEnabled: Value(settings.backgroundTrackingEnabled),
       timezone: Value(settings.timezone),
       updatedAt: Value(utcString(settings.updatedAt)),
     );
@@ -234,6 +246,7 @@ mixin RepositoryMappings {
       matchKind: TrackingRuleMatchKind.fromStorageValue(row.matchKind),
       activityId: row.activityId,
       syncEnabled: row.syncEnabled,
+      enabled: row.enabled,
       updatedAt: readUtc(row.updatedAt),
       deletedAt: readNullableUtc(row.deletedAt),
     );
@@ -248,6 +261,7 @@ mixin RepositoryMappings {
       matchKind: Value(rule.matchKind.storageValue),
       activityId: Value(rule.activityId),
       syncEnabled: Value(rule.syncEnabled),
+      enabled: Value(rule.enabled),
       updatedAt: Value(utcString(rule.updatedAt)),
       deletedAt: Value(rule.deletedAt == null ? null : utcString(rule.deletedAt!)),
     );

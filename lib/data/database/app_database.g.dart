@@ -2357,6 +2357,85 @@ class $ProfileSettingsTable extends ProfileSettings
         requiredDuringInsert: false,
         defaultValue: const Constant(1),
       );
+  static const VerificationMeta _themeModeMeta = const VerificationMeta(
+    'themeMode',
+  );
+  @override
+  late final GeneratedColumn<String> themeMode = GeneratedColumn<String>(
+    'theme_mode',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('light'),
+  );
+  static const VerificationMeta _weekStartDayMeta = const VerificationMeta(
+    'weekStartDay',
+  );
+  @override
+  late final GeneratedColumn<int> weekStartDay = GeneratedColumn<int>(
+    'week_start_day',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(1),
+  );
+  static const VerificationMeta _use24HourFormatMeta = const VerificationMeta(
+    'use24HourFormat',
+  );
+  @override
+  late final GeneratedColumn<bool> use24HourFormat = GeneratedColumn<bool>(
+    'use24_hour_format',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("use24_hour_format" IN (0, 1))',
+    ),
+    defaultValue: const Constant(true),
+  );
+  static const VerificationMeta _defaultRecordMinutesMeta =
+      const VerificationMeta('defaultRecordMinutes');
+  @override
+  late final GeneratedColumn<int> defaultRecordMinutes = GeneratedColumn<int>(
+    'default_record_minutes',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(25),
+  );
+  static const VerificationMeta _quickReminderEnabledMeta =
+      const VerificationMeta('quickReminderEnabled');
+  @override
+  late final GeneratedColumn<bool> quickReminderEnabled = GeneratedColumn<bool>(
+    'quick_reminder_enabled',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("quick_reminder_enabled" IN (0, 1))',
+    ),
+    defaultValue: const Constant(true),
+  );
+  static const VerificationMeta _backgroundTrackingEnabledMeta =
+      const VerificationMeta('backgroundTrackingEnabled');
+  @override
+  late final GeneratedColumn<bool> backgroundTrackingEnabled =
+      GeneratedColumn<bool>(
+        'background_tracking_enabled',
+        aliasedName,
+        false,
+        type: DriftSqlType.bool,
+        requiredDuringInsert: false,
+        defaultConstraints: GeneratedColumn.constraintIsAlways(
+          'CHECK ("background_tracking_enabled" IN (0, 1))',
+        ),
+        defaultValue: const Constant(false),
+      );
   static const VerificationMeta _timezoneMeta = const VerificationMeta(
     'timezone',
   );
@@ -2388,6 +2467,12 @@ class $ProfileSettingsTable extends ProfileSettings
     reminderMethod,
     reminderTimeOfDayMinutes,
     mergeNeighborThresholdMinutes,
+    themeMode,
+    weekStartDay,
+    use24HourFormat,
+    defaultRecordMinutes,
+    quickReminderEnabled,
+    backgroundTrackingEnabled,
     timezone,
     updatedAt,
   ];
@@ -2457,6 +2542,57 @@ class $ProfileSettingsTable extends ProfileSettings
         ),
       );
     }
+    if (data.containsKey('theme_mode')) {
+      context.handle(
+        _themeModeMeta,
+        themeMode.isAcceptableOrUnknown(data['theme_mode']!, _themeModeMeta),
+      );
+    }
+    if (data.containsKey('week_start_day')) {
+      context.handle(
+        _weekStartDayMeta,
+        weekStartDay.isAcceptableOrUnknown(
+          data['week_start_day']!,
+          _weekStartDayMeta,
+        ),
+      );
+    }
+    if (data.containsKey('use24_hour_format')) {
+      context.handle(
+        _use24HourFormatMeta,
+        use24HourFormat.isAcceptableOrUnknown(
+          data['use24_hour_format']!,
+          _use24HourFormatMeta,
+        ),
+      );
+    }
+    if (data.containsKey('default_record_minutes')) {
+      context.handle(
+        _defaultRecordMinutesMeta,
+        defaultRecordMinutes.isAcceptableOrUnknown(
+          data['default_record_minutes']!,
+          _defaultRecordMinutesMeta,
+        ),
+      );
+    }
+    if (data.containsKey('quick_reminder_enabled')) {
+      context.handle(
+        _quickReminderEnabledMeta,
+        quickReminderEnabled.isAcceptableOrUnknown(
+          data['quick_reminder_enabled']!,
+          _quickReminderEnabledMeta,
+        ),
+      );
+    }
+    if (data.containsKey('background_tracking_enabled')) {
+      context.handle(
+        _backgroundTrackingEnabledMeta,
+        backgroundTrackingEnabled.isAcceptableOrUnknown(
+          data['background_tracking_enabled']!,
+          _backgroundTrackingEnabledMeta,
+        ),
+      );
+    }
     if (data.containsKey('timezone')) {
       context.handle(
         _timezoneMeta,
@@ -2510,6 +2646,30 @@ class $ProfileSettingsTable extends ProfileSettings
         DriftSqlType.int,
         data['${effectivePrefix}merge_neighbor_threshold_minutes'],
       )!,
+      themeMode: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}theme_mode'],
+      )!,
+      weekStartDay: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}week_start_day'],
+      )!,
+      use24HourFormat: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}use24_hour_format'],
+      )!,
+      defaultRecordMinutes: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}default_record_minutes'],
+      )!,
+      quickReminderEnabled: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}quick_reminder_enabled'],
+      )!,
+      backgroundTrackingEnabled: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}background_tracking_enabled'],
+      )!,
       timezone: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}timezone'],
@@ -2536,6 +2696,24 @@ class ProfileSettingsRow extends DataClass
   final String reminderMethod;
   final int reminderTimeOfDayMinutes;
   final int mergeNeighborThresholdMinutes;
+
+  /// 主题模式（ThemeModeSetting.storageValue：light/dark/system，默认浅色）。
+  final String themeMode;
+
+  /// 每周起始日（ISO：1=周一 … 7=周日，默认周一）。
+  final int weekStartDay;
+
+  /// 24 小时制（默认 true）。
+  final bool use24HourFormat;
+
+  /// 默认记录时长（分钟，临时活动等快捷启动默认时长）。
+  final int defaultRecordMinutes;
+
+  /// 快速提醒开关（触发时刻提醒开始记录）。
+  final bool quickReminderEnabled;
+
+  /// 后台自动记录总开关（默认关——用户显式开启）。
+  final bool backgroundTrackingEnabled;
   final String timezone;
   final String updatedAt;
   const ProfileSettingsRow({
@@ -2546,6 +2724,12 @@ class ProfileSettingsRow extends DataClass
     required this.reminderMethod,
     required this.reminderTimeOfDayMinutes,
     required this.mergeNeighborThresholdMinutes,
+    required this.themeMode,
+    required this.weekStartDay,
+    required this.use24HourFormat,
+    required this.defaultRecordMinutes,
+    required this.quickReminderEnabled,
+    required this.backgroundTrackingEnabled,
     required this.timezone,
     required this.updatedAt,
   });
@@ -2565,6 +2749,14 @@ class ProfileSettingsRow extends DataClass
     map['merge_neighbor_threshold_minutes'] = Variable<int>(
       mergeNeighborThresholdMinutes,
     );
+    map['theme_mode'] = Variable<String>(themeMode);
+    map['week_start_day'] = Variable<int>(weekStartDay);
+    map['use24_hour_format'] = Variable<bool>(use24HourFormat);
+    map['default_record_minutes'] = Variable<int>(defaultRecordMinutes);
+    map['quick_reminder_enabled'] = Variable<bool>(quickReminderEnabled);
+    map['background_tracking_enabled'] = Variable<bool>(
+      backgroundTrackingEnabled,
+    );
     map['timezone'] = Variable<String>(timezone);
     map['updated_at'] = Variable<String>(updatedAt);
     return map;
@@ -2581,6 +2773,12 @@ class ProfileSettingsRow extends DataClass
       reminderMethod: Value(reminderMethod),
       reminderTimeOfDayMinutes: Value(reminderTimeOfDayMinutes),
       mergeNeighborThresholdMinutes: Value(mergeNeighborThresholdMinutes),
+      themeMode: Value(themeMode),
+      weekStartDay: Value(weekStartDay),
+      use24HourFormat: Value(use24HourFormat),
+      defaultRecordMinutes: Value(defaultRecordMinutes),
+      quickReminderEnabled: Value(quickReminderEnabled),
+      backgroundTrackingEnabled: Value(backgroundTrackingEnabled),
       timezone: Value(timezone),
       updatedAt: Value(updatedAt),
     );
@@ -2605,6 +2803,18 @@ class ProfileSettingsRow extends DataClass
       mergeNeighborThresholdMinutes: serializer.fromJson<int>(
         json['mergeNeighborThresholdMinutes'],
       ),
+      themeMode: serializer.fromJson<String>(json['themeMode']),
+      weekStartDay: serializer.fromJson<int>(json['weekStartDay']),
+      use24HourFormat: serializer.fromJson<bool>(json['use24HourFormat']),
+      defaultRecordMinutes: serializer.fromJson<int>(
+        json['defaultRecordMinutes'],
+      ),
+      quickReminderEnabled: serializer.fromJson<bool>(
+        json['quickReminderEnabled'],
+      ),
+      backgroundTrackingEnabled: serializer.fromJson<bool>(
+        json['backgroundTrackingEnabled'],
+      ),
       timezone: serializer.fromJson<String>(json['timezone']),
       updatedAt: serializer.fromJson<String>(json['updatedAt']),
     );
@@ -2626,6 +2836,14 @@ class ProfileSettingsRow extends DataClass
       'mergeNeighborThresholdMinutes': serializer.toJson<int>(
         mergeNeighborThresholdMinutes,
       ),
+      'themeMode': serializer.toJson<String>(themeMode),
+      'weekStartDay': serializer.toJson<int>(weekStartDay),
+      'use24HourFormat': serializer.toJson<bool>(use24HourFormat),
+      'defaultRecordMinutes': serializer.toJson<int>(defaultRecordMinutes),
+      'quickReminderEnabled': serializer.toJson<bool>(quickReminderEnabled),
+      'backgroundTrackingEnabled': serializer.toJson<bool>(
+        backgroundTrackingEnabled,
+      ),
       'timezone': serializer.toJson<String>(timezone),
       'updatedAt': serializer.toJson<String>(updatedAt),
     };
@@ -2639,6 +2857,12 @@ class ProfileSettingsRow extends DataClass
     String? reminderMethod,
     int? reminderTimeOfDayMinutes,
     int? mergeNeighborThresholdMinutes,
+    String? themeMode,
+    int? weekStartDay,
+    bool? use24HourFormat,
+    int? defaultRecordMinutes,
+    bool? quickReminderEnabled,
+    bool? backgroundTrackingEnabled,
     String? timezone,
     String? updatedAt,
   }) => ProfileSettingsRow(
@@ -2652,6 +2876,13 @@ class ProfileSettingsRow extends DataClass
         reminderTimeOfDayMinutes ?? this.reminderTimeOfDayMinutes,
     mergeNeighborThresholdMinutes:
         mergeNeighborThresholdMinutes ?? this.mergeNeighborThresholdMinutes,
+    themeMode: themeMode ?? this.themeMode,
+    weekStartDay: weekStartDay ?? this.weekStartDay,
+    use24HourFormat: use24HourFormat ?? this.use24HourFormat,
+    defaultRecordMinutes: defaultRecordMinutes ?? this.defaultRecordMinutes,
+    quickReminderEnabled: quickReminderEnabled ?? this.quickReminderEnabled,
+    backgroundTrackingEnabled:
+        backgroundTrackingEnabled ?? this.backgroundTrackingEnabled,
     timezone: timezone ?? this.timezone,
     updatedAt: updatedAt ?? this.updatedAt,
   );
@@ -2674,6 +2905,22 @@ class ProfileSettingsRow extends DataClass
       mergeNeighborThresholdMinutes: data.mergeNeighborThresholdMinutes.present
           ? data.mergeNeighborThresholdMinutes.value
           : this.mergeNeighborThresholdMinutes,
+      themeMode: data.themeMode.present ? data.themeMode.value : this.themeMode,
+      weekStartDay: data.weekStartDay.present
+          ? data.weekStartDay.value
+          : this.weekStartDay,
+      use24HourFormat: data.use24HourFormat.present
+          ? data.use24HourFormat.value
+          : this.use24HourFormat,
+      defaultRecordMinutes: data.defaultRecordMinutes.present
+          ? data.defaultRecordMinutes.value
+          : this.defaultRecordMinutes,
+      quickReminderEnabled: data.quickReminderEnabled.present
+          ? data.quickReminderEnabled.value
+          : this.quickReminderEnabled,
+      backgroundTrackingEnabled: data.backgroundTrackingEnabled.present
+          ? data.backgroundTrackingEnabled.value
+          : this.backgroundTrackingEnabled,
       timezone: data.timezone.present ? data.timezone.value : this.timezone,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
@@ -2691,6 +2938,12 @@ class ProfileSettingsRow extends DataClass
           ..write(
             'mergeNeighborThresholdMinutes: $mergeNeighborThresholdMinutes, ',
           )
+          ..write('themeMode: $themeMode, ')
+          ..write('weekStartDay: $weekStartDay, ')
+          ..write('use24HourFormat: $use24HourFormat, ')
+          ..write('defaultRecordMinutes: $defaultRecordMinutes, ')
+          ..write('quickReminderEnabled: $quickReminderEnabled, ')
+          ..write('backgroundTrackingEnabled: $backgroundTrackingEnabled, ')
           ..write('timezone: $timezone, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
@@ -2706,6 +2959,12 @@ class ProfileSettingsRow extends DataClass
     reminderMethod,
     reminderTimeOfDayMinutes,
     mergeNeighborThresholdMinutes,
+    themeMode,
+    weekStartDay,
+    use24HourFormat,
+    defaultRecordMinutes,
+    quickReminderEnabled,
+    backgroundTrackingEnabled,
     timezone,
     updatedAt,
   );
@@ -2721,6 +2980,12 @@ class ProfileSettingsRow extends DataClass
           other.reminderTimeOfDayMinutes == this.reminderTimeOfDayMinutes &&
           other.mergeNeighborThresholdMinutes ==
               this.mergeNeighborThresholdMinutes &&
+          other.themeMode == this.themeMode &&
+          other.weekStartDay == this.weekStartDay &&
+          other.use24HourFormat == this.use24HourFormat &&
+          other.defaultRecordMinutes == this.defaultRecordMinutes &&
+          other.quickReminderEnabled == this.quickReminderEnabled &&
+          other.backgroundTrackingEnabled == this.backgroundTrackingEnabled &&
           other.timezone == this.timezone &&
           other.updatedAt == this.updatedAt);
 }
@@ -2733,6 +2998,12 @@ class ProfileSettingsCompanion extends UpdateCompanion<ProfileSettingsRow> {
   final Value<String> reminderMethod;
   final Value<int> reminderTimeOfDayMinutes;
   final Value<int> mergeNeighborThresholdMinutes;
+  final Value<String> themeMode;
+  final Value<int> weekStartDay;
+  final Value<bool> use24HourFormat;
+  final Value<int> defaultRecordMinutes;
+  final Value<bool> quickReminderEnabled;
+  final Value<bool> backgroundTrackingEnabled;
   final Value<String> timezone;
   final Value<String> updatedAt;
   const ProfileSettingsCompanion({
@@ -2743,6 +3014,12 @@ class ProfileSettingsCompanion extends UpdateCompanion<ProfileSettingsRow> {
     this.reminderMethod = const Value.absent(),
     this.reminderTimeOfDayMinutes = const Value.absent(),
     this.mergeNeighborThresholdMinutes = const Value.absent(),
+    this.themeMode = const Value.absent(),
+    this.weekStartDay = const Value.absent(),
+    this.use24HourFormat = const Value.absent(),
+    this.defaultRecordMinutes = const Value.absent(),
+    this.quickReminderEnabled = const Value.absent(),
+    this.backgroundTrackingEnabled = const Value.absent(),
     this.timezone = const Value.absent(),
     this.updatedAt = const Value.absent(),
   });
@@ -2754,6 +3031,12 @@ class ProfileSettingsCompanion extends UpdateCompanion<ProfileSettingsRow> {
     this.reminderMethod = const Value.absent(),
     this.reminderTimeOfDayMinutes = const Value.absent(),
     this.mergeNeighborThresholdMinutes = const Value.absent(),
+    this.themeMode = const Value.absent(),
+    this.weekStartDay = const Value.absent(),
+    this.use24HourFormat = const Value.absent(),
+    this.defaultRecordMinutes = const Value.absent(),
+    this.quickReminderEnabled = const Value.absent(),
+    this.backgroundTrackingEnabled = const Value.absent(),
     required String timezone,
     required String updatedAt,
   }) : timezone = Value(timezone),
@@ -2766,6 +3049,12 @@ class ProfileSettingsCompanion extends UpdateCompanion<ProfileSettingsRow> {
     Expression<String>? reminderMethod,
     Expression<int>? reminderTimeOfDayMinutes,
     Expression<int>? mergeNeighborThresholdMinutes,
+    Expression<String>? themeMode,
+    Expression<int>? weekStartDay,
+    Expression<bool>? use24HourFormat,
+    Expression<int>? defaultRecordMinutes,
+    Expression<bool>? quickReminderEnabled,
+    Expression<bool>? backgroundTrackingEnabled,
     Expression<String>? timezone,
     Expression<String>? updatedAt,
   }) {
@@ -2780,6 +3069,15 @@ class ProfileSettingsCompanion extends UpdateCompanion<ProfileSettingsRow> {
         'reminder_time_of_day_minutes': reminderTimeOfDayMinutes,
       if (mergeNeighborThresholdMinutes != null)
         'merge_neighbor_threshold_minutes': mergeNeighborThresholdMinutes,
+      if (themeMode != null) 'theme_mode': themeMode,
+      if (weekStartDay != null) 'week_start_day': weekStartDay,
+      if (use24HourFormat != null) 'use24_hour_format': use24HourFormat,
+      if (defaultRecordMinutes != null)
+        'default_record_minutes': defaultRecordMinutes,
+      if (quickReminderEnabled != null)
+        'quick_reminder_enabled': quickReminderEnabled,
+      if (backgroundTrackingEnabled != null)
+        'background_tracking_enabled': backgroundTrackingEnabled,
       if (timezone != null) 'timezone': timezone,
       if (updatedAt != null) 'updated_at': updatedAt,
     });
@@ -2793,6 +3091,12 @@ class ProfileSettingsCompanion extends UpdateCompanion<ProfileSettingsRow> {
     Value<String>? reminderMethod,
     Value<int>? reminderTimeOfDayMinutes,
     Value<int>? mergeNeighborThresholdMinutes,
+    Value<String>? themeMode,
+    Value<int>? weekStartDay,
+    Value<bool>? use24HourFormat,
+    Value<int>? defaultRecordMinutes,
+    Value<bool>? quickReminderEnabled,
+    Value<bool>? backgroundTrackingEnabled,
     Value<String>? timezone,
     Value<String>? updatedAt,
   }) {
@@ -2807,6 +3111,13 @@ class ProfileSettingsCompanion extends UpdateCompanion<ProfileSettingsRow> {
           reminderTimeOfDayMinutes ?? this.reminderTimeOfDayMinutes,
       mergeNeighborThresholdMinutes:
           mergeNeighborThresholdMinutes ?? this.mergeNeighborThresholdMinutes,
+      themeMode: themeMode ?? this.themeMode,
+      weekStartDay: weekStartDay ?? this.weekStartDay,
+      use24HourFormat: use24HourFormat ?? this.use24HourFormat,
+      defaultRecordMinutes: defaultRecordMinutes ?? this.defaultRecordMinutes,
+      quickReminderEnabled: quickReminderEnabled ?? this.quickReminderEnabled,
+      backgroundTrackingEnabled:
+          backgroundTrackingEnabled ?? this.backgroundTrackingEnabled,
       timezone: timezone ?? this.timezone,
       updatedAt: updatedAt ?? this.updatedAt,
     );
@@ -2842,6 +3153,28 @@ class ProfileSettingsCompanion extends UpdateCompanion<ProfileSettingsRow> {
         mergeNeighborThresholdMinutes.value,
       );
     }
+    if (themeMode.present) {
+      map['theme_mode'] = Variable<String>(themeMode.value);
+    }
+    if (weekStartDay.present) {
+      map['week_start_day'] = Variable<int>(weekStartDay.value);
+    }
+    if (use24HourFormat.present) {
+      map['use24_hour_format'] = Variable<bool>(use24HourFormat.value);
+    }
+    if (defaultRecordMinutes.present) {
+      map['default_record_minutes'] = Variable<int>(defaultRecordMinutes.value);
+    }
+    if (quickReminderEnabled.present) {
+      map['quick_reminder_enabled'] = Variable<bool>(
+        quickReminderEnabled.value,
+      );
+    }
+    if (backgroundTrackingEnabled.present) {
+      map['background_tracking_enabled'] = Variable<bool>(
+        backgroundTrackingEnabled.value,
+      );
+    }
     if (timezone.present) {
       map['timezone'] = Variable<String>(timezone.value);
     }
@@ -2863,6 +3196,12 @@ class ProfileSettingsCompanion extends UpdateCompanion<ProfileSettingsRow> {
           ..write(
             'mergeNeighborThresholdMinutes: $mergeNeighborThresholdMinutes, ',
           )
+          ..write('themeMode: $themeMode, ')
+          ..write('weekStartDay: $weekStartDay, ')
+          ..write('use24HourFormat: $use24HourFormat, ')
+          ..write('defaultRecordMinutes: $defaultRecordMinutes, ')
+          ..write('quickReminderEnabled: $quickReminderEnabled, ')
+          ..write('backgroundTrackingEnabled: $backgroundTrackingEnabled, ')
           ..write('timezone: $timezone, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
@@ -4179,6 +4518,21 @@ class $TrackingRulesTable extends TrackingRules
     ),
     defaultValue: const Constant(true),
   );
+  static const VerificationMeta _enabledMeta = const VerificationMeta(
+    'enabled',
+  );
+  @override
+  late final GeneratedColumn<bool> enabled = GeneratedColumn<bool>(
+    'enabled',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("enabled" IN (0, 1))',
+    ),
+    defaultValue: const Constant(true),
+  );
   static const VerificationMeta _updatedAtMeta = const VerificationMeta(
     'updatedAt',
   );
@@ -4209,6 +4563,7 @@ class $TrackingRulesTable extends TrackingRules
     matchKind,
     activityId,
     syncEnabled,
+    enabled,
     updatedAt,
     deletedAt,
   ];
@@ -4268,6 +4623,12 @@ class $TrackingRulesTable extends TrackingRules
         ),
       );
     }
+    if (data.containsKey('enabled')) {
+      context.handle(
+        _enabledMeta,
+        enabled.isAcceptableOrUnknown(data['enabled']!, _enabledMeta),
+      );
+    }
     if (data.containsKey('updated_at')) {
       context.handle(
         _updatedAtMeta,
@@ -4315,6 +4676,10 @@ class $TrackingRulesTable extends TrackingRules
         DriftSqlType.bool,
         data['${effectivePrefix}sync_enabled'],
       )!,
+      enabled: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}enabled'],
+      )!,
       updatedAt: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}updated_at'],
@@ -4342,10 +4707,14 @@ class TrackingRuleRow extends DataClass implements Insertable<TrackingRuleRow> {
   /// 匹配类型（process/title，存储值见 TrackingRuleMatchKind.storageValue）。
   final String matchKind;
 
-  /// 映射到的活动 id（可空：未指定时命中即切未分配？——设计：**必填**，
-  /// 无匹配活动的规则无意义，规则匹配到活动是映射的落点）。
+  /// 映射到的活动 id（必填：规则匹配到活动是映射的落点，无匹配活动的规则
+  /// 无意义）。
   final String activityId;
   final bool syncEnabled;
+
+  /// 规则启停（批次 4 schema v3）：false = 规则保留但不参与匹配（区别于
+  /// 软删——软删是删除语义，启停是临时停用）；随行 LWW 同步。
+  final bool enabled;
   final String updatedAt;
   final String? deletedAt;
   const TrackingRuleRow({
@@ -4355,6 +4724,7 @@ class TrackingRuleRow extends DataClass implements Insertable<TrackingRuleRow> {
     required this.matchKind,
     required this.activityId,
     required this.syncEnabled,
+    required this.enabled,
     required this.updatedAt,
     this.deletedAt,
   });
@@ -4369,6 +4739,7 @@ class TrackingRuleRow extends DataClass implements Insertable<TrackingRuleRow> {
     map['match_kind'] = Variable<String>(matchKind);
     map['activity_id'] = Variable<String>(activityId);
     map['sync_enabled'] = Variable<bool>(syncEnabled);
+    map['enabled'] = Variable<bool>(enabled);
     map['updated_at'] = Variable<String>(updatedAt);
     if (!nullToAbsent || deletedAt != null) {
       map['deleted_at'] = Variable<String>(deletedAt);
@@ -4386,6 +4757,7 @@ class TrackingRuleRow extends DataClass implements Insertable<TrackingRuleRow> {
       matchKind: Value(matchKind),
       activityId: Value(activityId),
       syncEnabled: Value(syncEnabled),
+      enabled: Value(enabled),
       updatedAt: Value(updatedAt),
       deletedAt: deletedAt == null && nullToAbsent
           ? const Value.absent()
@@ -4405,6 +4777,7 @@ class TrackingRuleRow extends DataClass implements Insertable<TrackingRuleRow> {
       matchKind: serializer.fromJson<String>(json['matchKind']),
       activityId: serializer.fromJson<String>(json['activityId']),
       syncEnabled: serializer.fromJson<bool>(json['syncEnabled']),
+      enabled: serializer.fromJson<bool>(json['enabled']),
       updatedAt: serializer.fromJson<String>(json['updatedAt']),
       deletedAt: serializer.fromJson<String?>(json['deletedAt']),
     );
@@ -4419,6 +4792,7 @@ class TrackingRuleRow extends DataClass implements Insertable<TrackingRuleRow> {
       'matchKind': serializer.toJson<String>(matchKind),
       'activityId': serializer.toJson<String>(activityId),
       'syncEnabled': serializer.toJson<bool>(syncEnabled),
+      'enabled': serializer.toJson<bool>(enabled),
       'updatedAt': serializer.toJson<String>(updatedAt),
       'deletedAt': serializer.toJson<String?>(deletedAt),
     };
@@ -4431,6 +4805,7 @@ class TrackingRuleRow extends DataClass implements Insertable<TrackingRuleRow> {
     String? matchKind,
     String? activityId,
     bool? syncEnabled,
+    bool? enabled,
     String? updatedAt,
     Value<String?> deletedAt = const Value.absent(),
   }) => TrackingRuleRow(
@@ -4440,6 +4815,7 @@ class TrackingRuleRow extends DataClass implements Insertable<TrackingRuleRow> {
     matchKind: matchKind ?? this.matchKind,
     activityId: activityId ?? this.activityId,
     syncEnabled: syncEnabled ?? this.syncEnabled,
+    enabled: enabled ?? this.enabled,
     updatedAt: updatedAt ?? this.updatedAt,
     deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
   );
@@ -4455,6 +4831,7 @@ class TrackingRuleRow extends DataClass implements Insertable<TrackingRuleRow> {
       syncEnabled: data.syncEnabled.present
           ? data.syncEnabled.value
           : this.syncEnabled,
+      enabled: data.enabled.present ? data.enabled.value : this.enabled,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
       deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
     );
@@ -4469,6 +4846,7 @@ class TrackingRuleRow extends DataClass implements Insertable<TrackingRuleRow> {
           ..write('matchKind: $matchKind, ')
           ..write('activityId: $activityId, ')
           ..write('syncEnabled: $syncEnabled, ')
+          ..write('enabled: $enabled, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('deletedAt: $deletedAt')
           ..write(')'))
@@ -4483,6 +4861,7 @@ class TrackingRuleRow extends DataClass implements Insertable<TrackingRuleRow> {
     matchKind,
     activityId,
     syncEnabled,
+    enabled,
     updatedAt,
     deletedAt,
   );
@@ -4496,6 +4875,7 @@ class TrackingRuleRow extends DataClass implements Insertable<TrackingRuleRow> {
           other.matchKind == this.matchKind &&
           other.activityId == this.activityId &&
           other.syncEnabled == this.syncEnabled &&
+          other.enabled == this.enabled &&
           other.updatedAt == this.updatedAt &&
           other.deletedAt == this.deletedAt);
 }
@@ -4507,6 +4887,7 @@ class TrackingRulesCompanion extends UpdateCompanion<TrackingRuleRow> {
   final Value<String> matchKind;
   final Value<String> activityId;
   final Value<bool> syncEnabled;
+  final Value<bool> enabled;
   final Value<String> updatedAt;
   final Value<String?> deletedAt;
   final Value<int> rowid;
@@ -4517,6 +4898,7 @@ class TrackingRulesCompanion extends UpdateCompanion<TrackingRuleRow> {
     this.matchKind = const Value.absent(),
     this.activityId = const Value.absent(),
     this.syncEnabled = const Value.absent(),
+    this.enabled = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.deletedAt = const Value.absent(),
     this.rowid = const Value.absent(),
@@ -4528,6 +4910,7 @@ class TrackingRulesCompanion extends UpdateCompanion<TrackingRuleRow> {
     required String matchKind,
     required String activityId,
     this.syncEnabled = const Value.absent(),
+    this.enabled = const Value.absent(),
     required String updatedAt,
     this.deletedAt = const Value.absent(),
     this.rowid = const Value.absent(),
@@ -4543,6 +4926,7 @@ class TrackingRulesCompanion extends UpdateCompanion<TrackingRuleRow> {
     Expression<String>? matchKind,
     Expression<String>? activityId,
     Expression<bool>? syncEnabled,
+    Expression<bool>? enabled,
     Expression<String>? updatedAt,
     Expression<String>? deletedAt,
     Expression<int>? rowid,
@@ -4554,6 +4938,7 @@ class TrackingRulesCompanion extends UpdateCompanion<TrackingRuleRow> {
       if (matchKind != null) 'match_kind': matchKind,
       if (activityId != null) 'activity_id': activityId,
       if (syncEnabled != null) 'sync_enabled': syncEnabled,
+      if (enabled != null) 'enabled': enabled,
       if (updatedAt != null) 'updated_at': updatedAt,
       if (deletedAt != null) 'deleted_at': deletedAt,
       if (rowid != null) 'rowid': rowid,
@@ -4567,6 +4952,7 @@ class TrackingRulesCompanion extends UpdateCompanion<TrackingRuleRow> {
     Value<String>? matchKind,
     Value<String>? activityId,
     Value<bool>? syncEnabled,
+    Value<bool>? enabled,
     Value<String>? updatedAt,
     Value<String?>? deletedAt,
     Value<int>? rowid,
@@ -4578,6 +4964,7 @@ class TrackingRulesCompanion extends UpdateCompanion<TrackingRuleRow> {
       matchKind: matchKind ?? this.matchKind,
       activityId: activityId ?? this.activityId,
       syncEnabled: syncEnabled ?? this.syncEnabled,
+      enabled: enabled ?? this.enabled,
       updatedAt: updatedAt ?? this.updatedAt,
       deletedAt: deletedAt ?? this.deletedAt,
       rowid: rowid ?? this.rowid,
@@ -4605,6 +4992,9 @@ class TrackingRulesCompanion extends UpdateCompanion<TrackingRuleRow> {
     if (syncEnabled.present) {
       map['sync_enabled'] = Variable<bool>(syncEnabled.value);
     }
+    if (enabled.present) {
+      map['enabled'] = Variable<bool>(enabled.value);
+    }
     if (updatedAt.present) {
       map['updated_at'] = Variable<String>(updatedAt.value);
     }
@@ -4626,6 +5016,7 @@ class TrackingRulesCompanion extends UpdateCompanion<TrackingRuleRow> {
           ..write('matchKind: $matchKind, ')
           ..write('activityId: $activityId, ')
           ..write('syncEnabled: $syncEnabled, ')
+          ..write('enabled: $enabled, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('deletedAt: $deletedAt, ')
           ..write('rowid: $rowid')
@@ -6693,6 +7084,12 @@ typedef $$ProfileSettingsTableCreateCompanionBuilder =
       Value<String> reminderMethod,
       Value<int> reminderTimeOfDayMinutes,
       Value<int> mergeNeighborThresholdMinutes,
+      Value<String> themeMode,
+      Value<int> weekStartDay,
+      Value<bool> use24HourFormat,
+      Value<int> defaultRecordMinutes,
+      Value<bool> quickReminderEnabled,
+      Value<bool> backgroundTrackingEnabled,
       required String timezone,
       required String updatedAt,
     });
@@ -6705,6 +7102,12 @@ typedef $$ProfileSettingsTableUpdateCompanionBuilder =
       Value<String> reminderMethod,
       Value<int> reminderTimeOfDayMinutes,
       Value<int> mergeNeighborThresholdMinutes,
+      Value<String> themeMode,
+      Value<int> weekStartDay,
+      Value<bool> use24HourFormat,
+      Value<int> defaultRecordMinutes,
+      Value<bool> quickReminderEnabled,
+      Value<bool> backgroundTrackingEnabled,
       Value<String> timezone,
       Value<String> updatedAt,
     });
@@ -6750,6 +7153,36 @@ class $$ProfileSettingsTableFilterComposer
 
   ColumnFilters<int> get mergeNeighborThresholdMinutes => $composableBuilder(
     column: $table.mergeNeighborThresholdMinutes,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get themeMode => $composableBuilder(
+    column: $table.themeMode,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get weekStartDay => $composableBuilder(
+    column: $table.weekStartDay,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get use24HourFormat => $composableBuilder(
+    column: $table.use24HourFormat,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get defaultRecordMinutes => $composableBuilder(
+    column: $table.defaultRecordMinutes,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get quickReminderEnabled => $composableBuilder(
+    column: $table.quickReminderEnabled,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get backgroundTrackingEnabled => $composableBuilder(
+    column: $table.backgroundTrackingEnabled,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -6808,6 +7241,36 @@ class $$ProfileSettingsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get themeMode => $composableBuilder(
+    column: $table.themeMode,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get weekStartDay => $composableBuilder(
+    column: $table.weekStartDay,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get use24HourFormat => $composableBuilder(
+    column: $table.use24HourFormat,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get defaultRecordMinutes => $composableBuilder(
+    column: $table.defaultRecordMinutes,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get quickReminderEnabled => $composableBuilder(
+    column: $table.quickReminderEnabled,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get backgroundTrackingEnabled => $composableBuilder(
+    column: $table.backgroundTrackingEnabled,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get timezone => $composableBuilder(
     column: $table.timezone,
     builder: (column) => ColumnOrderings(column),
@@ -6856,6 +7319,34 @@ class $$ProfileSettingsTableAnnotationComposer
 
   GeneratedColumn<int> get mergeNeighborThresholdMinutes => $composableBuilder(
     column: $table.mergeNeighborThresholdMinutes,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get themeMode =>
+      $composableBuilder(column: $table.themeMode, builder: (column) => column);
+
+  GeneratedColumn<int> get weekStartDay => $composableBuilder(
+    column: $table.weekStartDay,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get use24HourFormat => $composableBuilder(
+    column: $table.use24HourFormat,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get defaultRecordMinutes => $composableBuilder(
+    column: $table.defaultRecordMinutes,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get quickReminderEnabled => $composableBuilder(
+    column: $table.quickReminderEnabled,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get backgroundTrackingEnabled => $composableBuilder(
+    column: $table.backgroundTrackingEnabled,
     builder: (column) => column,
   );
 
@@ -6910,6 +7401,12 @@ class $$ProfileSettingsTableTableManager
                 Value<String> reminderMethod = const Value.absent(),
                 Value<int> reminderTimeOfDayMinutes = const Value.absent(),
                 Value<int> mergeNeighborThresholdMinutes = const Value.absent(),
+                Value<String> themeMode = const Value.absent(),
+                Value<int> weekStartDay = const Value.absent(),
+                Value<bool> use24HourFormat = const Value.absent(),
+                Value<int> defaultRecordMinutes = const Value.absent(),
+                Value<bool> quickReminderEnabled = const Value.absent(),
+                Value<bool> backgroundTrackingEnabled = const Value.absent(),
                 Value<String> timezone = const Value.absent(),
                 Value<String> updatedAt = const Value.absent(),
               }) => ProfileSettingsCompanion(
@@ -6920,6 +7417,12 @@ class $$ProfileSettingsTableTableManager
                 reminderMethod: reminderMethod,
                 reminderTimeOfDayMinutes: reminderTimeOfDayMinutes,
                 mergeNeighborThresholdMinutes: mergeNeighborThresholdMinutes,
+                themeMode: themeMode,
+                weekStartDay: weekStartDay,
+                use24HourFormat: use24HourFormat,
+                defaultRecordMinutes: defaultRecordMinutes,
+                quickReminderEnabled: quickReminderEnabled,
+                backgroundTrackingEnabled: backgroundTrackingEnabled,
                 timezone: timezone,
                 updatedAt: updatedAt,
               ),
@@ -6932,6 +7435,12 @@ class $$ProfileSettingsTableTableManager
                 Value<String> reminderMethod = const Value.absent(),
                 Value<int> reminderTimeOfDayMinutes = const Value.absent(),
                 Value<int> mergeNeighborThresholdMinutes = const Value.absent(),
+                Value<String> themeMode = const Value.absent(),
+                Value<int> weekStartDay = const Value.absent(),
+                Value<bool> use24HourFormat = const Value.absent(),
+                Value<int> defaultRecordMinutes = const Value.absent(),
+                Value<bool> quickReminderEnabled = const Value.absent(),
+                Value<bool> backgroundTrackingEnabled = const Value.absent(),
                 required String timezone,
                 required String updatedAt,
               }) => ProfileSettingsCompanion.insert(
@@ -6942,6 +7451,12 @@ class $$ProfileSettingsTableTableManager
                 reminderMethod: reminderMethod,
                 reminderTimeOfDayMinutes: reminderTimeOfDayMinutes,
                 mergeNeighborThresholdMinutes: mergeNeighborThresholdMinutes,
+                themeMode: themeMode,
+                weekStartDay: weekStartDay,
+                use24HourFormat: use24HourFormat,
+                defaultRecordMinutes: defaultRecordMinutes,
+                quickReminderEnabled: quickReminderEnabled,
+                backgroundTrackingEnabled: backgroundTrackingEnabled,
                 timezone: timezone,
                 updatedAt: updatedAt,
               ),
@@ -7643,6 +8158,7 @@ typedef $$TrackingRulesTableCreateCompanionBuilder =
       required String matchKind,
       required String activityId,
       Value<bool> syncEnabled,
+      Value<bool> enabled,
       required String updatedAt,
       Value<String?> deletedAt,
       Value<int> rowid,
@@ -7655,6 +8171,7 @@ typedef $$TrackingRulesTableUpdateCompanionBuilder =
       Value<String> matchKind,
       Value<String> activityId,
       Value<bool> syncEnabled,
+      Value<bool> enabled,
       Value<String> updatedAt,
       Value<String?> deletedAt,
       Value<int> rowid,
@@ -7718,6 +8235,11 @@ class $$TrackingRulesTableFilterComposer
 
   ColumnFilters<bool> get syncEnabled => $composableBuilder(
     column: $table.syncEnabled,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get enabled => $composableBuilder(
+    column: $table.enabled,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -7789,6 +8311,11 @@ class $$TrackingRulesTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<bool> get enabled => $composableBuilder(
+    column: $table.enabled,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get updatedAt => $composableBuilder(
     column: $table.updatedAt,
     builder: (column) => ColumnOrderings(column),
@@ -7848,6 +8375,9 @@ class $$TrackingRulesTableAnnotationComposer
     column: $table.syncEnabled,
     builder: (column) => column,
   );
+
+  GeneratedColumn<bool> get enabled =>
+      $composableBuilder(column: $table.enabled, builder: (column) => column);
 
   GeneratedColumn<String> get updatedAt =>
       $composableBuilder(column: $table.updatedAt, builder: (column) => column);
@@ -7913,6 +8443,7 @@ class $$TrackingRulesTableTableManager
                 Value<String> matchKind = const Value.absent(),
                 Value<String> activityId = const Value.absent(),
                 Value<bool> syncEnabled = const Value.absent(),
+                Value<bool> enabled = const Value.absent(),
                 Value<String> updatedAt = const Value.absent(),
                 Value<String?> deletedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
@@ -7923,6 +8454,7 @@ class $$TrackingRulesTableTableManager
                 matchKind: matchKind,
                 activityId: activityId,
                 syncEnabled: syncEnabled,
+                enabled: enabled,
                 updatedAt: updatedAt,
                 deletedAt: deletedAt,
                 rowid: rowid,
@@ -7935,6 +8467,7 @@ class $$TrackingRulesTableTableManager
                 required String matchKind,
                 required String activityId,
                 Value<bool> syncEnabled = const Value.absent(),
+                Value<bool> enabled = const Value.absent(),
                 required String updatedAt,
                 Value<String?> deletedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
@@ -7945,6 +8478,7 @@ class $$TrackingRulesTableTableManager
                 matchKind: matchKind,
                 activityId: activityId,
                 syncEnabled: syncEnabled,
+                enabled: enabled,
                 updatedAt: updatedAt,
                 deletedAt: deletedAt,
                 rowid: rowid,

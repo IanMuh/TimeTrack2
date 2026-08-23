@@ -49,6 +49,7 @@ import 'update_store.dart';
 class AppStore {
   AppStore._({
     required this.database,
+    required this.currentVersion,
     required this.activities,
     required this.undo,
     required this.clock,
@@ -67,6 +68,10 @@ class AppStore {
   });
 
   final AppDatabase database;
+
+  /// 当前应用版本（设置页关于/更新卡展示；pubspec 注入，阶段 4 平台层
+  /// 可换 package_info）。
+  final String currentVersion;
 
   /// 活动仓储（启动 seed 与指令活动名解析共用）。
   final ActivityRepository activities;
@@ -184,6 +189,9 @@ class AppStore {
       dataRevision: revision,
       clock: clock,
       now: now,
+      // 总开关闸门（批次 4）：设置页后台记录总开关（默认关）关闭时不轮询。
+      trackingEnabled: () =>
+          settings.current?.backgroundTrackingEnabled ?? false,
     );
 
     final dispatcher = CommandDispatcher(
@@ -201,6 +209,7 @@ class AppStore {
 
     final store = AppStore._(
       database: database,
+      currentVersion: currentVersion,
       activities: activities,
       undo: undo,
       clock: clock,

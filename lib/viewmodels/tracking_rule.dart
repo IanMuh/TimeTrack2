@@ -40,6 +40,7 @@ class TrackingRule {
     required this.matchKind,
     required this.activityId,
     this.syncEnabled = true,
+    this.enabled = true,
     required this.updatedAt,
     this.deletedAt,
   });
@@ -50,6 +51,9 @@ class TrackingRule {
   final TrackingRuleMatchKind matchKind;
   final String activityId;
   final bool syncEnabled;
+
+  /// 规则启停（false = 保留规则但不参与匹配；区别于软删的删除语义）。
+  final bool enabled;
   final DateTime updatedAt;
   final DateTime? deletedAt;
 
@@ -71,6 +75,7 @@ class TrackingRule {
     TrackingRuleMatchKind? matchKind,
     String? activityId,
     bool? syncEnabled,
+    bool? enabled,
     DateTime? updatedAt,
     DateTime? deletedAt,
     bool clearDeletedAt = false,
@@ -82,6 +87,7 @@ class TrackingRule {
       matchKind: matchKind ?? this.matchKind,
       activityId: activityId ?? this.activityId,
       syncEnabled: syncEnabled ?? this.syncEnabled,
+      enabled: enabled ?? this.enabled,
       updatedAt: updatedAt ?? this.updatedAt,
       deletedAt: clearDeletedAt ? null : deletedAt ?? this.deletedAt,
     );
@@ -95,6 +101,7 @@ class TrackingRule {
       'match_kind': matchKind.storageValue,
       'activity_id': activityId,
       'sync_enabled': syncEnabled,
+      'enabled': enabled,
       'updated_at': updatedAt.toUtc().toIso8601String(),
       'deleted_at': deletedAt?.toUtc().toIso8601String(),
     };
@@ -112,6 +119,7 @@ class TrackingRule {
       matchKind: TrackingRuleMatchKind.fromStorageValue(map['match_kind']),
       activityId: readString(map['activity_id']),
       syncEnabled: readBool(map['sync_enabled']),
+      enabled: map['enabled'] == null ? true : readBool(map['enabled']),
       updatedAt: readDateTime(map['updated_at']),
       deletedAt: readNullableDateTime(map['deleted_at']),
     );

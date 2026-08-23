@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import 'components/app_theme.dart';
 import 'l10n/app_localizations.dart';
+import 'viewmodels/profile_settings.dart' show ThemeModeSetting;
 import 'routes/app_router.dart';
 import 'stores/app_store.dart';
 import 'stores/theme_mode_store.dart';
@@ -58,12 +59,23 @@ class _TimeTrack2AppState extends State<TimeTrack2App> {
   @override
   Widget build(BuildContext context) {
     final router = _router;
+    final store = widget.appStore;
+    // 主题持久化接线（批次 4）：store 模式下以 ProfileSettings.themeMode 为
+    // 单一事实源（设置页经 SettingsStore.save 落库 → 此处重建）；ThemeModeStore
+    // 仅占位模式（appStore == null）与库未加载时的回退。
+    final settingsListenable = store?.settings;
+    final listenable = settingsListenable == null
+        ? _themeMode
+        : Listenable.merge([_themeMode, settingsListenable]);
     return ListenableBuilder(
-      listenable: _themeMode,
+      listenable: listenable,
       builder: (context, _) {
         final theme = TimeTrack2App._light;
         final darkTheme = TimeTrack2App._dark;
-        final themeMode = _themeMode.mode;
+        final persisted = settingsListenable?.current?.themeMode;
+        final themeMode = persisted == null
+            ? _themeMode.mode
+            : themeModeFromSetting(persisted);
         final locale = widget.locale;
         const delegates = [
           AppLocalizations.delegate,
@@ -100,6 +112,15 @@ class _TimeTrack2AppState extends State<TimeTrack2App> {
       },
     );
   }
+}
+
+/// ThemeModeSetting（viewmodels 纯类型）→ material ThemeMode 映射（UI 层）。
+ThemeMode themeModeFromSetting(ThemeModeSetting setting) {
+  return switch (setting) {
+    ThemeModeSetting.light => ThemeMode.light,
+    ThemeModeSetting.dark => ThemeMode.dark,
+    ThemeModeSetting.system => ThemeMode.system,
+  };
 }
 
 /// 占位模式 home（appStore == null 时使用：验证主题/本地化基座可运行；

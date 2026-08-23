@@ -46,6 +46,7 @@ class TrackingStore extends ChangeNotifier {
     ForegroundDetector? detector,
     this.pollInterval = const Duration(seconds: 5),
     DateTime Function()? now,
+    this.trackingEnabled,
   })  : detector = detector ?? _NoopDetector(),
         _now = now ?? DateTime.now {
     clock.addListener(_onTick);
@@ -59,12 +60,32 @@ class TrackingStore extends ChangeNotifier {
 
   /// 轮询间隔（节流：tick 每秒但仅间隔达标才检测）。
   final Duration pollInterval;
+
+  /// 后台记录总开关读取（ProfileSettings.backgroundTrackingEnabled；
+  /// null = 不拦截——测试/无配置场景）。轮询前置闸门：总开关关闭时不检测。
+  final bool Function()? trackingEnabled;
   final DateTime Function() _now;
 
   bool _disposed = false;
   DateTime _lastPoll = DateTime.fromMillisecondsSinceEpoch(0);
   String? _lastMatchedActivityId;
   String? _lastMatchNote;
+  List<TrackingRule> _ruleList = const [];
+
+  /// 当前未删规则列表（设置页渲染；[reloadRules] 后更新，CRUD 自动刷新）。
+  /// 命名避开同文件的仓储字段 [rules]（TrackingRuleRepository）。
+  List<TrackingRule> get ruleList => _ruleList;
+
+  /// 重载规则列表（设置页进入/外部变更后调用）。
+  Future<void> reloadRules() async {
+    if (_disposed) return;
+    final result = await rules.activeRules();
+    if (_disposed) return;
+    if (result.isSuccess) {
+      _ruleList = result.requireValue();
+      notifyListeners();
+    }
+  }
 
   /// 最近一次自动命中切换的活动 id（UI 展示）。
   String? get lastMatchedActivityId => _lastMatchedActivityId;
@@ -92,6 +113,9 @@ class TrackingStore extends ChangeNotifier {
   /// 检测前台并自动切换（供 tick 驱动与手动调用；fake 测试直接调）。
   Future<void> poll() async {
     if (_disposed) return;
+    // 总开关闸门（批次 4）：设置页关闭后台记录时不产生自动切换。
+    final enabledGate = trackingEnabled;
+    if (enabledGate != null && !enabledGate()) return;
     if (_polling) return; // 重入保护（手动调用与 tick 并发时只执行一轮）
     _polling = true;
     try {
@@ -132,6 +156,7 @@ class TrackingStore extends ChangeNotifier {
     List<TrackingRule> candidates,
   ) {
     for (final rule in candidates) {
+      if (!rule.enabled) continue; // 停用规则不参与匹配（区别于软删）
       if (rule.matchKind == TrackingRuleMatchKind.unknown) continue;
       if (rule.matchKind == TrackingRuleMatchKind.process) {
         // 进程缺失时 process 类规则跳过（防 `*` 全通配误命中空进程）。
@@ -181,6 +206,8 @@ class TrackingStore extends ChangeNotifier {
     if (result.isSuccess) {
       dataRevision.bump(); // 数据已变更：即使 dispose 后仍须递增（同步依赖）
       if (_disposed) return result; // await 期间可能已 dispose：跳过通知
+      await reloadRules();
+      if (_disposed) return result;
       notifyListeners();
     }
     return result;
@@ -192,6 +219,8 @@ class TrackingStore extends ChangeNotifier {
     if (result.isSuccess) {
       dataRevision.bump();
       if (_disposed) return result; // await 期间可能已 dispose：跳过通知
+      await reloadRules();
+      if (_disposed) return result;
       notifyListeners();
     }
     return result;
