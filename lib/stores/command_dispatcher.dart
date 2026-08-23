@@ -20,6 +20,7 @@ import '../viewmodels/activity.dart';
 import '../utils/result.dart';
 import '../viewmodels/commands/command_invocation.dart';
 import '../viewmodels/tracking_rule.dart';
+import 'activity_store.dart';
 import 'category_store.dart';
 import 'command_contracts.dart';
 import 'data_revision.dart';
@@ -35,6 +36,7 @@ class CommandDispatcher {
     required this.sync,
     required this.update,
     required this.category,
+    required this.activity,
     required this.tracking,
     required this.activities,
     required this.fileInterop,
@@ -47,6 +49,9 @@ class CommandDispatcher {
   final SyncNowProvider sync;
   final UpdateActions update;
   final CategoryStore category;
+
+  /// 活动 store（批次 5a：activity_create 指令落点，undo 收口）。
+  final ActivityStore activity;
   final TrackingStore tracking;
   final ActivityRepository activities;
   final FileInteropService fileInterop;
@@ -130,6 +135,27 @@ class CommandDispatcher {
       case 'delete':
         final result = await timer.deleteEntry(invocation.args.first);
         return _fromAppResult(result, successMessage: '已删除时间段');
+      case 'entry_update':
+        return _entryUpdate(invocation);
+      case 'activity_create':
+        final createColorRaw = invocation.options['color'];
+        if (createColorRaw != null && int.tryParse(createColorRaw) == null) {
+          return CommandFailure('非法颜色值：--color=<整数>');
+        }
+        final oneOffRaw = invocation.options['one_off'];
+        if (oneOffRaw != null &&
+            oneOffRaw != 'true' &&
+            oneOffRaw != 'false') {
+          return const CommandFailure('非法开关值：--one_off=true|false');
+        }
+        // 默认色与 category_create 同源（teal 0xff0f766e）；UI 路径始终
+        // 显式传色板色，默认值仅兜底 CLI 文本调用。
+        final created = await activity.createActivity(
+          name: invocation.args.first,
+          color: int.tryParse(createColorRaw ?? '') ?? 0xff0f766e,
+          isOneOff: oneOffRaw == 'true',
+        );
+        return _fromAppResultData(created, successMessage: '已新建活动');
 
       // ---- 撤销/重做 ----
       case 'undo':
@@ -310,6 +336,72 @@ class CommandDispatcher {
   // 内部
   // ---------------------------------------------------------------------------
 
+  /// entry_update：条目字段部分更新（至少一项修改）。
+  ///
+  /// 时间语义：--start/--end 为 HH:MM，相对**条目所在本地日**还原（编辑
+  /// 历史条目不漂移日期；跨日移动能力挂账）。显式给出的 --end 落在起点
+  /// 之前时视为次日凌晨（跨零点延伸场景，如 23:00 的条目补 end=00:30）。
+  Future<CommandResult> _entryUpdate(CommandInvocation invocation) async {
+    final options = invocation.options;
+    if (options.isEmpty) {
+      return const CommandFailure(
+          '编辑需要至少一项修改：--activity/--start/--end/--note');
+    }
+    final existing = await timer.entries.entryById(invocation.args.first);
+    if (existing == null) {
+      return const CommandFailure('条目不存在或已删除');
+    }
+    DateTime? startAt;
+    final startRaw = options['start'];
+    if (startRaw != null) {
+      final parsedStart = _todayAt(startRaw);
+      if (parsedStart == null) {
+        return const CommandFailure('非法时间值：--start=HH:MM');
+      }
+      startAt = _onDay(existing.startAt, parsedStart);
+    }
+    DateTime? endAt;
+    final endRaw = options['end'];
+    if (endRaw != null) {
+      final parsedEnd = _todayAt(endRaw);
+      if (parsedEnd == null) {
+        return const CommandFailure('非法时间值：--end=HH:MM');
+      }
+      final baseStart = startAt ?? existing.startAt;
+      var resolvedEnd = _onDay(existing.startAt, parsedEnd);
+      if (!resolvedEnd.isAfter(baseStart)) {
+        resolvedEnd = resolvedEnd.add(const Duration(days: 1));
+        if (!resolvedEnd.isAfter(baseStart)) {
+          // +1 天仍不晚于起点：调用方给的时段跨度超过 24 小时且方向颠倒，
+          // 显式失败而非静默再进位。
+          return const CommandFailure('结束时刻必须晚于开始时刻');
+        }
+      }
+      endAt = resolvedEnd;
+    }
+    String? activityId;
+    final activityName = options['activity'];
+    if (activityName != null) {
+      final resolvedActivity = await _resolveActivityId(activityName);
+      if (resolvedActivity.id == null) {
+        return CommandFailure(resolvedActivity.error ?? '活动名解析失败');
+      }
+      activityId = resolvedActivity.id;
+    }
+    final result = await timer.updateEntry(
+      entryId: invocation.args.first,
+      activityId: activityId,
+      startAt: startAt,
+      endAt: endAt,
+      note: options['note'],
+    );
+    return _fromAppResultData(result, successMessage: '已编辑时间段');
+  }
+
+  /// `HH:MM` 解析出的当日时刻挪到 [base] 所在本地日（entry_update 时间还原）。
+  DateTime _onDay(DateTime base, DateTime timeOfDay) =>
+      DateTime(base.year, base.month, base.day, timeOfDay.hour, timeOfDay.minute);
+
   /// 解析活动名→id（全量未删活动按名精确匹配；重名歧义/不存在明确失败）。
   ///
   /// 返回 `(id, error)` record：id 非 null 时 error 为 null（成功）；失败时
@@ -379,6 +471,19 @@ class CommandDispatcher {
   }) {
     return result.fold(
       onSuccess: (_) => CommandSuccess(message: successMessage),
+      onFailure: (f) => CommandFailure(f.message),
+    );
+  }
+
+  /// `AppResult<T>` → CommandResult 并**透传载荷**（批次 5a）：UI 经指令通道
+  /// 执行后需要产物实体（如 activity_create 返回新活动以继续分类关联）。
+  CommandResult _fromAppResultData<T>(
+    AppResult<T> result, {
+    required String successMessage,
+  }) {
+    return result.fold(
+      onSuccess: (success) =>
+          CommandSuccess<T>(data: success.value, message: successMessage),
       onFailure: (f) => CommandFailure(f.message),
     );
   }

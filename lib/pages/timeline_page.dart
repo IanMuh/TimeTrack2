@@ -18,11 +18,11 @@ import 'timeline_widgets.dart';
 /// 时间线页（契约 §4.3）：竖向时间轴主视图 + 比例条次要 tab + 条目明细 +
 /// 条目编辑对话框 + 日志视图。
 ///
-/// 动作全部经 [CommandDispatcher]（铁律 7）。**挂账（批次 5 收口）**：
-/// - 编辑保存 = delete + add 两条指令（缺 entry_update 指令，撤销为两条非一条）；
-/// - "延伸到当前时刻" 同上；
-/// - add 指令的 start/end 仅支持当日时刻（跨日编辑由对话框校验提示拆分，
-///   保存仍按当日时刻落——跨日能力随 entry_update 一并收口）；
+/// 动作全部经 [CommandDispatcher]（铁律 7）。批次 5a 收口：编辑保存与
+/// "延伸到当前时刻"均走单条 entry_update 指令（一条撤销记录）；时间选项
+/// 相对条目所在日还原，显式 --end 早于起点视为次日凌晨（跨零点延伸）。
+/// **仍挂账**：
+/// - add 指令的 start/end 仅支持当日时刻（跨日移动条目能力未收口）；
 /// - "最长连续" 口径暂取单条最大时长（未接合并阈值设置）。
 class TimelinePage extends StatefulWidget {
   const TimelinePage({super.key, required this.app});
@@ -164,21 +164,30 @@ class _TimelinePageState extends State<TimelinePage> {
       );
 
   Future<bool> _submitEntry(EntryEditDraft draft) async {
-    final target = _activityById(draft.activityId) ?? _activities.firstOrNull;
-    if (target == null) return false;
     final options = <String, String>{
       'start': _hm(draft.start),
       'end': _hm(draft.end ?? DateTime.now()),
       if (draft.note.isNotEmpty) 'note': draft.note,
     };
     if (draft.entryId != null) {
-      // 编辑 = delete + add（挂账：批次 5 entry_update 指令 + 单条撤销）。
-      final del = await app.dispatcher
-          .dispatch(CommandInvocation(name: 'delete', args: [draft.entryId!]));
-      if (!_ok(del)) return false;
+      // 编辑 = 单条 entry_update 指令（一条撤销记录，批次 5a 收口）。
+      // 目标活动按名解析；原活动已删/未选中时不传 --activity——保持条目
+      // 现有活动（部分更新语义），不静默改挂到其他活动。
+      final target = _activityById(draft.activityId);
+      final r = await app.dispatcher.dispatch(CommandInvocation(
+        name: 'entry_update',
+        args: [draft.entryId!],
+        options: {
+          ...options,
+          if (target != null) 'activity': target.name,
+        },
+      ));
+      return _ok(r);
     }
+    final targetNew = _activityById(draft.activityId) ?? _activities.firstOrNull;
+    if (targetNew == null) return false;
     final r = await app.dispatcher.dispatch(
-      CommandInvocation(name: 'add', args: [target.name], options: options),
+      CommandInvocation(name: 'add', args: [targetNew.name], options: options),
     );
     return _ok(r);
   }
@@ -225,18 +234,11 @@ class _TimelinePageState extends State<TimelinePage> {
           CommandInvocation(
               name: 'split', args: [id], options: {'at': _hm(at)}))),
       onExtendToNow: (id) async {
-        // 延伸 = delete + add(start=原起点, end=now)（挂账 entry_update）。
-        final e = _entries.where((x) => x.id == id).firstOrNull;
-        if (e == null) return false;
-        final target = _activityById(e.activityId);
-        if (target == null) return false;
-        final del = await app.dispatcher
-            .dispatch(CommandInvocation(name: 'delete', args: [id]));
-        if (!_ok(del)) return false;
+        // 延伸 = 单条 entry_update（end=now；跨零点由分发器 +1 天启发处理）。
         return _ok(await app.dispatcher.dispatch(CommandInvocation(
-          name: 'add',
-          args: [target.name],
-          options: {'start': _hm(e.startAt), 'end': _hm(DateTime.now())},
+          name: 'entry_update',
+          args: [id],
+          options: {'end': _hm(DateTime.now())},
         )));
       },
     );

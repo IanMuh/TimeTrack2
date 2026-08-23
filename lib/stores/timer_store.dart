@@ -20,6 +20,7 @@
 /// | 操作 | before | after | undo | redo |
 /// |---|---|---|---|---|
 /// | add（新建） | null | 新条目 | 软删新条目 | 恢复新条目 |
+/// | update（编辑） | 旧行全集复活+新段软删 | 新段全集复活+旧行软删 | 对称换血复原旧时段 | 对称换血重放新时段 |
 /// | split | 原条目 | 原条目软删 | 恢复原条目 | 软删原条目 |
 /// | merge | 原条目+邻居 | 原条目软删 | 恢复二者 | 软删原条目 |
 /// | delete | 原条目 | 原条目软删 | 恢复 | 软删 |
@@ -377,6 +378,93 @@ class TimerStore extends ChangeNotifier {
     } finally {
       _endWrite();
     }
+  }
+
+  /// 编辑时间条目字段（批次 5a entry_update 指令落点）：活动/起止/备注
+  /// 部分更新。一条撤销记录（替代旧"delete + add 两条指令两条撤销"）。
+  ///
+  /// undo 语义 = **对称换血**（仓储按段模型返回新旧两套行，见
+  /// [TimeEntryRepository.updateEntryFields]）：停用集 = 被编辑行自身；
+  /// undo 复活它 + 软删全部新段；redo 反向。首段命中原 id 时新旧共享
+  /// 同一 id——以目标态一侧为准去重（同一 id 双 op 会按应用序互相覆盖）。
+  ///
+  /// 返回值取新段首行（id 与被编辑行一致），保持单实体调用契约。
+  ///
+  /// 注：清 end 复活运行态（clearEnd）不在此暴露——多运行不变式风险，
+  /// 仓储能力保留给未来显式场景。
+  Future<AppResult<TimeEntry>> updateEntry({
+    required String entryId,
+    String? activityId,
+    DateTime? startAt,
+    DateTime? endAt,
+    String? note,
+  }) async {
+    if (!_tryBeginWrite()) return const AppFailure('操作进行中，请稍后再试');
+    try {
+      final before = await entries.entryByIdIncludingDeleted(entryId);
+      if (before == null || before.isDeleted) {
+        return const AppFailure('条目不存在或已删除，无法编辑');
+      }
+      final result = await entries.updateEntryFields(
+        entry: before,
+        activityId: activityId,
+        startAt: startAt,
+        endAt: endAt,
+        note: note,
+      );
+      if (result
+          case AppFailure<({List<TimeEntry> saved, List<TimeEntry> deactivated})>
+              failure) {
+        // 失败原因透传（记录类型 ≠ 返回类型，重新包一层 TimeEntry 结果）。
+        return AppFailure<TimeEntry>(failure.message);
+      }
+      final outcome = result.requireValue();
+      final savedRows = outcome.saved;
+      _lastAction = savedRows.first;
+      undo.record(
+        label: '编辑',
+        changes: [
+          UndoChange(
+            // undo 目标态 = 旧行全集复活（主侧胜出共享 id）；redo 反向。
+            before: TimerEntryChange(_mergeUpdateOps(
+              outcome.deactivated,
+              softDelete: false,
+              secondary: savedRows,
+              secondarySoftDelete: true,
+            )),
+            after: TimerEntryChange(_mergeUpdateOps(
+              savedRows,
+              softDelete: false,
+              secondary: outcome.deactivated,
+              secondarySoftDelete: true,
+            )),
+            applier: _applier,
+          ),
+        ],
+      );
+      // 运行条目被补 end 后不再是运行态——时钟 tick 只 notify 不重查，
+      // 缓存须主动刷新防"已结束仍显示计时"。refresh 内部含 notify。
+      await refresh();
+      _afterWrite();
+      return AppSuccess(savedRows.first);
+    } finally {
+      _endWrite();
+    }
+  }
+
+  /// 按条目 id 去重合并两组恢复 op：[primary] 的目标态覆盖 [secondary]
+  /// （编辑换血中同 id 只能有一个终态——防同 id 双 op 按应用序互相覆盖）。
+  static List<({TimeEntry entry, bool softDelete})> _mergeUpdateOps(
+    Iterable<TimeEntry> primary, {
+    required bool softDelete,
+    required Iterable<TimeEntry> secondary,
+    required bool secondarySoftDelete,
+  }) {
+    final byId = <String, ({TimeEntry entry, bool softDelete})>{
+      for (final e in secondary) e.id: (entry: e, softDelete: secondarySoftDelete),
+      for (final e in primary) e.id: (entry: e, softDelete: softDelete),
+    };
+    return byId.values.toList();
   }
 
   /// 删除时间段。

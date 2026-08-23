@@ -33,6 +33,7 @@ import '../data/repositories/tracking_rule_repository.dart';
 import '../data/sync/sync_bundle_repository.dart';
 import '../data/update/windows_installer.dart';
 import '../utils/result.dart';
+import 'activity_store.dart';
 import 'category_store.dart';
 import 'clock_store.dart';
 import 'command_dispatcher.dart';
@@ -59,6 +60,7 @@ class AppStore {
     required this.dataRevision,
     required this.timer,
     required this.category,
+    required this.activity,
     required this.settings,
     required this.today,
     required this.timeline,
@@ -86,6 +88,9 @@ class AppStore {
   final DataRevision dataRevision;
   final TimerStore timer;
   final CategoryStore category;
+
+  /// 活动 store（批次 5a：activity_create 指令落点 + 新建撤销）。
+  final ActivityStore activity;
   final SettingsStore settings;
   final TodayStore today;
   final TimelineStore timeline;
@@ -155,6 +160,11 @@ class AppStore {
       undo: undo,
       dataRevision: revision,
     );
+    final activity = ActivityStore(
+      activities: activities,
+      undo: undo,
+      dataRevision: revision,
+    );
     final settings = SettingsStore(
       settings: settingsRepo,
       undo: undo,
@@ -219,6 +229,7 @@ class AppStore {
       sync: sync,
       update: update,
       category: category,
+      activity: activity,
       tracking: tracking,
       activities: activities,
       fileInterop: fileInterop,
@@ -235,6 +246,7 @@ class AppStore {
       dataRevision: revision,
       timer: timer,
       category: category,
+      activity: activity,
       settings: settings,
       today: today,
       timeline: timeline,
@@ -307,6 +319,7 @@ class AppStore {
     today.dispose();
     settings.dispose();
     category.dispose();
+    activity.dispose();
     timer.dispose();
     clock.dispose();
     dataRevision.dispose();

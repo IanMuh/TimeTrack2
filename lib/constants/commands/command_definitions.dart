@@ -73,6 +73,28 @@ final List<CommandDefinition> commandDefinitions = [
     // 解析器只做选项键/时间值校验，不做取值枚举校验。
     description: '与相邻条目合并：merge <id> --direction=previous|next',
   ),
+  CommandDefinition(
+    name: 'entry_update',
+    aliases: ['编辑条目'],
+    minPositionalArgs: 1,
+    maxPositionalArgs: 1,
+    allowedOptions: {'activity', 'start', 'end', 'note'},
+    timeOptions: {'start', 'end'},
+    description:
+        '编辑时间条目（至少一项修改）：entry_update <id> [--activity=<活动名>] '
+        '[--start=HH:MM] [--end=HH:MM] [--note=...]（时间相对条目所在日）',
+  ),
+
+  // ---- 活动 ----
+  CommandDefinition(
+    name: 'activity_create',
+    aliases: ['新建活动'],
+    minPositionalArgs: 1,
+    maxPositionalArgs: 1,
+    allowedOptions: {'color', 'one_off'},
+    description:
+        '新建活动：activity_create <名称> [--color=<整数>] [--one_off=true|false]',
+  ),
 
   // ---- 撤销/重做 ----
   CommandDefinition(

@@ -18,11 +18,13 @@ import 'timer_widgets.dart';
 /// [CommandDispatcher] 指令通道（不变式 6/7），活动选择复用 §5.1 合并选择器
 /// （契约文件 `components/activity_picker/activity_picker.dart`）。
 ///
-/// 已知边界（注释即挂账单，批次 5 收口）：
-/// - "临时活动"= 创建一次性活动再切换，属两条数据操作，**非单条撤销记录**
-///   （缺 ActivityChangeApplier，收口时并入 activity_create 指令）；
+/// 已知边界（注释即挂账单）：
 /// - 活动 isOneOff 的编辑切换仓储 updateActivity 暂不支持（只支持 名/色），
 ///   表单提交后 oneOff 变更不落库（按钮语义保留，落库能力随批次 5）。
+///
+/// 批次 5a 收口：新建活动（选择器表单 + "临时活动"）统一经 activity_create
+/// 指令通道——单条撤销记录（undo=软删/redo=复活）；分类关联仍走
+/// CategoryStore.setActivityCategories（指令通道化挂账不变）。
 class TimerPage extends StatefulWidget {
   const TimerPage({super.key, required this.app});
 
@@ -214,15 +216,26 @@ class _TimerPageState extends State<TimerPage> {
   }
 
   Future<bool> _createActivity(ActivityDraft draft) async {
-    final result = await app.activities.createActivity(
-      name: draft.name,
-      color: draft.color,
-      isOneOff: draft.oneOff,
-    );
-    if (result.isSuccess == false) return false;
-    final activity = result.requireValue();
-    return _applyLinks(activity.id, draft.mainCategoryId, draft.secondaryCategoryIds);
+    // 经指令通道新建（activity_create，单条撤销记录）；从结果载荷取回
+    // 新活动实体以继续分类关联。
+    final result = await app.dispatcher.dispatch(CommandInvocation(
+      name: 'activity_create',
+      args: [draft.name],
+      options: {
+        'color': draft.color.toString(),
+        if (draft.oneOff) 'one_off': 'true',
+      },
+    ));
+    final created = _payloadOf(result);
+    if (created is! Activity) return false;
+    return _applyLinks(created.id, draft.mainCategoryId, draft.secondaryCategoryIds);
   }
+
+  /// CommandResult 载荷提取（成功返回 data；失败/空载返回 null）。
+  static Object? _payloadOf(CommandResult result) => switch (result) {
+        final CommandSuccess success => success.data,
+        final CommandFailure _ => null,
+      };
 
   Future<bool> _editActivity(Activity activity) async {
     // 名/色支持；isOneOff 切换落库能力批次 5（仓储 updateActivity 仅名/色）。
@@ -260,18 +273,24 @@ class _TimerPageState extends State<TimerPage> {
     if (existing != null) {
       activity = existing;
     } else {
-      final result = await app.activities.createActivity(
-        name: name,
-        color: ActivityPalette.of(ActivityPalette.amber, dark: false),
-        isOneOff: true,
-      );
-      if (result.isSuccess == false) {
+      // 创建同样经 activity_create 指令通道（单条撤销记录，批次 5a）。
+      final result = await app.dispatcher.dispatch(CommandInvocation(
+        name: 'activity_create',
+        args: [name],
+        options: {
+          'color':
+              ActivityPalette.of(ActivityPalette.amber, dark: false).toString(),
+          'one_off': 'true',
+        },
+      ));
+      final created = _payloadOf(result);
+      if (created is! Activity) {
         if (mounted) {
           showAppSnackBar(context, message: l10n.createFailed, isError: true);
         }
         return;
       }
-      activity = result.requireValue();
+      activity = created;
     }
     if (!mounted) return;
     _switchTo(activity);
