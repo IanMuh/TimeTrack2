@@ -73,6 +73,8 @@ class _GatedStatsRepository extends StatsRepository {
     required DateTime start,
     required DateTime end,
     DateTime? effectiveNow,
+    Set<String>? categoryFilterIds,
+    bool includeAuto = false,
   }) {
     if (gates.isEmpty) {
       return _run(start: start, end: end, effectiveNow: effectiveNow);

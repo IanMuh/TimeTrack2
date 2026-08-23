@@ -15,8 +15,8 @@ import 'stats_widgets.dart';
 /// 统计页（契约 §4.4）：范围 5 预设 + 步进、维度 4 种、树形筛选、
 /// 树聚合全屏宽、fl_chart 柱状+环形+每日明细、排除自动、AI 入口预留。
 ///
-/// **挂账（批次 5）**：compute 暂无分类过滤/排除自动参数——筛选与排除
-/// 在页内生效于图表/明细（条目层），聚合行过滤随 compute 参数收口。
+/// 批次 5b 已收口：分类筛选与"排除自动条目"经 compute 参数在仓储切片层
+/// 生效（聚合行/环形图/明细同口径）；页内仅保留明细条目列表的等价过滤。
 class StatsPage extends StatefulWidget {
   const StatsPage({super.key, required this.app});
 
@@ -101,7 +101,16 @@ class _StatsPageState extends State<StatsPage> {
 
   Future<void> _compute() async {
     final (s, e) = _range;
-    await app.stats.compute(start: s, end: e, dimension: _dimension);
+    // 批次 5b：分类过滤/排除自动下沉到 compute（仓储切片层），聚合行、
+    // 环形图与明细同口径；页内不再做行级补偿过滤。
+    await app.stats.compute(
+      start: s,
+      end: e,
+      dimension: _dimension,
+      categoryFilterIds:
+          _selectedCategories.isEmpty ? null : Set.of(_selectedCategories),
+      includeAuto: _excludeAuto,
+    );
   }
 
   Future<void> _loadEntries() async {
@@ -363,15 +372,21 @@ class _StatsPageState extends State<StatsPage> {
           _selectedCategories.contains(id)
               ? _selectedCategories.remove(id)
               : _selectedCategories.add(id);
+          _compute(); // 过滤参数下沉 compute（批次 5b）：选择变化须重算
         }),
         onToggleExpand: (id) => setState(() {
           _treeExpanded.contains(id)
               ? _treeExpanded.remove(id)
               : _treeExpanded.add(id);
         }),
-        onAll: () => setState(
-            () => _selectedCategories.addAll(app.category.all.map((c) => c.id))),
-        onNone: () => setState(_selectedCategories.clear),
+        onAll: () => setState(() {
+          _selectedCategories.addAll(app.category.all.map((c) => c.id));
+          _compute();
+        }),
+        onNone: () => setState(() {
+          _selectedCategories.clear();
+          _compute();
+        }),
       ),
     );
   }
@@ -432,12 +447,15 @@ class _StatsPageState extends State<StatsPage> {
           },
         ),
         const SizedBox(height: 8),
-        // 排除自动条目开关（页内生效于图表/明细；聚合行过滤挂账批次 5）。
+        // 排除自动条目开关（compute 下沉后聚合行/图表/明细同口径，批次 5b）。
         Row(
           children: [
             AppToggle(
               value: _excludeAuto,
-              onChanged: (v) => setState(() => _excludeAuto = v),
+              onChanged: (v) {
+                setState(() => _excludeAuto = v);
+                _compute();
+              },
               label: l10n.stExcludeAuto,
             ),
           ],
@@ -472,9 +490,8 @@ class _StatsPageState extends State<StatsPage> {
   }
 
   List<Widget> _buildRows(dynamic snapshot, ColorScheme scheme) {
-    final rows = (snapshot.rows as List<dynamic>)
-        .where((r) => _rowPassesFilter(r))
-        .toList()
+    // 批次 5b：过滤已下沉 compute，快照行即过滤后结果——不再页内补偿。
+    final rows = (snapshot.rows as List<dynamic>).toList()
       ..sort((a, b) => b.totalDuration.compareTo(a.totalDuration));
     final collapsedAncestors = <String>{};
     final out = <Widget>[];
@@ -505,22 +522,12 @@ class _StatsPageState extends State<StatsPage> {
     return out;
   }
 
-  /// 行过滤（页内：分类筛选对 category 前缀行生效——挂账 compute 参数）。
-  bool _rowPassesFilter(dynamic row) {
-    if (_selectedCategories.isEmpty) return true;
-    final id = row.id as String;
-    if (!id.startsWith('category:')) return true;
-    final catId = id.substring('category:'.length);
-    if (_selectedCategories.contains(catId)) return true;
-    final desc = app.category.descendantsOf[catId] ?? const <String>{};
-    return desc.any(_selectedCategories.contains);
-  }
+  /// 行过滤已下沉 compute（批次 5b）：快照行即按当前筛选/排除自动计算
+  /// 的结果，页内不再做 category 前缀的行级补偿。
 
   /// 环形图切片（当前维度 top6 + 其他）。
   List<(String, Color, Duration)> _slices(dynamic snapshot) {
-    final rows = (snapshot.rows as List<dynamic>)
-        .where((r) => _rowPassesFilter(r))
-        .toList()
+    final rows = (snapshot.rows as List<dynamic>).toList()
       ..sort((a, b) => b.totalDuration.compareTo(a.totalDuration));
     final top = rows.take(6).toList();
     var others = Duration.zero;
