@@ -42,6 +42,9 @@ class _FakeBackend implements SyncBackend {
 }
 
 void main() {
+  // AppStore.create 现装配 TrayService（批次 6）：MethodChannel 处理器
+  // 注册需要 Binding（Windows 测试宿主上会真实注册）。
+  TestWidgetsFlutterBinding.ensureInitialized();
   group('AppStore 组装与启动编排', () {
     test('create：组装全部 store 并加载缓存（内存库，跳过网络检查）', () async {
       final db = AppDatabase(NativeDatabase.memory());

@@ -1,6 +1,7 @@
 
 import 'dart:io' show stderr;
 
+import '../../constants/storage_keys.dart';
 import '../../utils/result.dart';
 import '../../viewmodels/profile_settings.dart';
 import '../database/app_database.dart' hide ProfileSettings;
@@ -80,5 +81,39 @@ class SettingsRepository with RepositoryMappings {
     final query = database.select(database.profileSettings)
       ..where((t) => t.id.equals(1));
     return query.getSingleOrNull();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Windows 关窗到托盘模式（批次 6 托盘；app_metadata 键值存储）
+  // ---------------------------------------------------------------------------
+
+  /// 读取关窗模式：`ask`（默认）/ `minimize` / `exit`。库内无值或取值
+  /// 非法均回退 [TrayCloseMode.ask]——白名单唯一权威在 [TrayCloseMode]。
+  Future<String> trayCloseMode() async {
+    try {
+      final row = await (database.select(database.appMetadata)
+            ..where((t) => t.key.equals(AppMetadataKeys.closeToTrayMode)))
+          .getSingleOrNull();
+      final value = row?.value;
+      if (value != null && TrayCloseMode.all.contains(value)) {
+        return value;
+      }
+      return TrayCloseMode.ask;
+    } catch (e) {
+      // ignore: avoid_print
+      stderr.writeln('[settings] 读取关窗模式失败（回退 ask）：$e');
+      return TrayCloseMode.ask;
+    }
+  }
+
+  /// 写入关窗模式（非法取值抛 ArgumentError——调用方 UI 白名单内传值）。
+  Future<void> setTrayCloseMode(String mode) async {
+    if (!TrayCloseMode.all.contains(mode)) {
+      throw ArgumentError.value(mode, 'mode', '非法关窗模式');
+    }
+    await database.into(database.appMetadata).insertOnConflictUpdate(
+          AppMetadataCompanion.insert(
+              key: AppMetadataKeys.closeToTrayMode, value: mode),
+        );
   }
 }

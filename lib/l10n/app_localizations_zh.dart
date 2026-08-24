@@ -786,6 +786,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get exitApp => '退出应用';
 
   @override
+  String get trayCloseRemember => '记住我的选择，不再询问';
+
+  @override
   String get stillDoingThis => '仍在进行这个活动？';
 
   @override

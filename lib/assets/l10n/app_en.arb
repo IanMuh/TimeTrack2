@@ -247,6 +247,7 @@
   "closeAppContent": "Minimizing to tray keeps background tracking running",
   "minimizeToTray": "Minimize to tray",
   "exitApp": "Exit app",
+  "trayCloseRemember": "Remember my choice, don't ask again",
   "stillDoingThis": "Still doing this?",
   "activityRunningMinutes": "Running for {minutes} minutes",
   "remindLater": "Remind later",

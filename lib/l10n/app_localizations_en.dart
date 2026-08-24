@@ -793,6 +793,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get exitApp => 'Exit app';
 
   @override
+  String get trayCloseRemember => 'Remember my choice, don\'t ask again';
+
+  @override
   String get stillDoingThis => 'Still doing this?';
 
   @override

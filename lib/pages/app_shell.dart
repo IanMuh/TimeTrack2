@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../components/global_timer_bar.dart';
+import '../constants/storage_keys.dart';
 import '../l10n/app_localizations.dart';
 import '../stores/app_store.dart';
 import '../stores/reminder_store.dart';
@@ -85,12 +86,19 @@ class _AppShellState extends State<AppShell> {
   final Set<String> _updateSnackbarShownVersions = {};
   bool _forcedUpdateDialogShown = false;
 
+  // ---- Windows 托盘（批次 6）----
+
+  /// 关窗模式（`ask`/`minimize`/`exit`；启动异步加载，未加载前按 ask 兜底）。
+  String _trayCloseMode = TrayCloseMode.ask;
+  bool _closeDialogShownThisSession = false;
+
   @override
   void initState() {
     super.initState();
     _sessionStart = widget.app.clock.now();
     widget.app.reminder.addListener(_onReminderChanged);
     widget.app.update.addListener(_onUpdateChanged);
+    _wireTray();
     // 可疑条目启动检测：AppStore.init 已 await timer.refresh()，postFrame
     // 时 runningEntry 缓存可用；timer 监听兜底晚到场景（幂等，标志位去重）。
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -104,11 +112,141 @@ class _AppShellState extends State<AppShell> {
     widget.app.reminder.removeListener(_onReminderChanged);
     widget.app.update.removeListener(_onUpdateChanged);
     widget.app.timer.removeListener(_onTimerForSuspicious);
+    // 托盘回调指向本 State：dispose 后必须摘除（服务随 AppStore 存活）。
+    widget.app.tray.onCommand = null;
+    widget.app.tray.onCloseToTray = null;
     super.dispose();
+  }
+
+  /// 托盘事件接线（批次 6）：命令路由 + 关窗模式加载。
+  void _wireTray() {
+    final tray = widget.app.tray;
+    tray.onCommand = (command) {
+      switch (command) {
+        case 'togglePause':
+          final tracking = widget.app.tracking;
+          tracking.setSessionPaused(!tracking.sessionPaused);
+          setState(() {}); // 计时条重建 → 推送新暂停态给托盘菜单/tooltip
+        case 'show':
+          // 唤起窗口由 native 完成；Dart 侧无需动作（保留分支防未来扩展）。
+          break;
+      }
+    };
+    tray.onCloseToTray = _onClosedToTray;
+    unawaited(_loadTrayCloseMode());
+  }
+
+  Future<void> _loadTrayCloseMode() async {
+    final mode = await widget.app.settings.trayCloseMode();
+    if (!mounted) return;
+    setState(() => _trayCloseMode = mode);
+    // 加载完成后立即推送一次托盘配置（非 Windows no-op）。
+    _pushTrayStatus();
+  }
+
+  /// 关窗被拦截并隐藏到托盘后：ask 模式且本次会话未询问过 → 弹选择对话框
+  /// （契约 §6.4"首次关窗弹选择对话框，可记住选择"）。
+  Future<void> _onClosedToTray() async {
+    if (_trayCloseMode != TrayCloseMode.ask || _closeDialogShownThisSession) {
+      return;
+    }
+    if (!mounted) return;
+    _closeDialogShownThisSession = true;
+    await _showClosePreferenceDialog();
   }
 
   void _onTimerForSuspicious() {
     _checkSuspiciousEntry();
+  }
+
+  /// 首次关窗选择对话框：最小化到托盘（默认）/ 直接退出 + 记住选择。
+  Future<void> _showClosePreferenceDialog() async {
+    if (!mounted) return;
+    final l10n = AppLocalizations.of(context)!;
+    var selected = TrayCloseMode.minimize; // 契约：默认最小化到托盘
+    var remember = true;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => AlertDialog(
+          backgroundColor: Theme.of(dialogContext).colorScheme.surface,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text(l10n.closeAppTitle, style: const TextStyle(fontSize: 15)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(l10n.closeAppContent),
+              // RadioGroup（3.32+ 新 API）：组值/回调收敛到祖先，单钮只声明 value。
+              RadioGroup<String>(
+                groupValue: selected,
+                onChanged: (v) =>
+                    setDialogState(() => selected = v ?? selected),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    RadioListTile<String>(
+                      value: TrayCloseMode.minimize,
+                      title: Text(l10n.minimizeToTray),
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                    ),
+                    RadioListTile<String>(
+                      value: TrayCloseMode.exit,
+                      title: Text(l10n.exitApp),
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                    ),
+                  ],
+                ),
+              ),
+              CheckboxListTile(
+                value: remember,
+                onChanged: (v) => setDialogState(() => remember = v ?? true),
+                title: Text(l10n.trayCloseRemember),
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.leading,
+                dense: true,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: Text(l10n.ok),
+            ),
+            FilledButton(
+              onPressed: () async {
+                Navigator.of(dialogContext).pop();
+                if (remember) {
+                  await widget.app.settings.setTrayCloseMode(selected);
+                }
+                if (!mounted) return;
+                setState(() => _trayCloseMode = selected);
+                _pushTrayStatus();
+              },
+              child: Text(l10n.ok),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 推送托盘状态（模式 + 记录态 + 暂停态；服务内去重）。在计时条构建器
+  /// 中每秒调用——重复推送被 TrayService 拦截，无通道流量。
+  void _pushTrayStatus() {
+    final running = widget.app.timer.runningEntry;
+    final recording =
+        running != null && !_entryIsUnassigned;
+    final activity = recording ? running.activityNameSnapshot : '';
+    unawaited(widget.app.tray.configure(
+      mode: _trayCloseMode,
+      recording: recording,
+      paused: widget.app.tracking.sessionPaused,
+      activity: activity,
+    ));
   }
 
   void _onReminderChanged() {
@@ -607,6 +745,8 @@ class _AppShellState extends State<AppShell> {
           }
         }
         final canStop = recording;
+        // 托盘状态推送（批次 6；服务内去重，秒级调用无通道流量）。
+        _pushTrayStatus();
         return GlobalTimerBar(
           isRecording: recording,
           activityName: name,

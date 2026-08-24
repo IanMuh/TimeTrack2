@@ -10,6 +10,9 @@ dependencies:
   crypto: ^3.0.7
   drift: ^2.34.3
   drift_flutter: ^0.3.1
+  # **直接固定传递依赖 ffi**（批次 6 Windows FFI 前台检测器直接使用
+  # calloc/Utf16；drift/sqlite3 已传递引入 2.x）——直接声明使意图显式可见。
+  ffi: ^2.2.0
   file_selector: ^1.1.0
   fl_chart: ^1.2.0
   flutter:

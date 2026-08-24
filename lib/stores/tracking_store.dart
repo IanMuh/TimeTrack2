@@ -66,6 +66,19 @@ class TrackingStore extends ChangeNotifier {
   final bool Function()? trackingEnabled;
   final DateTime Function() _now;
 
+  /// 会话级暂停（批次 6 托盘「暂停/恢复记录」落点）：true 时 poll 前置闸门
+  /// 拦截——后台自动检测挂起，不影响当前计时条目，也不改动持久化的
+  /// [trackingEnabled] 总开关（重启后恢复原设置状态）。内存态。
+  bool _sessionPaused = false;
+  bool get sessionPaused => _sessionPaused;
+
+  /// 设置会话级暂停（托盘菜单切换；幂等——同值不重复通知）。
+  void setSessionPaused(bool paused) {
+    if (_sessionPaused == paused) return;
+    _sessionPaused = paused;
+    notifyListeners();
+  }
+
   bool _disposed = false;
   DateTime _lastPoll = DateTime.fromMillisecondsSinceEpoch(0);
   String? _lastMatchedActivityId;
@@ -116,6 +129,8 @@ class TrackingStore extends ChangeNotifier {
     // 总开关闸门（批次 4）：设置页关闭后台记录时不产生自动切换。
     final enabledGate = trackingEnabled;
     if (enabledGate != null && !enabledGate()) return;
+    // 会话级暂停闸门（批次 6 托盘「暂停记录」）：挂起时不产生自动切换。
+    if (_sessionPaused) return;
     // 手动会话保持（批次 5c 切换防冲突）：用户手动切换/停止后，自动记录
     // 不抢占——auto 不覆盖手动选择。
     if (timer.manualSessionHold) return;

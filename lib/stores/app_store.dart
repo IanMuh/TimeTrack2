@@ -13,6 +13,8 @@ library;
 import 'dart:async';
 import 'dart:io' show Directory, Platform;
 
+import '../api/platform/tray_service.dart';
+import '../api/platform/windows_foreground_detector.dart';
 import '../api/supabase/sync_backend.dart';
 import '../api/supabase/sync_status_store.dart';
 import '../api/update/update_downloader.dart';
@@ -72,6 +74,7 @@ class AppStore {
     required this.tracking,
     required this.lan,
     required this.wipe,
+    required this.tray,
     required this.dispatcher,
     required this.fileInterop,
   });
@@ -109,6 +112,9 @@ class AppStore {
 
   /// 数据全清服务（设置页危险区）。
   final DataWipeService wipe;
+
+  /// Windows 托盘桥接（批次 6；非 Windows 平台全部 no-op）。
+  final TrayService tray;
   final CommandDispatcher dispatcher;
   final FileInteropService fileInterop;
 
@@ -224,16 +230,23 @@ class AppStore {
       appVersion: currentVersion,
     );
     final wipe = DataWipeService(database: database);
+    // 前台检测器（批次 6 平台层）：Windows 注入 FFI 真实现，其余平台
+    // 保持 Noop（检测器抽象不变，TrackingStore 零感知）。
     final tracking = TrackingStore(
       rules: rules,
       timer: timer,
       dataRevision: revision,
       clock: clock,
       now: now,
+      detector: WindowsForegroundDetector.isSupported
+          ? WindowsForegroundDetector()
+          : NoopForegroundDetector(),
+      pollInterval: const Duration(seconds: 5),
       // 总开关闸门（批次 4）：设置页后台记录总开关（默认关）关闭时不轮询。
       trackingEnabled: () =>
           settings.current?.backgroundTrackingEnabled ?? false,
     );
+    final tray = TrayService();
 
     final dispatcher = CommandDispatcher(
       undo: undo,
@@ -269,6 +282,7 @@ class AppStore {
       tracking: tracking,
       lan: lan,
       wipe: wipe,
+      tray: tray,
       dispatcher: dispatcher,
       fileInterop: fileInterop,
     );

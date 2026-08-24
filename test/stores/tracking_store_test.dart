@@ -365,4 +365,33 @@ void main() {
       );
     });
   });
+
+  group('TrackingStore 会话级暂停（批次 6 托盘「暂停记录」）', () {
+    test('暂停后 poll 不切换；恢复后正常工作；幂等设置不重复通知', () async {
+      final h = _TestHarness();
+      addTearDown(h.close);
+      final a =
+          (await h.activities.createActivity(name: 'A', color: 0)).requireValue();
+      await h.seedRule(process: 'chrome.exe', activityId: a.id);
+      h.detector.processName = 'chrome.exe';
+
+      // 暂停：命中规则也不切换（且不进入手动保持——两闸门独立）。
+      var notifyCount = 0;
+      void listener() => notifyCount++;
+      h.tracking.addListener(listener);
+      h.tracking.setSessionPaused(true);
+      expect(h.tracking.sessionPaused, isTrue);
+      h.tracking.setSessionPaused(true); // 幂等：同值不再通知
+      expect(notifyCount, 1);
+
+      await h.tracking.poll();
+      expect(await h.entries.runningEntry(), isNull, reason: '挂起时不自动开始');
+
+      // 恢复：自动检测照常工作。
+      h.tracking.removeListener(listener);
+      h.tracking.setSessionPaused(false);
+      await h.tracking.poll();
+      expect((await h.entries.runningEntry())!.activityId, a.id);
+    });
+  });
 }

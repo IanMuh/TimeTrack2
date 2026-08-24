@@ -1580,6 +1580,12 @@ abstract class AppLocalizations {
   /// **'退出应用'**
   String get exitApp;
 
+  /// No description provided for @trayCloseRemember.
+  ///
+  /// In zh, this message translates to:
+  /// **'记住我的选择，不再询问'**
+  String get trayCloseRemember;
+
   /// No description provided for @stillDoingThis.
   ///
   /// In zh, this message translates to:
