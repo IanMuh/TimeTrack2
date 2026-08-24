@@ -413,7 +413,7 @@
   "stDailyDetail": "Daily detail",
   "stLegendOther": "Other",
   "stExcludeAuto": "Exclude auto entries",
-  "stExcludeAutoHint": "Background auto entries are excluded from charts and details (row filter lands with compute params in batch 5)",
+  "stExcludeAutoHint": "Background auto entries are excluded from stats — details, charts and aggregate rows share the same filter",
   "stAiButton": "AI summary",
   "stAiPhase2": "Phase 2",
   "stAiGuideTitle": "AI summary not configured",

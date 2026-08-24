@@ -2579,7 +2579,7 @@ abstract class AppLocalizations {
   /// No description provided for @stExcludeAutoHint.
   ///
   /// In zh, this message translates to:
-  /// **'后台自动记录的条目不参与统计（明细与图表生效；聚合行过滤随批次 5 接入 compute 参数）'**
+  /// **'后台自动记录的条目不参与统计（明细、图表与聚合行同口径生效）'**
   String get stExcludeAutoHint;
 
   /// No description provided for @stAiButton.

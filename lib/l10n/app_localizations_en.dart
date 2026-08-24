@@ -1310,7 +1310,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get stExcludeAutoHint =>
-      'Background auto entries are excluded from charts and details (row filter lands with compute params in batch 5)';
+      'Background auto entries are excluded from stats — details, charts and aggregate rows share the same filter';
 
   @override
   String get stAiButton => 'AI summary';

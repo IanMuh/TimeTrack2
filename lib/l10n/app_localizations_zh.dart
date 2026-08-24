@@ -1295,8 +1295,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get stExcludeAuto => '排除自动条目';
 
   @override
-  String get stExcludeAutoHint =>
-      '后台自动记录的条目不参与统计（明细与图表生效；聚合行过滤随批次 5 接入 compute 参数）';
+  String get stExcludeAutoHint => '后台自动记录的条目不参与统计（明细、图表与聚合行同口径生效）';
 
   @override
   String get stAiButton => 'AI 总结';
