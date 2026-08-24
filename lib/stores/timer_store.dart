@@ -158,6 +158,15 @@ class TimerStore extends ChangeNotifier {
   /// 最近一次操作产物（切换/停止/补记/切割/合并的条目；删除为 null）。
   TimeEntry? get lastAction => _lastAction;
 
+  /// 手动会话保持（批次 5c 切换防冲突）：用户**手动**切换/停止后置真，
+  /// 自动记录（TrackingStore）在此标志为真时不得抢占——auto 不覆盖手动
+  /// 选择。手动停止同样保护（"未在记录"也是用户的主动选择）。自动切换
+  /// 不触碰本标志（它只在标志为假时才被允许发生）；内存态，重启即复位。
+  bool _manualHold = false;
+
+  /// 是否处于手动会话保持（供 TrackingStore 前置闸门读取）。
+  bool get manualSessionHold => _manualHold;
+
   // ---------------------------------------------------------------------------
   // 查询
   // ---------------------------------------------------------------------------
@@ -201,6 +210,9 @@ class TimerStore extends ChangeNotifier {
       }
       _lastAction = after;
       _runningEntry = after; // 写路径同步刷新运行条目缓存（时钟 tick 不触发 refresh）
+      if (!isAuto) {
+        _manualHold = true; // 手动选择：自动记录让位（切换防冲突，批次 5c）
+      }
       _recordSwitchOrStop('切换', beforeRunning, after, oldRunningAfter);
       _afterWrite();
       return result;
@@ -213,6 +225,9 @@ class TimerStore extends ChangeNotifier {
   Future<AppResult<TimeEntry>> stopRunning({DateTime? at}) async {
     if (!_tryBeginWrite()) return const AppFailure('操作进行中，请稍后再试');
     try {
+      // 手动/自动停止都进入保持态：停止是显式意图（"未在记录"同样受保护，
+      // 防自动记录在用户刚停止后立即重新拉起——批次 5c 切换防冲突）。
+      _manualHold = true;
       final beforeRunning = await entries.runningEntry();
       final result = await entries.stopRunning(at: at);
       if (result case AppFailure<TimeEntry> failure) {

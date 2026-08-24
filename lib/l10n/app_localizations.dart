@@ -3775,6 +3775,96 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'所有设置即时生效并自动保存，更改后相关页面即时一致。'**
   String get settingsInstantHint;
+
+  /// No description provided for @remOngoingSubtitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'运行提醒 · 提醒方式：对话框'**
+  String get remOngoingSubtitle;
+
+  /// No description provided for @remOngoingBody.
+  ///
+  /// In zh, this message translates to:
+  /// **'「{activity}」已记录 {elapsed}，是否仍在进行？'**
+  String remOngoingBody(String activity, String elapsed);
+
+  /// No description provided for @remQuickTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'到开始记录的时间了'**
+  String get remQuickTitle;
+
+  /// No description provided for @remQuickBody.
+  ///
+  /// In zh, this message translates to:
+  /// **'触发时刻提醒：现在在做什么？记一笔吧。'**
+  String get remQuickBody;
+
+  /// No description provided for @remDismiss.
+  ///
+  /// In zh, this message translates to:
+  /// **'知道了'**
+  String get remDismiss;
+
+  /// No description provided for @bannerOngoingTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'已连续记录 {duration}'**
+  String bannerOngoingTitle(String duration);
+
+  /// No description provided for @bannerOngoingSub.
+  ///
+  /// In zh, this message translates to:
+  /// **'「{activity}」 · 提醒方式：横幅'**
+  String bannerOngoingSub(String activity);
+
+  /// No description provided for @suspiciousTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'发现遗留运行条目'**
+  String get suspiciousTitle;
+
+  /// No description provided for @suspiciousSubtitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'上次退出时仍在记录'**
+  String get suspiciousSubtitle;
+
+  /// No description provided for @updateAvailableSubtle.
+  ///
+  /// In zh, this message translates to:
+  /// **'静默检查，不打断当前操作'**
+  String get updateAvailableSubtle;
+
+  /// No description provided for @updateIgnoreAction.
+  ///
+  /// In zh, this message translates to:
+  /// **'忽略'**
+  String get updateIgnoreAction;
+
+  /// No description provided for @forcedUpdateTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'需要立即更新'**
+  String get forcedUpdateTitle;
+
+  /// No description provided for @forcedUpdateSubtitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'此更新不可跳过'**
+  String get forcedUpdateSubtitle;
+
+  /// No description provided for @forcedUpdateBody.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前版本 v{current} 已停止支持。必须更新到 v{version} 后才能继续使用，下载将自动开始。'**
+  String forcedUpdateBody(String current, String version);
+
+  /// No description provided for @forcedUpdateAction.
+  ///
+  /// In zh, this message translates to:
+  /// **'立即更新'**
+  String get forcedUpdateAction;
 }
 
 class _AppLocalizationsDelegate

@@ -703,5 +703,43 @@
   "settingsAboutLicense": "许可",
   "settingsAboutLicenseHint": "MIT License · 含第三方依赖许可",
   "settingsAboutCheckUpdate": "检查更新",
-  "settingsInstantHint": "所有设置即时生效并自动保存，更改后相关页面即时一致。"
+  "settingsInstantHint": "所有设置即时生效并自动保存，更改后相关页面即时一致。",
+
+  "remOngoingSubtitle": "运行提醒 · 提醒方式：对话框",
+  "remOngoingBody": "「{activity}」已记录 {elapsed}，是否仍在进行？",
+  "@remOngoingBody": {
+    "placeholders": {
+      "activity": { "type": "String" },
+      "elapsed": { "type": "String" }
+    }
+  },
+  "remQuickTitle": "到开始记录的时间了",
+  "remQuickBody": "触发时刻提醒：现在在做什么？记一笔吧。",
+  "remDismiss": "知道了",
+  "bannerOngoingTitle": "已连续记录 {duration}",
+  "@bannerOngoingTitle": {
+    "placeholders": {
+      "duration": { "type": "String" }
+    }
+  },
+  "bannerOngoingSub": "「{activity}」 · 提醒方式：横幅",
+  "@bannerOngoingSub": {
+    "placeholders": {
+      "activity": { "type": "String" }
+    }
+  },
+  "suspiciousTitle": "发现遗留运行条目",
+  "suspiciousSubtitle": "上次退出时仍在记录",
+  "updateAvailableSubtle": "静默检查，不打断当前操作",
+  "updateIgnoreAction": "忽略",
+  "forcedUpdateTitle": "需要立即更新",
+  "forcedUpdateSubtitle": "此更新不可跳过",
+  "forcedUpdateBody": "当前版本 v{current} 已停止支持。必须更新到 v{version} 后才能继续使用，下载将自动开始。",
+  "@forcedUpdateBody": {
+    "placeholders": {
+      "current": { "type": "String" },
+      "version": { "type": "String" }
+    }
+  },
+  "forcedUpdateAction": "立即更新"
 }

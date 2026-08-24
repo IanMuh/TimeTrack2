@@ -1979,4 +1979,58 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get settingsInstantHint =>
       'All settings apply instantly and persist; pages stay consistent after changes.';
+
+  @override
+  String get remOngoingSubtitle => 'Running reminder · Dialog style';
+
+  @override
+  String remOngoingBody(String activity, String elapsed) {
+    return '\"$activity\" has been recorded for $elapsed. Still going?';
+  }
+
+  @override
+  String get remQuickTitle => 'Time to start tracking';
+
+  @override
+  String get remQuickBody =>
+      'Trigger-time reminder: what are you working on? Log it.';
+
+  @override
+  String get remDismiss => 'Got it';
+
+  @override
+  String bannerOngoingTitle(String duration) {
+    return 'Recording for $duration';
+  }
+
+  @override
+  String bannerOngoingSub(String activity) {
+    return '\"$activity\" · Banner style';
+  }
+
+  @override
+  String get suspiciousTitle => 'Leftover running entry found';
+
+  @override
+  String get suspiciousSubtitle => 'Still recording when the app last closed';
+
+  @override
+  String get updateAvailableSubtle => 'Silent check — won\'t interrupt you';
+
+  @override
+  String get updateIgnoreAction => 'Ignore';
+
+  @override
+  String get forcedUpdateTitle => 'Update required';
+
+  @override
+  String get forcedUpdateSubtitle => 'This update cannot be skipped';
+
+  @override
+  String forcedUpdateBody(String current, String version) {
+    return 'Version v$current is no longer supported. Update to v$version to continue — the download will start automatically.';
+  }
+
+  @override
+  String get forcedUpdateAction => 'Update now';
 }

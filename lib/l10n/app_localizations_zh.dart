@@ -1926,4 +1926,57 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get settingsInstantHint => '所有设置即时生效并自动保存，更改后相关页面即时一致。';
+
+  @override
+  String get remOngoingSubtitle => '运行提醒 · 提醒方式：对话框';
+
+  @override
+  String remOngoingBody(String activity, String elapsed) {
+    return '「$activity」已记录 $elapsed，是否仍在进行？';
+  }
+
+  @override
+  String get remQuickTitle => '到开始记录的时间了';
+
+  @override
+  String get remQuickBody => '触发时刻提醒：现在在做什么？记一笔吧。';
+
+  @override
+  String get remDismiss => '知道了';
+
+  @override
+  String bannerOngoingTitle(String duration) {
+    return '已连续记录 $duration';
+  }
+
+  @override
+  String bannerOngoingSub(String activity) {
+    return '「$activity」 · 提醒方式：横幅';
+  }
+
+  @override
+  String get suspiciousTitle => '发现遗留运行条目';
+
+  @override
+  String get suspiciousSubtitle => '上次退出时仍在记录';
+
+  @override
+  String get updateAvailableSubtle => '静默检查，不打断当前操作';
+
+  @override
+  String get updateIgnoreAction => '忽略';
+
+  @override
+  String get forcedUpdateTitle => '需要立即更新';
+
+  @override
+  String get forcedUpdateSubtitle => '此更新不可跳过';
+
+  @override
+  String forcedUpdateBody(String current, String version) {
+    return '当前版本 v$current 已停止支持。必须更新到 v$version 后才能继续使用，下载将自动开始。';
+  }
+
+  @override
+  String get forcedUpdateAction => '立即更新';
 }

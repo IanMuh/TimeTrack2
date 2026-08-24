@@ -116,6 +116,9 @@ class TrackingStore extends ChangeNotifier {
     // 总开关闸门（批次 4）：设置页关闭后台记录时不产生自动切换。
     final enabledGate = trackingEnabled;
     if (enabledGate != null && !enabledGate()) return;
+    // 手动会话保持（批次 5c 切换防冲突）：用户手动切换/停止后，自动记录
+    // 不抢占——auto 不覆盖手动选择。
+    if (timer.manualSessionHold) return;
     if (_polling) return; // 重入保护（手动调用与 tick 并发时只执行一轮）
     _polling = true;
     try {

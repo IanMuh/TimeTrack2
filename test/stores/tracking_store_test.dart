@@ -241,9 +241,11 @@ void main() {
       expect((await h.entries.runningEntry())!.activityId, a.id);
 
       // 5s 间隔内 tick：不轮询（切到 B 后 poll 不动作）。
+      // 用 auto 切换制造 B 会话（批次 5c 起：手动切换会进入会话保持，
+      // 自动记录不得抢占——那是独立用例，此处只验证限频）。
       final b = (await h.activities.createActivity(name: 'B', color: 0))
           .requireValue();
-      await h.timer.switchToActivity(b.id);
+      await h.timer.switchToActivity(b.id, isAuto: true);
       h._fixedNow = h._fixedNow.add(const Duration(seconds: 2));
       h.clock.notifyListeners();
       await Future<void>.delayed(Duration.zero);
@@ -325,6 +327,42 @@ void main() {
       expect(h.tracking.ruleList, hasLength(1), reason: 'saveRule 后自动 reload');
       await h.tracking.deleteRule(h.tracking.ruleList.first);
       expect(h.tracking.ruleList, isEmpty, reason: 'deleteRule 后自动 reload');
+    });
+  });
+
+  group('TrackingStore 手动会话保持（批次 5c 切换防冲突）', () {
+    test('auto 切换不置保持；手动切换/停止后 poll 不抢占', () async {
+      final h = _TestHarness();
+      addTearDown(h.close);
+      final a =
+          (await h.activities.createActivity(name: 'A', color: 0)).requireValue();
+      final b =
+          (await h.activities.createActivity(name: 'B', color: 1)).requireValue();
+      await h.seedRule(process: 'chrome.exe', activityId: b.id);
+
+      // 自动切换：isAuto 路径不进入保持态。
+      h.detector.processName = 'chrome.exe';
+      await h.tracking.poll();
+      expect(h.timer.manualSessionHold, isFalse);
+      expect((await h.entries.runningEntry())!.activityId, b.id);
+
+      // 用户手动切到 A：前台仍命中 B 规则也不得抢占。
+      await h.timer.switchToActivity(a.id);
+      expect(h.timer.manualSessionHold, isTrue);
+      await h.tracking.poll();
+      expect((await h.entries.runningEntry())!.activityId, a.id,
+          reason: 'auto 不覆盖手动选择');
+
+      // 手动停止（切到未分配）：同样受保护，不被自动记录重新拉起。
+      await h.timer.stopRunning();
+      expect(h.timer.manualSessionHold, isTrue);
+      await h.tracking.poll();
+      final running = await h.entries.runningEntry();
+      expect(
+        await h.activities.activityIdIsUnassigned(running!.activityId),
+        isTrue,
+        reason: '停在未分配（未记录态），自动记录不得重新拉起',
+      );
     });
   });
 }

@@ -38,6 +38,7 @@ import 'category_store.dart';
 import 'clock_store.dart';
 import 'command_dispatcher.dart';
 import 'data_revision.dart';
+import 'reminder_store.dart';
 import 'settings_store.dart';
 import 'stats_store.dart';
 import 'sync_store.dart';
@@ -62,6 +63,7 @@ class AppStore {
     required this.category,
     required this.activity,
     required this.settings,
+    required this.reminder,
     required this.today,
     required this.timeline,
     required this.stats,
@@ -92,6 +94,9 @@ class AppStore {
   /// 活动 store（批次 5a：activity_create 指令落点 + 新建撤销）。
   final ActivityStore activity;
   final SettingsStore settings;
+
+  /// 提醒 store（批次 5c 弹窗体系：运行阈值「仍在进行？」+ 触发时刻提醒）。
+  final ReminderStore reminder;
   final TodayStore today;
   final TimelineStore timeline;
   final StatsStore stats;
@@ -169,6 +174,13 @@ class AppStore {
       settings: settingsRepo,
       undo: undo,
       dataRevision: revision,
+    );
+    final reminder = ReminderStore(
+      clock: clock,
+      settings: settings,
+      timer: timer,
+      isUnassignedActivity: activities.activityIdIsUnassigned,
+      now: now,
     );
     final today = TodayStore(
       entries: entries,
@@ -248,6 +260,7 @@ class AppStore {
       category: category,
       activity: activity,
       settings: settings,
+      reminder: reminder,
       today: today,
       timeline: timeline,
       stats: stats,
@@ -318,6 +331,7 @@ class AppStore {
     timeline.dispose();
     today.dispose();
     settings.dispose();
+    reminder.dispose();
     category.dispose();
     activity.dispose();
     timer.dispose();

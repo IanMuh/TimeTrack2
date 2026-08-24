@@ -67,6 +67,9 @@ Future<AppStore> _createStore() {
     database: AppDatabase(NativeDatabase.memory()),
     backend: _FakeBackend(),
     runStartupChecks: false,
+    // 固定在快速提醒触发时刻（09:00）之前——防 pumpAndSettle 推进时钟
+    // 时弹出模态提醒挡住导航点击（批次 5c 弹窗体系）。
+    now: () => DateTime(2026, 8, 14, 8),
   );
 }
 

@@ -703,5 +703,43 @@
   "settingsAboutLicense": "License",
   "settingsAboutLicenseHint": "MIT License · third-party licenses included",
   "settingsAboutCheckUpdate": "Check for updates",
-  "settingsInstantHint": "All settings apply instantly and persist; pages stay consistent after changes."
+  "settingsInstantHint": "All settings apply instantly and persist; pages stay consistent after changes.",
+
+  "remOngoingSubtitle": "Running reminder · Dialog style",
+  "remOngoingBody": "\"{activity}\" has been recorded for {elapsed}. Still going?",
+  "@remOngoingBody": {
+    "placeholders": {
+      "activity": { "type": "String" },
+      "elapsed": { "type": "String" }
+    }
+  },
+  "remQuickTitle": "Time to start tracking",
+  "remQuickBody": "Trigger-time reminder: what are you working on? Log it.",
+  "remDismiss": "Got it",
+  "bannerOngoingTitle": "Recording for {duration}",
+  "@bannerOngoingTitle": {
+    "placeholders": {
+      "duration": { "type": "String" }
+    }
+  },
+  "bannerOngoingSub": "\"{activity}\" · Banner style",
+  "@bannerOngoingSub": {
+    "placeholders": {
+      "activity": { "type": "String" }
+    }
+  },
+  "suspiciousTitle": "Leftover running entry found",
+  "suspiciousSubtitle": "Still recording when the app last closed",
+  "updateAvailableSubtle": "Silent check — won't interrupt you",
+  "updateIgnoreAction": "Ignore",
+  "forcedUpdateTitle": "Update required",
+  "forcedUpdateSubtitle": "This update cannot be skipped",
+  "forcedUpdateBody": "Version v{current} is no longer supported. Update to v{version} to continue — the download will start automatically.",
+  "@forcedUpdateBody": {
+    "placeholders": {
+      "current": { "type": "String" },
+      "version": { "type": "String" }
+    }
+  },
+  "forcedUpdateAction": "Update now"
 }

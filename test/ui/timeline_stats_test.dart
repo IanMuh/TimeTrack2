@@ -42,11 +42,20 @@ class _FakeBackend implements SyncBackend {
   Future<AppResult<void>> signOut() async => const AppSuccess(null);
 }
 
+/// 套件时钟：真实**当日凌晨** 00:30——早于快速提醒触发时刻（09:00），
+/// 防其模态在 pumpAndSettle 中弹出挡交互；又与 add 指令的 HH:MM 解析
+/// （dispatcher 取真实今日）保持同一自然日，时间线/统计范围一致。
+final DateTime _harnessNow = () {
+  final r = DateTime.now();
+  return DateTime(r.year, r.month, r.day, 0, 30);
+}();
+
 Future<AppStore> _createStore() {
   return AppStore.create(
     database: AppDatabase(NativeDatabase.memory()),
     backend: _FakeBackend(),
     runStartupChecks: false,
+    now: () => _harnessNow,
   );
 }
 
