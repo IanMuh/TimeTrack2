@@ -1544,6 +1544,30 @@ abstract class AppLocalizations {
   /// **'暂不开启'**
   String get usageAccessLater;
 
+  /// No description provided for @bgGuideWhy.
+  ///
+  /// In zh, this message translates to:
+  /// **'为何需要此权限'**
+  String get bgGuideWhy;
+
+  /// No description provided for @bgGuideWhyBody.
+  ///
+  /// In zh, this message translates to:
+  /// **'自动记录通过系统「使用情况访问」识别当前前台应用，并按你配置的规则自动切换计时活动。'**
+  String get bgGuideWhyBody;
+
+  /// No description provided for @bgGuidePrivacy.
+  ///
+  /// In zh, this message translates to:
+  /// **'隐私承诺：仅读取前台应用包名用于本地规则匹配；不读取屏幕内容，不上传任何使用数据。'**
+  String get bgGuidePrivacy;
+
+  /// No description provided for @bgGuideNote.
+  ///
+  /// In zh, this message translates to:
+  /// **'暂不开启可稍后在 设置 → 后台记录 中再次授权。'**
+  String get bgGuideNote;
+
   /// No description provided for @trackingWindowsNote.
   ///
   /// In zh, this message translates to:

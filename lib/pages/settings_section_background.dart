@@ -1,9 +1,14 @@
 /// 设置分区实现 ③：后台记录（平台卡 + 总开关 + 规则列表/表单，契约 §6.2）。
 ///
 /// 规则 CRUD 经指令通道（tracking_rule_create/update/delete）——铁律 7；
-/// 总开关写 ProfileSettings（SettingsStore）；检测器状态展示真实平台实现
-/// （批次 6 前为 Noop → "待平台层接入"）。
+/// 总开关写 ProfileSettings（SettingsStore）；平台卡按平台分派：
+/// - Android（批次 6b）：「使用情况访问」授权状态卡 + 跳系统设置 +
+///   未授权禁总开关 + 进分区全屏引导（§6.3，本会话不重复纠缠）；
+/// - Windows/其他：常驻说明 + 检测器状态（批次 6a 前为 Noop → "待接入"）。
 library;
+
+import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 
@@ -15,6 +20,7 @@ import '../viewmodels/activity.dart';
 import '../viewmodels/commands/command_invocation.dart';
 import '../viewmodels/tracking_rule.dart';
 import 'settings_widgets.dart';
+import 'tracking_guide_page.dart';
 
 /// 后台记录分区。
 class BackgroundSection extends StatefulWidget {
@@ -29,6 +35,9 @@ class BackgroundSection extends StatefulWidget {
 class _BackgroundSectionState extends State<BackgroundSection> {
   List<Activity> _activities = const [];
 
+  /// 「使用情况访问」授权状态（null = 未查询/非 Android）。
+  bool? _usageGranted;
+
   @override
   void initState() {
     super.initState();
@@ -42,6 +51,41 @@ class _BackgroundSectionState extends State<BackgroundSection> {
     if (result.isSuccess) {
       setState(() => _activities = result.requireValue());
     }
+    await _refreshUsageGranted();
+    unawaited(_maybeShowGuide());
+  }
+
+  /// 查询「使用情况访问」授权态（非 Android 短路为 null）。
+  Future<void> _refreshUsageGranted() async {
+    if (!Platform.isAndroid) return;
+    final granted = await widget.app.androidTracking.isUsageGranted();
+    if (!mounted) return;
+    setState(() => _usageGranted = granted);
+  }
+
+  /// §6.3 引导触发：进分区时未授权且本会话未纠缠过 → 全屏引导。
+  Future<void> _maybeShowGuide() async {
+    if (!mounted || !Platform.isAndroid) return;
+    if (widget.app.androidTracking.guideDismissedThisSession) return;
+    if (_usageGranted == true) {
+      // 已授权：标记会话内不再引导。
+      widget.app.androidTracking.guideDismissedThisSession = true;
+      return;
+    }
+    await Navigator.of(context, rootNavigator: true).push(
+      MaterialPageRoute<void>(
+        fullscreenDialog: true,
+        builder: (_) => TrackingGuidePage(bridge: widget.app.androidTracking),
+      ),
+    );
+    // 从系统设置返回后复查授权态。
+    widget.app.androidTracking.guideDismissedThisSession = true;
+    await _refreshUsageGranted();
+  }
+
+  Future<void> _openUsageSettings() async {
+    await widget.app.androidTracking.openUsageAccessSettings();
+    await _refreshUsageGranted();
   }
 
   Activity? _activityOf(String id) {
@@ -60,6 +104,9 @@ class _BackgroundSectionState extends State<BackgroundSection> {
       builder: (context, _) {
         final settings = app.settings.current;
         final rules = app.tracking.ruleList;
+        // §6.2：Android 未授权时总开关禁用（引导用户先去系统设置授权）。
+        final androidNeedsPermission =
+            Platform.isAndroid && _usageGranted == false;
         return SettingsSectionCard(
           key: const ValueKey('sec-background'),
           icon: Icons.insights_outlined,
@@ -67,7 +114,12 @@ class _BackgroundSectionState extends State<BackgroundSection> {
           subtitle: l10n.settingsSecBackgroundSub,
           paddedChildren: true,
           children: [
-            _PlatformCard(app: app),
+            _PlatformCard(
+              app: app,
+              usageGranted: Platform.isAndroid ? (_usageGranted ?? false) : null,
+              onOpenUsageSettings:
+                  Platform.isAndroid ? _openUsageSettings : null,
+            ),
             const SizedBox(height: 14),
             // 总开关。
             Container(
@@ -84,9 +136,13 @@ class _BackgroundSectionState extends State<BackgroundSection> {
               ),
               child: SettingsSwitchRow(
                 title: l10n.settingsBgMasterSwitch,
-                subtitle: l10n.settingsBgMasterHint,
-                value: settings?.backgroundTrackingEnabled ?? false,
-                onChanged: (v) => _saveMaster(v),
+                subtitle: androidNeedsPermission
+                    ? l10n.usageAccessGuide
+                    : l10n.settingsBgMasterHint,
+                value: androidNeedsPermission
+                    ? false
+                    : settings?.backgroundTrackingEnabled ?? false,
+                onChanged: androidNeedsPermission ? null : (v) => _saveMaster(v),
               ),
             ),
             const SizedBox(height: 14),
@@ -208,14 +264,93 @@ class _BackgroundSectionState extends State<BackgroundSection> {
   }
 }
 
-/// 平台卡（Windows 常驻说明 + 检测状态；Android 授权卡批次 6 随平台层）。
+/// 平台卡：Android = 「使用情况访问」授权状态卡（§6.2）；Windows/其他 =
+/// 常驻说明 + 检测器状态。
 class _PlatformCard extends StatelessWidget {
-  const _PlatformCard({required this.app});
+  const _PlatformCard({
+    required this.app,
+    this.usageGranted,
+    this.onOpenUsageSettings,
+  });
 
   final AppStore app;
 
+  /// Android：授权态（null = 非 Android）。
+  final bool? usageGranted;
+  final VoidCallback? onOpenUsageSettings;
+
   @override
   Widget build(BuildContext context) {
+    if (usageGranted != null) {
+      return _androidCard(context);
+    }
+    return _windowsCard(context);
+  }
+
+  Widget _androidCard(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final scheme = Theme.of(context).colorScheme;
+    final granted = usageGranted == true;
+    return SettingsInfoBanner(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                granted
+                    ? Icons.verified_user_outlined
+                    : Icons.privacy_tip_outlined,
+                size: 16,
+                color: granted ? scheme.primary : scheme.error,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                l10n.usageAccess,
+                style: Theme.of(context)
+                    .textTheme
+                    .bodySmall
+                    ?.copyWith(fontWeight: FontWeight.w600),
+              ),
+              const Spacer(),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(999),
+                  color: granted
+                      ? scheme.primary.withValues(alpha: 0.1)
+                      : scheme.error.withValues(alpha: 0.08),
+                ),
+                child: Text(
+                  granted ? l10n.usageAccessGranted : l10n.usageAccessNotGranted,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: granted ? scheme.primary : scheme.error,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(l10n.settingsBgDetectorState(granted
+              ? l10n.settingsBgDetectorRunning
+              : l10n.usageAccessNotGranted)),
+          if (!granted) ...[
+            const SizedBox(height: 8),
+            FilledButton.tonalIcon(
+              key: const ValueKey('open-usage-settings'),
+              onPressed: onOpenUsageSettings,
+              icon: const Icon(Icons.settings_outlined, size: 16),
+              label: Text(l10n.usageAccessButton),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _windowsCard(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final scheme = Theme.of(context).colorScheme;
     final detectorReady = app.tracking.detector is! NoopForegroundDetector;

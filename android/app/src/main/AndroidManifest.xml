@@ -1,4 +1,9 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- 批次 6b 后台自动记录：「使用情况访问」识别前台应用（特殊权限，
+         经系统设置授予，不能运行时弹窗；tools:ignore 抑制受保护权限提示）。 -->
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
     <application
         android:label="timetrack2"
         android:name="${applicationName}"

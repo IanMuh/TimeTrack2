@@ -768,6 +768,18 @@ class AppLocalizationsZh extends AppLocalizations {
   String get usageAccessLater => '暂不开启';
 
   @override
+  String get bgGuideWhy => '为何需要此权限';
+
+  @override
+  String get bgGuideWhyBody => '自动记录通过系统「使用情况访问」识别当前前台应用，并按你配置的规则自动切换计时活动。';
+
+  @override
+  String get bgGuidePrivacy => '隐私承诺：仅读取前台应用包名用于本地规则匹配；不读取屏幕内容，不上传任何使用数据。';
+
+  @override
+  String get bgGuideNote => '暂不开启可稍后在 设置 → 后台记录 中再次授权。';
+
+  @override
   String get trackingWindowsNote => 'Windows 端通过检测前台窗口自动记录';
 
   @override

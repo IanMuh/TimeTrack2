@@ -13,6 +13,7 @@ library;
 import 'dart:async';
 import 'dart:io' show Directory, Platform;
 
+import '../api/platform/android_tracking.dart';
 import '../api/platform/tray_service.dart';
 import '../api/platform/windows_foreground_detector.dart';
 import '../api/supabase/sync_backend.dart';
@@ -72,9 +73,11 @@ class AppStore {
     required this.sync,
     required this.update,
     required this.tracking,
+    required this.foregroundDetector,
     required this.lan,
     required this.wipe,
     required this.tray,
+    required this.androidTracking,
     required this.dispatcher,
     required this.fileInterop,
   });
@@ -107,6 +110,9 @@ class AppStore {
   final UpdateStore update;
   final TrackingStore tracking;
 
+  /// 前台检测器实例（批次 6：Android 实现持 ClockStore 监听，dispose 摘除）。
+  final ForegroundDetector foregroundDetector;
+
   /// LAN 设备互通编排（批次 4 设置页）。
   final LanStore lan;
 
@@ -115,6 +121,9 @@ class AppStore {
 
   /// Windows 托盘桥接（批次 6；非 Windows 平台全部 no-op）。
   final TrayService tray;
+
+  /// Android 后台记录桥（批次 6b：使用情况权限/前台包名查询）。
+  final AndroidTrackingBridge androidTracking;
   final CommandDispatcher dispatcher;
   final FileInteropService fileInterop;
 
@@ -230,17 +239,24 @@ class AppStore {
       appVersion: currentVersion,
     );
     final wipe = DataWipeService(database: database);
-    // 前台检测器（批次 6 平台层）：Windows 注入 FFI 真实现，其余平台
-    // 保持 Noop（检测器抽象不变，TrackingStore 零感知）。
+    // 前台检测器（批次 6 平台层）：按平台注入真实现——Windows FFI 窗口
+    // 检测 / Android UsageStats 包名缓存，其余平台保持 Noop（TrackingStore
+    // 零感知）。Android 实现持 ClockStore 监听 → 捕获实例供 dispose。
+    final androidTracking = AndroidTrackingBridge();
+    final ForegroundDetector foregroundDetector =
+        WindowsForegroundDetector.isSupported
+            ? WindowsForegroundDetector()
+            : AndroidTrackingBridge.isSupported
+                ? AndroidForegroundDetector(
+                    clock: clock, bridge: androidTracking)
+                : NoopForegroundDetector();
     final tracking = TrackingStore(
       rules: rules,
       timer: timer,
       dataRevision: revision,
       clock: clock,
       now: now,
-      detector: WindowsForegroundDetector.isSupported
-          ? WindowsForegroundDetector()
-          : NoopForegroundDetector(),
+      detector: foregroundDetector,
       pollInterval: const Duration(seconds: 5),
       // 总开关闸门（批次 4）：设置页后台记录总开关（默认关）关闭时不轮询。
       trackingEnabled: () =>
@@ -280,9 +296,11 @@ class AppStore {
       sync: sync,
       update: update,
       tracking: tracking,
+      foregroundDetector: foregroundDetector,
       lan: lan,
       wipe: wipe,
       tray: tray,
+      androidTracking: androidTracking,
       dispatcher: dispatcher,
       fileInterop: fileInterop,
     );
@@ -339,6 +357,12 @@ class AppStore {
   void dispose() {
     lan.dispose();
     tracking.dispose();
+    // Android 前台检测器持 ClockStore 监听，随 store 一并释放
+    //（Windows/Noop 实现为无状态 no-op dispose）。
+    final detector = foregroundDetector;
+    if (detector is AndroidForegroundDetector) {
+      detector.dispose();
+    }
     update.dispose();
     sync.dispose();
     stats.dispose();

@@ -773,6 +773,21 @@ class AppLocalizationsEn extends AppLocalizations {
   String get usageAccessLater => 'Not now';
 
   @override
+  String get bgGuideWhy => 'Why this permission is needed';
+
+  @override
+  String get bgGuideWhyBody =>
+      'Auto tracking reads the current foreground app via the system Usage Access setting and switches the running activity by your rules.';
+
+  @override
+  String get bgGuidePrivacy =>
+      'Privacy: only the foreground app\'s package name is read for local rule matching. Screen contents are never read and no usage data leaves this device.';
+
+  @override
+  String get bgGuideNote =>
+      'You can grant it later under Settings → Background tracking.';
+
+  @override
   String get trackingWindowsNote =>
       'On Windows, tracking works by detecting the foreground window';
 
