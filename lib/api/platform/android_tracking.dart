@@ -16,7 +16,12 @@ import '../../stores/tracking_store.dart';
 class AndroidTrackingBridge {
   AndroidTrackingBridge(
       {String channelName = 'timetrack/platform/android_tracking'})
-      : _channel = MethodChannel(channelName);
+      : _channel = MethodChannel(channelName) {
+    // 入站事件（通知暂停动作）仅 Android 注册——真机 Binding 恒已初始化。
+    if (isSupported) {
+      _channel.setMethodCallHandler(_onNativeCall);
+    }
+  }
 
   final MethodChannel _channel;
 
@@ -24,8 +29,24 @@ class AndroidTrackingBridge {
   /// 自动弹出；应用重启自然复位）。非 Android 平台恒 true（无引导）。
   bool guideDismissedThisSession = !isSupported;
 
+  /// 通知权限本会话是否已请求过（API 33+ 运行时弹窗只问一次，避免反复
+  /// 打扰；用户拒绝后可在系统设置重开）。
+  bool notificationPermissionAsked = false;
+
+  /// 通知「暂停/恢复」动作回调（native → Dart；壳层路由到
+  /// TrackingStore.setSessionPaused）。
+  void Function()? onPauseRequested;
+
   /// 当前平台是否支持（AppStore 装配判定用）。
   static bool get isSupported => !kIsWeb && Platform.isAndroid;
+
+  /// native 入站分发（当前仅通知暂停动作）。
+  Future<Object?> _onNativeCall(MethodCall call) async {
+    if (call.method == 'onPauseToggleRequested') {
+      onPauseRequested?.call();
+    }
+    return null;
+  }
 
   /// 「使用情况访问」是否已授予；非 Android / 无实现 / 异常 → false。
   Future<bool> isUsageGranted() async {
@@ -66,6 +87,52 @@ class AndroidTrackingBridge {
       await _channel.invokeMethod<void>('requestNotificationPermission');
     } on PlatformException {
       // 用户拒绝/异常不阻断流程（通知不可见但服务仍可运行）。
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // 前台服务（契约 §6.4 常驻通知）
+  // ---------------------------------------------------------------------------
+
+  /// 启动前台服务（重复调用 = 更新通知内容/暂停态，幂等）。
+  Future<void> startTrackingService({
+    required bool paused,
+    required String content,
+  }) async {
+    if (!isSupported) return;
+    try {
+      await _channel.invokeMethod<void>('startTrackingService', <String, dynamic>{
+        'paused': paused,
+        'content': content,
+      });
+    } on PlatformException {
+      // 服务启动失败（厂商限制等）不阻断 UI。
+    }
+  }
+
+  /// 停止前台服务并移除通知。
+  Future<void> stopTrackingService() async {
+    if (!isSupported) return;
+    try {
+      await _channel.invokeMethod<void>('stopTrackingService');
+    } on PlatformException {
+      // 忽略：未运行时停止是 no-op 失败。
+    }
+  }
+
+  /// 更新常驻通知内容/暂停文案（服务未运行时 native 返回 false 静默）。
+  Future<void> updateNotification({
+    required bool paused,
+    required String content,
+  }) async {
+    if (!isSupported) return;
+    try {
+      await _channel.invokeMethod<void>('updateNotification', <String, dynamic>{
+        'paused': paused,
+        'content': content,
+      });
+    } on PlatformException {
+      // 忽略。
     }
   }
 }

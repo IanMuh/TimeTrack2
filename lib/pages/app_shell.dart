@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../api/platform/android_tracking.dart' show AndroidTrackingBridge;
 import '../components/global_timer_bar.dart';
 import '../constants/storage_keys.dart';
 import '../l10n/app_localizations.dart';
@@ -99,10 +100,12 @@ class _AppShellState extends State<AppShell> {
     widget.app.reminder.addListener(_onReminderChanged);
     widget.app.update.addListener(_onUpdateChanged);
     _wireTray();
+    _wireAndroidTracking();
     // 可疑条目启动检测：AppStore.init 已 await timer.refresh()，postFrame
     // 时 runningEntry 缓存可用；timer 监听兜底晚到场景（幂等，标志位去重）。
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkSuspiciousEntry();
+      unawaited(_syncAndroidService());
     });
     widget.app.timer.addListener(_onTimerForSuspicious);
   }
@@ -112,10 +115,51 @@ class _AppShellState extends State<AppShell> {
     widget.app.reminder.removeListener(_onReminderChanged);
     widget.app.update.removeListener(_onUpdateChanged);
     widget.app.timer.removeListener(_onTimerForSuspicious);
+    widget.app.settings.removeListener(_syncAndroidService);
     // 托盘回调指向本 State：dispose 后必须摘除（服务随 AppStore 存活）。
     widget.app.tray.onCommand = null;
     widget.app.tray.onCloseToTray = null;
+    widget.app.androidTracking.onPauseRequested = null;
     super.dispose();
+  }
+
+  /// Android 前台服务接线（批次 6b）：通知「暂停」动作 → 会话暂停翻转；
+  /// 总开关/授权/命中活动变化 → 服务启停与常驻通知文案同步。
+  void _wireAndroidTracking() {
+    if (!AndroidTrackingBridge.isSupported) return;
+    final bridge = widget.app.androidTracking;
+    bridge.onPauseRequested = () {
+      final tracking = widget.app.tracking;
+      tracking.setSessionPaused(!tracking.sessionPaused);
+      setState(() {});
+      unawaited(_syncAndroidService());
+    };
+    widget.app.settings.addListener(_syncAndroidService);
+  }
+
+  /// 依据 总开关+使用情况授权 决定前台服务启停，并同步通知文案
+  /// （内容=最近命中的规则活动名；无命中由 native 显示「检测中…」）。
+  Future<void> _syncAndroidService() async {
+    if (!AndroidTrackingBridge.isSupported || !mounted) return;
+    final app = widget.app;
+    final enabled = app.settings.current?.backgroundTrackingEnabled ?? false;
+    final granted = await app.androidTracking.isUsageGranted();
+    if (!mounted) return;
+    if (!(enabled && granted)) {
+      await app.androidTracking.stopTrackingService();
+      return;
+    }
+    String content = '';
+    final matchedId = app.tracking.lastMatchedActivityId;
+    if (matchedId != null) {
+      final activity = await app.activities.activityById(matchedId);
+      if (!mounted) return;
+      content = activity?.name ?? '';
+    }
+    await app.androidTracking.startTrackingService(
+      paused: app.tracking.sessionPaused,
+      content: content,
+    );
   }
 
   /// 托盘事件接线（批次 6）：命令路由 + 关窗模式加载。
@@ -157,6 +201,8 @@ class _AppShellState extends State<AppShell> {
 
   void _onTimerForSuspicious() {
     _checkSuspiciousEntry();
+    // 命中活动变化（自动切换/手动切换）→ 常驻通知文案同步（批次 6b）。
+    unawaited(_syncAndroidService());
   }
 
   /// 首次关窗选择对话框：最小化到托盘（默认）/ 直接退出 + 记住选择。

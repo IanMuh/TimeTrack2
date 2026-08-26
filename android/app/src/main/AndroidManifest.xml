@@ -4,6 +4,10 @@
          经系统设置授予，不能运行时弹窗；tools:ignore 抑制受保护权限提示）。 -->
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
         tools:ignore="ProtectedPermissions" />
+    <!-- 批次 6b 前台服务常驻通知（契约 §6.4）。 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <application
         android:label="timetrack2"
         android:name="${applicationName}"
@@ -35,6 +39,12 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+
+        <!-- 批次 6b：后台自动记录前台服务（低优先级常驻通知）。 -->
+        <service
+            android:name=".TrackingForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

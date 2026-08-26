@@ -15,14 +15,19 @@ import io.flutter.plugin.common.MethodChannel
 /// - 「使用情况访问」权限判定与跳转（该权限不能运行时弹窗，只能进系统
 ///   设置授予——契约 §6.2）；
 /// - 通知权限运行时请求（API 33+，前台服务常驻通知可见性）；
-/// - 批次 6b 二阶段将追加前台服务 start/stop/updateNotification。
+/// - UsageStats 最近前台包名查询（后台自动检测的数据源）；
+/// - 前台服务 start/stop/updateNotification；通知「暂停」动作经
+///   [onPauseToggleRequested] 钩子回传 Dart（状态真身在 TrackingStore）。
 class MainActivity : FlutterActivity() {
     private val channelName = "timetrack/platform/android_tracking"
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
-            .setMethodCallHandler { call, result ->
+        val trackingChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            channelName,
+        )
+        trackingChannel.setMethodCallHandler { call, result ->
                 when (call.method) {
                     "isUsageGranted" -> result.success(isUsageAccessGranted())
                     "latestForegroundPackage" -> result.success(latestForegroundPackage())
@@ -39,9 +44,49 @@ class MainActivity : FlutterActivity() {
                         }
                         result.success(true)
                     }
+                    "startTrackingService" -> {
+                        val paused = call.argument<Boolean>("paused") ?: false
+                        val content = call.argument<String>("content").orEmpty()
+                        val intent = Intent(this, TrackingForegroundService::class.java)
+                            .putExtra(TrackingForegroundService.EXTRA_PAUSED, paused)
+                            .putExtra(TrackingForegroundService.EXTRA_CONTENT, content)
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            startForegroundService(intent)
+                        } else {
+                            startService(intent)
+                        }
+                        result.success(true)
+                    }
+                    "stopTrackingService" -> {
+                        stopService(
+                            Intent(this, TrackingForegroundService::class.java),
+                        )
+                        result.success(true)
+                    }
+                    "updateNotification" -> {
+                        val paused = call.argument<Boolean>("paused") ?: false
+                        val content = call.argument<String>("content").orEmpty()
+                        // 服务可能尚未运行（未授权总开关等）：找不到则静默忽略。
+                        val service = lastServiceInstance
+                        service?.update(content, paused) ?: run {
+                            result.success(false)
+                            return@setMethodCallHandler
+                        }
+                        result.success(true)
+                    }
                     else -> result.notImplemented()
                 }
             }
+        // 通知「暂停/恢复」动作 → Dart 翻转 sessionPaused（经桥的入站事件）。
+        onPauseToggleRequested = {
+            trackingChannel.invokeMethod("onPauseToggleRequested", null)
+        }
+    }
+
+    override fun onDestroy() {
+        onPauseToggleRequested = null
+        lastServiceInstance = null
+        super.onDestroy()
     }
 
     /// 「使用情况访问」是否已授予（AppOps 判定，与系统设置页口径一致）。
@@ -66,9 +111,6 @@ class MainActivity : FlutterActivity() {
 
     /// 最近一次进入前台的 应用包名（UsageEvents 取窗口内最后一条
     /// ACTIVITY_RESUMED / MOVE_TO_FRONT）；未授权或无事件返回空串。
-    ///
-    /// 批次 6b 一阶段先落查询骨架（未授权时 queryEvents 抛 SecurityException，
-    /// 收敛为空串——Dart 侧以空串表示"不可检测"，与容错语义一致）。
     private fun latestForegroundPackage(): String {
         if (!isUsageAccessGranted()) return ""
         return try {
@@ -102,5 +144,14 @@ class MainActivity : FlutterActivity() {
         // UsageEvents.Event 事件类型原始值（新 SDK 已移除常量名，值不变）。
         private const val EVENT_TYPE_ACTIVITY_RESUMED = 1
         private const val EVENT_TYPE_MOVE_TO_FRONT = 2
+
+        /// 通知「暂停/恢复」动作 → Dart 翻转 sessionPaused（MainActivity
+        /// 与服务同进程同主线程，静态钩子最简可靠）。
+        @JvmStatic
+        var onPauseToggleRequested: (() -> Unit)? = null
+
+        /// 当前运行中的服务实例引用（updateNotification 直达，免再发 intent）。
+        @JvmStatic
+        var lastServiceInstance: TrackingForegroundService? = null
     }
 }
