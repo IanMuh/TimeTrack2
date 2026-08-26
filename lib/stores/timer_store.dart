@@ -167,6 +167,14 @@ class TimerStore extends ChangeNotifier {
   /// 是否处于手动会话保持（供 TrackingStore 前置闸门读取）。
   bool get manualSessionHold => _manualHold;
 
+  /// 解除手动会话保持（批次 6b：后台分区提供可见的恢复入口——否则用户
+  /// 手动点过一次活动后自动切换永久失效且无感知，误判功能损坏）。
+  void clearManualSessionHold() {
+    if (!_manualHold) return;
+    _manualHold = false;
+    notifyListeners();
+  }
+
   // ---------------------------------------------------------------------------
   // 查询
   // ---------------------------------------------------------------------------

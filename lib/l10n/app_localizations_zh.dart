@@ -768,6 +768,29 @@ class AppLocalizationsZh extends AppLocalizations {
   String get usageAccessLater => '暂不开启';
 
   @override
+  String get bgCaptureCurrentApp => '捕获当前应用';
+
+  @override
+  String get bgCaptureProcess => '捕获进程名';
+
+  @override
+  String get bgCaptureTitle => '捕获窗口标题';
+
+  @override
+  String get bgManualHoldBanner => '自动切换已因手动选择暂时挂起';
+
+  @override
+  String get bgManualHoldResume => '恢复自动切换';
+
+  @override
+  String get settingsBgCaptureFailed => '未能获取当前前台（请稍后重试）';
+
+  @override
+  String bgNotifyForeground(String package) {
+    return '前台 $package（未匹配规则）';
+  }
+
+  @override
   String get bgGuideWhy => '为何需要此权限';
 
   @override

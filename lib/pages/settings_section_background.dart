@@ -100,7 +100,7 @@ class _BackgroundSectionState extends State<BackgroundSection> {
     final l10n = AppLocalizations.of(context)!;
     final app = widget.app;
     return ListenableBuilder(
-      listenable: Listenable.merge([app.tracking, app.settings]),
+      listenable: Listenable.merge([app.tracking, app.settings, app.timer]),
       builder: (context, _) {
         final settings = app.settings.current;
         final rules = app.tracking.ruleList;
@@ -120,6 +120,26 @@ class _BackgroundSectionState extends State<BackgroundSection> {
               onOpenUsageSettings:
                   Platform.isAndroid ? _openUsageSettings : null,
             ),
+            // 手动会话保持可见化（批次 6b 用户反馈）：手动点过活动卡后自动
+            // 切换挂起——给出状态与一键恢复，防"功能坏了"的误判。
+            if (app.timer.manualSessionHold) ...[
+              const SizedBox(height: 14),
+              SettingsInfoBanner(
+                child: Row(
+                  children: [
+                    Icon(Icons.pause_circle_outline,
+                        size: 16, color: SettingsSky.dark),
+                    const SizedBox(width: 8),
+                    Expanded(child: Text(l10n.bgManualHoldBanner)),
+                    TextButton(
+                      onPressed:
+                          widget.app.timer.clearManualSessionHold,
+                      child: Text(l10n.bgManualHoldResume),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 14),
             // 总开关。
             Container(
@@ -600,8 +620,25 @@ class _RuleFormDialogState extends State<RuleFormDialog> {
     super.dispose();
   }
 
-  Future<void> _pickActivity() async {
-    final app = widget.app;
+  /// 捕获当前前台（批次 6b）：进程名/包名或窗口标题填入模式框，并联动
+  /// 匹配类型。检测器不可用/无前台时提示。
+  void _captureForeground({required bool isTitle}) {
+    final detector = widget.app.foregroundDetector;
+    final value = isTitle ? (detector.windowTitle ?? '') : (detector.processName ?? '');
+    final l10n = AppLocalizations.of(context)!;
+    if (value.isEmpty) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(l10n.settingsBgCaptureFailed)));
+      return;
+    }
+    setState(() {
+      _pattern.text = value;
+      _kind = isTitle ? TrackingRuleMatchKind.title : TrackingRuleMatchKind.process;
+    });
+  }
+
+  Future<void> _pickActivity() async {    final app = widget.app;
     final category = app.category;
     final primary = <String, String?>{};
     final all = <String, Set<String>>{};
@@ -698,6 +735,32 @@ class _RuleFormDialogState extends State<RuleFormDialog> {
                 border: const OutlineInputBorder(),
                 isDense: true,
               ),
+            ),
+            const SizedBox(height: 8),
+            // 捕获当前前台（批次 6b）：免去手动查包名/进程名的门槛。
+            Wrap(
+              spacing: 8,
+              children: [
+                if (Platform.isAndroid)
+                  ActionChip(
+                    key: const ValueKey('capture-current'),
+                    avatar: const Icon(Icons.center_focus_strong, size: 16),
+                    label: Text(l10n.bgCaptureCurrentApp),
+                    onPressed: () => _captureForeground(isTitle: false),
+                  )
+                else ...[
+                  ActionChip(
+                    avatar: const Icon(Icons.center_focus_strong, size: 16),
+                    label: Text(l10n.bgCaptureProcess),
+                    onPressed: () => _captureForeground(isTitle: false),
+                  ),
+                  ActionChip(
+                    avatar: const Icon(Icons.center_focus_strong, size: 16),
+                    label: Text(l10n.bgCaptureTitle),
+                    onPressed: () => _captureForeground(isTitle: true),
+                  ),
+                ],
+              ],
             ),
             const SizedBox(height: 16),
             Text(l10n.settingsBgMatchKind,

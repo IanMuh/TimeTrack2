@@ -773,6 +773,31 @@ class AppLocalizationsEn extends AppLocalizations {
   String get usageAccessLater => 'Not now';
 
   @override
+  String get bgCaptureCurrentApp => 'Capture current app';
+
+  @override
+  String get bgCaptureProcess => 'Capture process';
+
+  @override
+  String get bgCaptureTitle => 'Capture window title';
+
+  @override
+  String get bgManualHoldBanner =>
+      'Auto switching is paused because of manual selection';
+
+  @override
+  String get bgManualHoldResume => 'Resume auto switching';
+
+  @override
+  String get settingsBgCaptureFailed =>
+      'Could not capture the foreground app (try again)';
+
+  @override
+  String bgNotifyForeground(String package) {
+    return 'Foreground $package (no rule matched)';
+  }
+
+  @override
   String get bgGuideWhy => 'Why this permission is needed';
 
   @override

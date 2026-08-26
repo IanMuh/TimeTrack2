@@ -1544,6 +1544,48 @@ abstract class AppLocalizations {
   /// **'暂不开启'**
   String get usageAccessLater;
 
+  /// No description provided for @bgCaptureCurrentApp.
+  ///
+  /// In zh, this message translates to:
+  /// **'捕获当前应用'**
+  String get bgCaptureCurrentApp;
+
+  /// No description provided for @bgCaptureProcess.
+  ///
+  /// In zh, this message translates to:
+  /// **'捕获进程名'**
+  String get bgCaptureProcess;
+
+  /// No description provided for @bgCaptureTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'捕获窗口标题'**
+  String get bgCaptureTitle;
+
+  /// No description provided for @bgManualHoldBanner.
+  ///
+  /// In zh, this message translates to:
+  /// **'自动切换已因手动选择暂时挂起'**
+  String get bgManualHoldBanner;
+
+  /// No description provided for @bgManualHoldResume.
+  ///
+  /// In zh, this message translates to:
+  /// **'恢复自动切换'**
+  String get bgManualHoldResume;
+
+  /// No description provided for @settingsBgCaptureFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'未能获取当前前台（请稍后重试）'**
+  String get settingsBgCaptureFailed;
+
+  /// No description provided for @bgNotifyForeground.
+  ///
+  /// In zh, this message translates to:
+  /// **'前台 {package}（未匹配规则）'**
+  String bgNotifyForeground(String package);
+
   /// No description provided for @bgGuideWhy.
   ///
   /// In zh, this message translates to:

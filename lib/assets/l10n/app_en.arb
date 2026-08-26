@@ -241,6 +241,18 @@
   "usageAccessGuide": "Usage access is required to auto-record foreground apps",
   "usageAccessButton": "Open system settings",
   "usageAccessLater": "Not now",
+  "bgCaptureCurrentApp": "Capture current app",
+  "bgCaptureProcess": "Capture process",
+  "bgCaptureTitle": "Capture window title",
+  "bgManualHoldBanner": "Auto switching is paused because of manual selection",
+  "bgManualHoldResume": "Resume auto switching",
+  "settingsBgCaptureFailed": "Could not capture the foreground app (try again)",
+  "bgNotifyForeground": "Foreground {package} (no rule matched)",
+  "@bgNotifyForeground": {
+    "placeholders": {
+      "package": { "type": "String" }
+    }
+  },
   "bgGuideWhy": "Why this permission is needed",
   "bgGuideWhyBody": "Auto tracking reads the current foreground app via the system Usage Access setting and switches the running activity by your rules.",
   "bgGuidePrivacy": "Privacy: only the foreground app's package name is read for local rule matching. Screen contents are never read and no usage data leaves this device.",

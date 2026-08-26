@@ -141,7 +141,8 @@ class _AppShellState extends State<AppShell>
   }
 
   /// 依据 总开关+使用情况授权 决定前台服务启停，并同步通知文案
-  /// （内容=最近命中的规则活动名；无命中由 native 显示「检测中…」）。
+  /// （多状态：命中→活动名；未命中但已识别前台→「前台 包名（未匹配规则）」；
+  /// 两者皆无 → native 显示「检测中…」）。
   Future<void> _syncAndroidService() async {
     if (!AndroidTrackingBridge.isSupported || !mounted) return;
     final app = widget.app;
@@ -152,12 +153,20 @@ class _AppShellState extends State<AppShell>
       await app.androidTracking.stopTrackingService();
       return;
     }
+    final l10n = AppLocalizations.of(context)!;
     String content = '';
     final matchedId = app.tracking.lastMatchedActivityId;
     if (matchedId != null) {
       final activity = await app.activities.activityById(matchedId);
       if (!mounted) return;
       content = activity?.name ?? '';
+    }
+    if (content.isEmpty) {
+      // 状态可见性（用户反馈）：区分"检测在工作但无匹配规则"与"检测中…"。
+      final detected = app.foregroundDetector.processName;
+      if (detected != null && detected.isNotEmpty) {
+        content = l10n.bgNotifyForeground(detected);
+      }
     }
     await app.androidTracking.startTrackingService(
       paused: app.tracking.sessionPaused,
