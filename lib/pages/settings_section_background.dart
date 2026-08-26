@@ -225,6 +225,13 @@ class _BackgroundSectionState extends State<BackgroundSection> {
     final store = widget.app.settings;
     final current = store.current;
     if (current == null) return;
+    // Android 开启时先补通知权限请求（API 33+；前台服务常驻通知可见性）。
+    // 引导页跳系统设置期间弹窗无法展示，故在用户主动开启的时机补问。
+    if (value && Platform.isAndroid &&
+        !widget.app.androidTracking.notificationPermissionAsked) {
+      await widget.app.androidTracking.requestNotificationPermission();
+      if (!mounted) return;
+    }
     await store.save(current.copyWith(backgroundTrackingEnabled: value));
   }
 

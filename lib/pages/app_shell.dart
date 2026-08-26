@@ -58,7 +58,8 @@ class AppShell extends StatefulWidget {
   State<AppShell> createState() => _AppShellState();
 }
 
-class _AppShellState extends State<AppShell> {
+class _AppShellState extends State<AppShell>
+    with WidgetsBindingObserver {
   /// 合并 timer（运行条目变化）+ clock（秒级推进）为单一 listenable，
   /// 避免每次 build 重建合并对象反复换订阅（计时条每秒重建）。
   late final Listenable _timerTick =
@@ -96,6 +97,7 @@ class _AppShellState extends State<AppShell> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _sessionStart = widget.app.clock.now();
     widget.app.reminder.addListener(_onReminderChanged);
     widget.app.update.addListener(_onUpdateChanged);
@@ -112,6 +114,7 @@ class _AppShellState extends State<AppShell> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     widget.app.reminder.removeListener(_onReminderChanged);
     widget.app.update.removeListener(_onUpdateChanged);
     widget.app.timer.removeListener(_onTimerForSuspicious);
@@ -202,6 +205,22 @@ class _AppShellState extends State<AppShell> {
   void _onTimerForSuspicious() {
     _checkSuspiciousEntry();
     // 命中活动变化（自动切换/手动切换）→ 常驻通知文案同步（批次 6b）。
+    unawaited(_syncAndroidService());
+  }
+
+  /// 应用生命周期（批次 6b Android）：从后台/系统设置回到前台时——
+  /// - 补问通知权限（引导页跳系统设置期间弹窗无法展示，回前台补问）；
+  /// - 刷新前台服务启停与通知文案（授权态可能已变）。
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    final bridge = widget.app.androidTracking;
+    if (!AndroidTrackingBridge.isSupported) return;
+    final enabled =
+        widget.app.settings.current?.backgroundTrackingEnabled ?? false;
+    if (!bridge.notificationPermissionAsked && enabled) {
+      unawaited(bridge.requestNotificationPermission());
+    }
     unawaited(_syncAndroidService());
   }
 

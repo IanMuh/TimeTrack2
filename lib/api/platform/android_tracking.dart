@@ -81,8 +81,11 @@ class AndroidTrackingBridge {
   }
 
   /// 请求通知权限（API 33+ 运行时弹窗；低版本系统设置默认可见，no-op）。
+  /// 调用即置 [notificationPermissionAsked]（本会话只主动问一次；用户拒绝
+  /// 后可去系统设置重开）。
   Future<void> requestNotificationPermission() async {
     if (!isSupported) return;
+    notificationPermissionAsked = true;
     try {
       await _channel.invokeMethod<void>('requestNotificationPermission');
     } on PlatformException {

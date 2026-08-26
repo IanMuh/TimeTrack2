@@ -7,8 +7,6 @@
 /// 设置 → 后台记录 手动再启。
 library;
 
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 
 import '../api/platform/android_tracking.dart';
@@ -87,11 +85,9 @@ class TrackingGuidePage extends StatelessWidget {
               const Spacer(),
               FilledButton.icon(
                 key: const ValueKey('guide-open-settings'),
-                onPressed: () {
-                  bridge.openUsageAccessSettings();
-                  // 顺手请求通知权限（前台服务常驻通知可见性，API 33+）。
-                  unawaited(bridge.requestNotificationPermission());
-                },
+                // 只跳系统设置（应用切后台时通知权限弹窗无法展示）；通知
+                // 权限在回前台后由壳层生命周期钩子补问。
+                onPressed: () => bridge.openUsageAccessSettings(),
                 icon: const Icon(Icons.settings_outlined, size: 18),
                 label: Text(l10n.usageAccessButton),
               ),

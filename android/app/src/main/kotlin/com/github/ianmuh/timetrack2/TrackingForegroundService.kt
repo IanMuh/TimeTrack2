@@ -48,7 +48,17 @@ class TrackingForegroundService : Service() {
         }
         val content = intent?.getStringExtra(EXTRA_CONTENT).orEmpty()
         val paused = intent?.getBooleanExtra(EXTRA_PAUSED, false) ?: false
-        startForeground(NOTIFICATION_ID, buildNotification(content, paused))
+        // targetSdk 34+：manifest 声明了 foregroundServiceType 时必须以三参
+        // 重载显式传类型，两参版本会抛 MissingForegroundServiceTypeException。
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIFICATION_ID,
+                buildNotification(content, paused),
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, buildNotification(content, paused))
+        }
         return START_STICKY
     }
 
