@@ -343,7 +343,14 @@ class AppStore {
   /// 备份外的一切（不排除 dataDir）；占位 dataDir 若仍在程序目录内，默认路径
   /// 触发安装更新会连带清空用户数据。占位 dataDir 落到系统临时目录
   /// （timetrack2/data），与程序目录天然分离。
-  static WindowsInstaller _defaultWindowsInstaller() {
+  ///
+  /// **仅 Windows 构造（批次 6b 真机修复）**：Android 上 `Directory.current`
+  /// 为根目录 `/`，安装器构造校验抛 ArgumentError 并阻断整个启动——非
+  /// Windows 返回 null（UpdateStore.install 已按平台分发优雅降级）。
+  static WindowsInstaller? _defaultWindowsInstaller() {
+    if (!Platform.isWindows) {
+      return null;
+    }
     final base = Directory.current.path;
     return WindowsInstaller(
       programDir: base,

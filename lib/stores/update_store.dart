@@ -98,13 +98,17 @@ class UpdateStore extends ChangeNotifier implements UpdateActions {
   UpdateStore({
     required this.manifestService,
     required this.verifier,
-    required this.windowsInstaller,
     required this.database,
+    this.windowsInstaller,
   });
 
   final UpdateManifestService manifestService;
   final UpdateVerifier verifier;
-  final WindowsInstaller windowsInstaller;
+
+  /// Windows 安装器（批次 6b 起**可空**）：仅 Windows 平台注入——Android 等
+  /// 平台无程序目录语义（`Directory.current` 为根目录，构造校验会抛错），
+  /// install() 在未注入时优雅降级为失败。
+  final WindowsInstaller? windowsInstaller;
   final AppDatabase database;
 
   UpdateStatus _status = const UpdateStatus(state: UpdateState.idle);
@@ -305,18 +309,23 @@ class UpdateStore extends ChangeNotifier implements UpdateActions {
       default:
         return _fail('当前平台暂不支持自动安装');
     }
+    final installer = windowsInstaller;
+    if (installer == null) {
+      // 未注入（批次 6b：非 Windows 平台装配不再构造安装器）——防御分支，
+      // 正常情况下上方的平台分发已拦截。
+      return _fail('当前平台未配置自动安装器');
+    }
     _transition(UpdateState.installing);
     try {
       // Windows：checkWritable → prepareStaging → applyStaging。
-      if (!windowsInstaller.checkWritable()) {
+      if (!installer.checkWritable()) {
         return _fail('程序目录不可写，无法安装——请从下载页手动获取更新');
       }
-      final staging =
-          await windowsInstaller.prepareStaging(verified.filePath);
+      final staging = await installer.prepareStaging(verified.filePath);
       if (staging case AppFailure<String> failure) {
         return _fail(failure.message);
       }
-      final applied = await windowsInstaller.applyStaging(staging.requireValue());
+      final applied = await installer.applyStaging(staging.requireValue());
       if (applied case AppFailure<void> failure) {
         return _fail(failure.message);
       }
