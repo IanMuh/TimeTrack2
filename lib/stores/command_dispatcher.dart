@@ -103,6 +103,16 @@ class CommandDispatcher {
       case 'stop':
         final result = await timer.stopRunning();
         return _fromAppResult(result, successMessage: '已停止当前活动');
+      case 'tracking_pause':
+        // 会话级暂停切换（批次 6 托盘/通知动作的指令化落点）：幂等 toggle，
+        // 内存态不影响计时条目与持久化总开关。
+        tracking.setSessionPaused(!tracking.sessionPaused);
+        return CommandSuccess(
+            data: tracking.sessionPaused,
+            message: tracking.sessionPaused ? '自动记录已暂停' : '自动记录已恢复');
+      case 'manual_hold_clear':
+        timer.clearManualSessionHold();
+        return const CommandSuccess(message: '已恢复自动切换');
       case 'add':
         final resolvedAdd = await _resolveActivityId(invocation.args.first);
         if (resolvedAdd.id == null) {

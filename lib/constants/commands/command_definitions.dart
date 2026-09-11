@@ -33,6 +33,16 @@ final List<CommandDefinition> commandDefinitions = [
     aliases: ['停止'],
     description: '停止当前活动',
   ),
+  CommandDefinition(
+    name: 'tracking_pause',
+    aliases: ['暂停记录'],
+    description: '切换会话级暂停（后台自动检测挂起/恢复；内存态不影响计时条目）',
+  ),
+  CommandDefinition(
+    name: 'manual_hold_clear',
+    aliases: ['恢复自动切换'],
+    description: '清除手动会话保持——恢复后台自动记录切换',
+  ),
 
   // ---- 时间条目编辑 ----
   CommandDefinition(

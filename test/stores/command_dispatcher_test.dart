@@ -177,6 +177,34 @@ void main() {
       expect(today.first.activityId, a.id);
     });
 
+    test('tracking_pause 指令：切换会话级暂停（幂等 toggle）', () async {
+      expect(h.tracking.sessionPaused, isFalse);
+      final pause = await run('暂停记录');
+      expect(pause, isA<CommandSuccess>());
+      expect(h.tracking.sessionPaused, isTrue);
+      expect(h.timer.manualSessionHold, isFalse,
+          reason: '会话暂停为内存态，不触碰手动保持');
+
+      final resume = await run('tracking_pause');
+      expect(resume, isA<CommandSuccess>());
+      expect(h.tracking.sessionPaused, isFalse);
+    });
+
+    test('manual_hold_clear 指令：清除手动会话保持', () async {
+      final a = (await h.activities.createActivity(name: '学习', color: 0))
+          .requireValue();
+      // 手动 switch 置位 manualHold（切换防冲突）。
+      await run('switch 学习');
+      expect(h.timer.manualSessionHold, isTrue);
+
+      final result = await run('manual_hold_clear');
+      expect(result, isA<CommandSuccess>());
+      expect(h.timer.manualSessionHold, isFalse,
+          reason: '恢复自动切换 = 清除手动保持');
+      expect((await h.entries.runningEntry())!.activityId, a.id,
+          reason: '不影响当前计时条目');
+    });
+
     test('category_create 指令：新建分类', () async {
       final result = await run('category_create 工作');
       expect(result, isA<CommandSuccess>());

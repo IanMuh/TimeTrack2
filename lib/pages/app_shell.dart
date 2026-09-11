@@ -132,8 +132,8 @@ class _AppShellState extends State<AppShell>
     if (!AndroidTrackingBridge.isSupported) return;
     final bridge = widget.app.androidTracking;
     bridge.onPauseRequested = () {
-      final tracking = widget.app.tracking;
-      tracking.setSessionPaused(!tracking.sessionPaused);
+      // 经指令通道（铁律 7）：通知动作与托盘同入口。
+      unawaited(_dispatch(CommandInvocation(name: 'tracking_pause')));
       setState(() {});
       unawaited(_syncAndroidService());
     };
@@ -180,8 +180,8 @@ class _AppShellState extends State<AppShell>
     tray.onCommand = (command) {
       switch (command) {
         case 'togglePause':
-          final tracking = widget.app.tracking;
-          tracking.setSessionPaused(!tracking.sessionPaused);
+          // 经指令通道（铁律 7）：托盘菜单与通知动作同入口。
+          unawaited(_dispatch(CommandInvocation(name: 'tracking_pause')));
           setState(() {}); // 计时条重建 → 推送新暂停态给托盘菜单/tooltip
         case 'show':
           // 唤起窗口由 native 完成；Dart 侧无需动作（保留分支防未来扩展）。

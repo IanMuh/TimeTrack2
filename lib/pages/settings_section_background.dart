@@ -134,8 +134,9 @@ class _BackgroundSectionState extends State<BackgroundSection> {
                     const SizedBox(width: 8),
                     Expanded(child: Text(l10n.bgManualHoldBanner)),
                     TextButton(
-                      onPressed:
-                          widget.app.timer.clearManualSessionHold,
+                      // 经指令通道（铁律 7）：manual_hold_clear 指令化落点。
+                      onPressed: () => widget.app.dispatcher
+                          .dispatch(CommandInvocation(name: 'manual_hold_clear')),
                       child: Text(l10n.bgManualHoldResume),
                     ),
                   ],
