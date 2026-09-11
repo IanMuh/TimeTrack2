@@ -59,7 +59,12 @@ class TimerFocusSection extends StatelessWidget {
         const SizedBox(height: 40),
         _StatusPill(recording: recording, accent: accent),
         const SizedBox(height: 20),
-        TnumText(formatHms(elapsed), style: timerStyle),
+        // FittedBox：系统字号放大/超长计时（100+ 小时）下 48px 大数字可能
+        // 超出焦点区宽——等比缩小而非溢出。
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          child: TnumText(formatHms(elapsed), style: timerStyle),
+        ),
         const SizedBox(height: 12),
         if (recording)
           Row(
@@ -100,8 +105,11 @@ class TimerFocusSection extends StatelessWidget {
             ],
           ),
         const SizedBox(height: 24),
-        Row(
-          mainAxisSize: MainAxisSize.min,
+        // Wrap：textScale 放大时 标签+值+分隔线+标签+值 超出焦点区宽——
+        // 换行而非溢出。
+        Wrap(
+          alignment: WrapAlignment.center,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             Text(l10n.timerTodayTotal, style: _statLabel(scheme)),
             const SizedBox(width: 6),
@@ -375,13 +383,16 @@ class TimerQuickSection extends StatelessWidget {
                 : constraints.maxWidth >= 600
                     ? 3
                     : 2;
+            // 卡片纵横比随系统字号放大放高：内容最小高度随字号线性增长，
+            // 固定 1.75 在放大档纵向溢出（app 层钳制 1.3 → 最扁 1.35）。
+            final textScale = MediaQuery.textScalerOf(context).scale(1.0);
             return GridView.count(
               crossAxisCount: columns,
               mainAxisSpacing: 12,
               crossAxisSpacing: 12,
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
-              childAspectRatio: 1.75,
+              childAspectRatio: 1.75 / textScale,
               children: [
                 for (final a in visible)
                   _ActivityCard(

@@ -1052,6 +1052,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String get todayPreviewTitle => 'Timeline preview';
 
   @override
+  String todayPreviewCount(int count) {
+    return '$count entries';
+  }
+
+  @override
   String get todayViewFullTimeline => 'View full timeline';
 
   @override

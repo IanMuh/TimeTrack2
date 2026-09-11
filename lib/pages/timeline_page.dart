@@ -286,11 +286,22 @@ class _TimelinePageState extends State<TimelinePage> {
       categoryIdsByActivity: all,
     );
     Activity? picked;
-    await showActivityCategoryPickerDialog(
-      context,
-      model: model,
-      events: ActivityPickerEvents(onSelectActivity: (a) => picked = a),
-    );
+    final events = ActivityPickerEvents(onSelectActivity: (a) => picked = a);
+    // 契约 §5.1：移动（<600）= 底部抽屉形态——桌面双栏弹窗左栏固定 232px，
+    // 紧凑视口下活动列表只剩几十像素（与计时页同款分支）。
+    if (MediaQuery.sizeOf(context).width >= 600) {
+      await showActivityCategoryPickerDialog(
+        context,
+        model: model,
+        events: events,
+      );
+    } else {
+      await showActivityCategoryPickerSheet(
+        context,
+        model: model,
+        events: events,
+      );
+    }
     return picked;
   }
 
@@ -483,8 +494,10 @@ class _TimelinePageState extends State<TimelinePage> {
           onEntryTap: (e) => _openEditor(entry: e),
         ),
         const SizedBox(height: 10),
-        // 工具行：缩放 + 分段 1-12。
-        Row(
+        // 工具行：缩放 + 分段 1-12。Wrap：en 文案 + 5 个按钮在紧凑视口
+        // 临界，textScale 放大即溢出——超宽自动换行。
+        Wrap(
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             Text(l10n.tlZoom,
                 style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),

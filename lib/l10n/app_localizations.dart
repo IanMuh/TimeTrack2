@@ -2066,6 +2066,12 @@ abstract class AppLocalizations {
   /// **'时间线预览'**
   String get todayPreviewTitle;
 
+  /// No description provided for @todayPreviewCount.
+  ///
+  /// In zh, this message translates to:
+  /// **'{count} 条'**
+  String todayPreviewCount(int count);
+
   /// No description provided for @todayViewFullTimeline.
   ///
   /// In zh, this message translates to:

@@ -326,8 +326,9 @@ class _StatsPageState extends State<StatsPage> {
         color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(8),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
+      // Wrap 而非 Row：en 文案下 4-5 个选项总宽超紧凑视口（范围段整组
+      // 曾在 Wrap 里但单子件本身超宽）——超宽自动换行，选中态不变。
+      child: Wrap(
         children: [
           for (var i = 0; i < options.length; i++)
             GestureDetector(

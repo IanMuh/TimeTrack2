@@ -180,7 +180,8 @@ class TlTimelineRow extends StatelessWidget {
   /// 24 小时制（用户偏好；12 时制显示 09:05 AM 形态）。
   final bool use24;
 
-  static const _leftColumn = 56.0;
+  /// 左列宽度：12 时制 "09:05 AM" 8 字符在 56px 内折行破坏对齐——加宽。
+  double get _leftColumn => use24 ? 56.0 : 76.0;
   static const _trackWidth = 26.0;
 
   @override
@@ -774,9 +775,14 @@ class TlLogRow extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-          Text(
-            deviceId,
-            style: TextStyle(fontSize: 10.5, color: scheme.onSurfaceVariant),
+          // 设备名可能任意长：Flexible + ellipsis 防顶出行尾。
+          Flexible(
+            child: Text(
+              deviceId,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 10.5, color: scheme.onSurfaceVariant),
+            ),
           ),
         ],
       ),

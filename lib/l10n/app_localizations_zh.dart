@@ -1037,6 +1037,11 @@ class AppLocalizationsZh extends AppLocalizations {
   String get todayPreviewTitle => '时间线预览';
 
   @override
+  String todayPreviewCount(int count) {
+    return '$count 条';
+  }
+
+  @override
   String get todayViewFullTimeline => '查看完整时间线';
 
   @override

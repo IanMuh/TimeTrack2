@@ -681,15 +681,27 @@ class _RuleFormDialogState extends State<RuleFormDialog> {
       primaryCategoryIdByActivity: primary,
       categoryIdsByActivity: all,
     );
-    await showActivityCategoryPickerDialog(
-      context,
-      model: model,
-      currentActivityId: _activityId,
-      events: ActivityPickerEvents(
-        onSelectActivity: (activity) =>
-            setState(() => _activityId = activity.id),
-      ),
+    final events = ActivityPickerEvents(
+      onSelectActivity: (activity) =>
+          setState(() => _activityId = activity.id),
     );
+    // 契约 §5.1：移动（<600）= 底部抽屉形态——桌面双栏弹窗左栏固定 232px，
+    // 紧凑视口下活动列表只剩几十像素（与计时页同款分支）。
+    if (MediaQuery.sizeOf(context).width >= 600) {
+      await showActivityCategoryPickerDialog(
+        context,
+        model: model,
+        currentActivityId: _activityId,
+        events: events,
+      );
+    } else {
+      await showActivityCategoryPickerSheet(
+        context,
+        model: model,
+        currentActivityId: _activityId,
+        events: events,
+      );
+    }
   }
 
   Future<void> _save() async {

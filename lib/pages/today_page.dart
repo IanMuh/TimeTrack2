@@ -10,6 +10,7 @@ import '../components/state_views.dart';
 import '../components/tnum_text.dart';
 import '../l10n/app_localizations.dart';
 import '../stores/app_store.dart';
+import '../utils/time_format.dart';
 import '../utils/day_metrics.dart';
 import '../viewmodels/activity_category.dart';
 import '../viewmodels/time_entry.dart';
@@ -333,7 +334,12 @@ class _TodayPageState extends State<TodayPage> {
         const SizedBox(width: 20),
         SizedBox(
           width: 320,
-          child: _TimelinePreview(l10n: l10n, entries: previewEntries),
+          child: _TimelinePreview(
+            l10n: l10n,
+            entries: previewEntries,
+            use24: app.settings.current?.use24HourFormat ?? true,
+            entryCount: previewEntries.length,
+          ),
         ),
       ],
     );
@@ -792,10 +798,21 @@ class _ActivityGroupRow extends StatelessWidget {
 
 /// 宽屏时间线预览（约 5 条 + 跳转）。
 class _TimelinePreview extends StatelessWidget {
-  const _TimelinePreview({required this.l10n, required this.entries});
+  const _TimelinePreview({
+    required this.l10n,
+    required this.entries,
+    required this.use24,
+    required this.entryCount,
+  });
 
   final AppLocalizations l10n;
   final List<TimeEntry> entries;
+
+  /// 12 小时制偏好（预览时刻曾硬编码 24h，与其余页面口径不一致）。
+  final bool use24;
+
+  /// 全量条数（筛选后；展示仅取前 5——文案 ARB 化，原为硬编码中文）。
+  final int entryCount;
 
   @override
   Widget build(BuildContext context) {
@@ -818,15 +835,15 @@ class _TimelinePreview extends StatelessWidget {
                 style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
               ),
               const Spacer(),
-              if (entries.length > 5)
+              if (entryCount > 5)
                 Text(
-                  '${entries.length} 条',
+                  l10n.todayPreviewCount(entryCount),
                   style:
                       TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
                 ),
             ],
           ),
-          for (final e in preview) _PreviewRow(entry: e),
+          for (final e in preview) _PreviewRow(entry: e, use24: use24),
           const SizedBox(height: 6),
           TextButton.icon(
             onPressed: () => context.go('/timeline'),
@@ -841,19 +858,20 @@ class _TimelinePreview extends StatelessWidget {
 }
 
 class _PreviewRow extends StatelessWidget {
-  const _PreviewRow({required this.entry});
+  const _PreviewRow({required this.entry, required this.use24});
 
   final TimeEntry entry;
+  final bool use24;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final start = DateFormat('HH:mm', 'zh').format(entry.startAt);
+    final start = formatClockOf(entry.startAt, use24: use24);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         children: [
-          _PreviewTime(start: start),
+          _PreviewTime(start: start, use24: use24),
           const SizedBox(width: 10),
           ActivityColorDot(
             entry.activityColorSnapshot == null
@@ -885,15 +903,17 @@ class _PreviewRow extends StatelessWidget {
 }
 
 class _PreviewTime extends StatelessWidget {
-  const _PreviewTime({required this.start});
+  const _PreviewTime({required this.start, required this.use24});
 
   final String start;
+  final bool use24;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    // 12 时制 "09:05 AM" 8 字符在 40px 内折行——按格式放宽。
     return SizedBox(
-      width: 40,
+      width: use24 ? 40 : 56,
       child: TnumText(
         start,
         style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant),

@@ -129,58 +129,118 @@ class StTreeRow extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              SizedBox(width: row.depth * 16.0),
-              Icon(
-                collapsed
-                    ? Icons.keyboard_arrow_right_rounded
-                    : Icons.keyboard_arrow_down_rounded,
-                size: 14,
-                color: scheme.onSurfaceVariant,
-              ),
-              const SizedBox(width: 4),
-              ActivityColorDot(Color(row.color), size: 8, ringWidth: 0),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  row.label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: row.depth == 0
-                        ? FontWeight.w600
-                        : FontWeight.w500,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              SizedBox(
-                width: 140,
-                child: ActivityColorBar2(Color(row.color), ratio: ratio),
-              ),
-              const SizedBox(width: 8),
-              TnumText(
-                '${(ratio * 100).toStringAsFixed(0)}%',
+          // 紧凑档（可用宽 <480）改两行：占比条不再固定 140px——单行固定
+          // 部分（条+%+时长+条数）在 320 窗口必溢出；层级信息两行均保留
+          //（契约 L113"紧凑档不得丢弃层级信息"）。
+          LayoutBuilder(builder: (context, constraints) {
+            final compact = constraints.maxWidth < 480;
+            final indent = SizedBox(width: row.depth * 16.0);
+            final label = Expanded(
+              child: Text(
+                row.label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                    fontSize: 11.5, color: scheme.onSurfaceVariant),
-              ),
-              const SizedBox(width: 12),
-              TnumText(
-                formatHm(row.totalDuration),
-                style: const TextStyle(
                   fontSize: 13,
-                  fontWeight: FontWeight.w600,
+                  fontWeight: row.depth == 0
+                      ? FontWeight.w600
+                      : FontWeight.w500,
                 ),
               ),
-              const SizedBox(width: 10),
-              Text(
-                l10n.stCountShort(row.count),
-                style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+            );
+            final duration = TnumText(
+              formatHm(row.totalDuration),
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
               ),
-            ],
-          ),
+            );
+            if (compact) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      indent,
+                      Icon(
+                        collapsed
+                            ? Icons.keyboard_arrow_right_rounded
+                            : Icons.keyboard_arrow_down_rounded,
+                        size: 14,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                      const SizedBox(width: 4),
+                      ActivityColorDot(Color(row.color), size: 8, ringWidth: 0),
+                      const SizedBox(width: 8),
+                      label,
+                      const SizedBox(width: 12),
+                      duration,
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Padding(
+                    padding: EdgeInsets.only(left: row.depth * 16.0 + 18),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: ActivityColorBar2(
+                              Color(row.color), ratio: ratio),
+                        ),
+                        const SizedBox(width: 8),
+                        TnumText(
+                          '${(ratio * 100).toStringAsFixed(0)}%',
+                          style: TextStyle(
+                              fontSize: 11.5,
+                              color: scheme.onSurfaceVariant),
+                        ),
+                        const SizedBox(width: 10),
+                        Text(
+                          l10n.stCountShort(row.count),
+                          style: TextStyle(
+                              fontSize: 11,
+                              color: scheme.onSurfaceVariant),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              );
+            }
+            return Row(
+              children: [
+                indent,
+                Icon(
+                  collapsed
+                      ? Icons.keyboard_arrow_right_rounded
+                      : Icons.keyboard_arrow_down_rounded,
+                  size: 14,
+                  color: scheme.onSurfaceVariant,
+                ),
+                const SizedBox(width: 4),
+                ActivityColorDot(Color(row.color), size: 8, ringWidth: 0),
+                const SizedBox(width: 8),
+                label,
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 140,
+                  child: ActivityColorBar2(Color(row.color), ratio: ratio),
+                ),
+                const SizedBox(width: 8),
+                TnumText(
+                  '${(ratio * 100).toStringAsFixed(0)}%',
+                  style: TextStyle(
+                      fontSize: 11.5, color: scheme.onSurfaceVariant),
+                ),
+                const SizedBox(width: 12),
+                duration,
+                const SizedBox(width: 10),
+                Text(
+                  l10n.stCountShort(row.count),
+                  style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+                ),
+              ],
+            );
+          }),
         ],
       ),
     );

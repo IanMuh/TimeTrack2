@@ -16,12 +16,18 @@ import 'stores/theme_mode_store.dart';
 /// - **主题接线**：[ListenableBuilder] 包 [ThemeModeStore] 提供 themeMode
 ///   （默认浅色，契约 §9.7）；ThemeModeStore 为 UI 状态类——持久化
 ///   （ProfileSettings 加 theme 列）随设置页批次 4 一起做，本批次仅内存态；
-/// - [locale] 可注入（widget 测试固定中/英文验证 ARB 注入）。
+/// - [locale] 可注入（widget 测试固定中/英文验证 ARB 注入）；
+/// - **系统字号钳制**：textScaler 最大 1.3 倍——无障碍放大 1.0-1.3 生效，
+///   超出部分钳制（大计时数字/统计树行/活动卡等临界布局按 1.3 上限设计，
+///   无钳制时极端放大会全屏溢出）。
 class TimeTrack2App extends StatefulWidget {
   const TimeTrack2App({super.key, this.locale, this.appStore});
 
   final Locale? locale;
   final AppStore? appStore;
+
+  /// 系统字号放大上限（超出钳制）。
+  static const double _maxTextScaleFactor = 1.3;
 
   /// 主题只构造一次（r 修复）：`buildTimeTrackTheme` 每次调用都会重新计算
   /// ColorScheme——根组件被上层重建（DI/路由框架接入后）会重复昂贵的主题
@@ -94,6 +100,7 @@ class _TimeTrack2AppState extends State<TimeTrack2App> {
             localizationsDelegates: delegates,
             supportedLocales: supportedLocales,
             locale: locale,
+            builder: _clampTextScaler,
             home: const _ShellPage(),
           );
         }
@@ -107,9 +114,24 @@ class _TimeTrack2AppState extends State<TimeTrack2App> {
           localizationsDelegates: delegates,
           supportedLocales: supportedLocales,
           locale: locale,
+          builder: _clampTextScaler,
           routerConfig: router,
         );
       },
+    );
+  }
+
+  /// 系统字号放大钳制（>1.3 的部分截断；缩小方向不干预）。
+  static Widget _clampTextScaler(BuildContext context, Widget? child) {
+    final mediaQuery = MediaQuery.of(context);
+    return MediaQuery(
+      data: mediaQuery.copyWith(
+        textScaler: mediaQuery.textScaler.clamp(
+          minScaleFactor: 0.0,
+          maxScaleFactor: TimeTrack2App._maxTextScaleFactor,
+        ),
+      ),
+      child: child ?? const SizedBox.shrink(),
     );
   }
 }

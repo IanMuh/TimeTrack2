@@ -333,6 +333,12 @@
   "todayRestDuration": "Rest",
   "todayVsPrevious": "vs previous day",
   "todayPreviewTitle": "Timeline preview",
+  "todayPreviewCount": "{count} entries",
+  "@todayPreviewCount": {
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
   "todayViewFullTimeline": "View full timeline",
   "todayBackToToday": "Back to today",
   "todayStartRecording": "Start recording",

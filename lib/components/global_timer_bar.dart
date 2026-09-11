@@ -169,19 +169,29 @@ class GlobalTimerBar extends StatelessWidget {
 
     // 切换活动：批次 2 接入选择器；当前禁用 + tooltip 说明原因（不呈现
     // 半成品选择器）。Tooltip 包禁用按钮仍可触发（自身持有手势）。
+    // 紧凑档用图标按钮：文字按钮（en "Switch activity" ≈105px）会把活动
+    // 名 FittedBox 压到不可读（契约 §3.3"活动名与计时不得省略"）。
     final switchButton = Tooltip(
       message: l10n.timerBarSwitchUnavailable,
-      child: FilledButton(
-        onPressed: null,
-        style: FilledButton.styleFrom(
-          visualDensity: VisualDensity.compact,
-          minimumSize: Size(0, compact ? 30 : 34),
-          padding: EdgeInsets.symmetric(horizontal: compact ? 10 : 14),
-          textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        ),
-        child: Text(l10n.timerBarSwitch),
-      ),
+      child: compact
+          ? IconButton(
+              onPressed: null,
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.cached_rounded, size: 18),
+            )
+          : FilledButton(
+              onPressed: null,
+              style: FilledButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                minimumSize: const Size(0, 34),
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                textStyle:
+                    const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8)),
+              ),
+              child: Text(l10n.timerBarSwitch),
+            ),
     );
 
     return Row(

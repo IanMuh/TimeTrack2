@@ -333,6 +333,12 @@
   "todayRestDuration": "休息时长",
   "todayVsPrevious": "较前日",
   "todayPreviewTitle": "时间线预览",
+  "todayPreviewCount": "{count} 条",
+  "@todayPreviewCount": {
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
   "todayViewFullTimeline": "查看完整时间线",
   "todayBackToToday": "回到今天",
   "todayStartRecording": "开始记录吧",
