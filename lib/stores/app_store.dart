@@ -190,13 +190,6 @@ class AppStore {
       undo: undo,
       dataRevision: revision,
     );
-    final reminder = ReminderStore(
-      clock: clock,
-      settings: settings,
-      timer: timer,
-      isUnassignedActivity: activities.activityIdIsUnassigned,
-      now: now,
-    );
     final today = TodayStore(
       entries: entries,
       dataRevision: revision,
@@ -276,6 +269,17 @@ class AppStore {
       fileInterop: fileInterop,
       database: database,
       dataRevision: revision, // 三类来源收口：import 成功后 bump
+      now: now, // entry_update --start/--end=now 的绝对语义来源
+    );
+    // 提醒 store 依赖指令通道（铁律 7：「停止」经 stop 指令分发），
+    // 故在 dispatcher 之后装配。
+    final reminder = ReminderStore(
+      clock: clock,
+      settings: settings,
+      timer: timer,
+      isUnassignedActivity: activities.activityIdIsUnassigned,
+      dispatch: dispatcher.dispatch,
+      now: now,
     );
 
     final store = AppStore._(

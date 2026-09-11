@@ -158,4 +158,99 @@ void main() {
     expect(find.text('学习'), findsAtLeastNWidgets(1));
     store.dispose();
   });
+
+  testWidgets('统计：排除自动开关极性——默认计入自动，勾选后聚合/明细同口径剔除',
+      (tester) async {
+    final store = await _createStore();
+    // 手动 00:00-00:10（学习）+ 自动 00:10-00:20（经计时写路径 isAuto 落库）。
+    await _addToday(store, '00:00', '00:10');
+    final auto = (await store.activities
+            .createActivity(name: '自动备份', color: 1))
+        .requireValue();
+    final xuexi = (await store.activities.activities())
+        .requireValue()
+        .firstWhere((a) => a.name == '学习');
+    final dayStart =
+        DateTime(_harnessNow.year, _harnessNow.month, _harnessNow.day);
+    await store.timer.switchToActivity(auto.id,
+        isAuto: true, at: dayStart.add(const Duration(minutes: 10)));
+    await store.timer.stopRunning(at: dayStart.add(const Duration(minutes: 20)));
+
+    await _pump(tester, store);
+    await tester.tap(find.byIcon(Icons.pie_chart_outline));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('活动').last); // 维度 → 活动（行 id = activity:<id>）
+    await tester.pumpAndSettle();
+
+    // 默认（开关关 = 计入）：学习 10 分钟在列，自动条目也在列。
+    final included = store.stats.snapshot!;
+    expect(
+      included.rows
+          .where((r) => r.id == 'activity:${xuexi.id}')
+          .single
+          .totalDuration,
+      const Duration(minutes: 10),
+    );
+    expect(
+      included.rows.where((r) => r.id == 'activity:${auto.id}'),
+      isNotEmpty,
+      reason: '开关默认关 = 自动条目计入聚合（极性回归锁）',
+    );
+
+    // 勾选「排除自动条目」→ 自动剔除，明细/图表/聚合行同口径。
+    await tester.tap(find.text('排除自动条目'));
+    await tester.pumpAndSettle();
+    final excluded = store.stats.snapshot!;
+    expect(excluded.rows.where((r) => r.id == 'activity:${auto.id}'), isEmpty);
+    expect(
+      excluded.rows
+          .where((r) => r.id == 'activity:${xuexi.id}')
+          .single
+          .totalDuration,
+      const Duration(minutes: 10),
+    );
+    store.dispose();
+  });
+
+  testWidgets('可疑条目：未分配遗留运行段不弹对话框（未记录态非可疑）',
+      (tester) async {
+    final store = await _createStore();
+    // 上次会话 00:00 记录、00:10 停止 → 留下 00:10 起的未分配运行段
+    //（早于会话起点 00:30）。修复前会误弹「发现遗留运行条目」。
+    final a = (await store.activities.createActivity(name: '临时', color: 1))
+        .requireValue();
+    final dayStart =
+        DateTime(_harnessNow.year, _harnessNow.month, _harnessNow.day);
+    await store.timer.switchToActivity(a.id, at: dayStart);
+    await store.timer.stopRunning(at: dayStart.add(const Duration(minutes: 10)));
+
+    await _pump(tester, store);
+    expect(find.byType(AlertDialog), findsNothing,
+        reason: '未记录态的跨会话运行段不属可疑，不弹决策对话框');
+    store.dispose();
+  });
+
+  testWidgets('可疑条目：真实活动遗留运行段弹决策框，「结束到现在」落当前时刻',
+      (tester) async {
+    final store = await _createStore();
+    // 阈值调大防运行阈值提醒（运行条目 00:00 起，会话起点 00:30 已达 30 分钟）。
+    await store.settings.reload();
+    await store.settings
+        .save(store.settings.current!.copyWith(reminderMinutes: 600));
+    final a = (await store.activities.createActivity(name: '遗留任务', color: 2))
+        .requireValue();
+    final dayStart =
+        DateTime(_harnessNow.year, _harnessNow.month, _harnessNow.day);
+    await store.timer.switchToActivity(a.id, at: dayStart);
+
+    await _pump(tester, store);
+    expect(find.text('发现遗留运行条目'), findsOneWidget);
+    // 「结束到现在」= entry_update --end=now（绝对语义）。
+    await tester.tap(find.text('结束到现在'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(store.timer.runningEntry, isNull,
+        reason: '遗留条目已结束（end=now 落库成功；若指令失败条目仍在运行）');
+    store.dispose();
+  });
 }

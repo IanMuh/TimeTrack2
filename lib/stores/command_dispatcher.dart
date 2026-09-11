@@ -42,7 +42,9 @@ class CommandDispatcher {
     required this.fileInterop,
     required this.database,
     DataRevision? dataRevision,
-  }) : _dataRevision = dataRevision ?? DataRevision();
+    DateTime Function()? now,
+  })  : _dataRevision = dataRevision ?? DataRevision(),
+        _now = now ?? DateTime.now;
 
   final UndoStore undo;
   final TimerStore timer;
@@ -59,6 +61,10 @@ class CommandDispatcher {
 
   /// dataRevision（模块 3d③：import 成功后 bump——数据变更使派生缓存失效）。
   final DataRevision _dataRevision;
+
+  /// 当前时刻（注入时钟；`entry_update --start/--end=now` 的绝对语义来源，
+  /// 与壳层/测试的确定性时钟同源）。
+  final DateTime Function() _now;
 
   /// 分发一条指令到对应 store 写路径；统一返回 [CommandResult]。
   ///
@@ -339,8 +345,11 @@ class CommandDispatcher {
   /// entry_update：条目字段部分更新（至少一项修改）。
   ///
   /// 时间语义：--start/--end 为 HH:MM，相对**条目所在本地日**还原（编辑
-  /// 历史条目不漂移日期；跨日移动能力挂账）。显式给出的 --end 落在起点
-  /// 之前时视为次日凌晨（跨零点延伸场景，如 23:00 的条目补 end=00:30）。
+  /// 历史条目不漂移日期；跨日移动能力挂账）；特值 `now` = 注入时钟的当前
+  /// 时刻（绝对语义，「结束到现在」对跨天遗留条目不受 HH:MM 分钟截断/
+  /// 日期锚定影响）。显式 --end 落在起点之前视为次日凌晨（跨零点延伸，
+  /// 如 23:00 的条目补 end=00:30）；**等于起点显式失败**（与补记 add 的
+  /// start<end 校验一致，防启发把相等静默进位成 24 小时条目）。
   Future<CommandResult> _entryUpdate(CommandInvocation invocation) async {
     final options = invocation.options;
     if (options.isEmpty) {
@@ -354,30 +363,42 @@ class CommandDispatcher {
     DateTime? startAt;
     final startRaw = options['start'];
     if (startRaw != null) {
-      final parsedStart = _todayAt(startRaw);
-      if (parsedStart == null) {
-        return const CommandFailure('非法时间值：--start=HH:MM');
+      if (startRaw == 'now') {
+        startAt = _now();
+      } else {
+        final parsedStart = _todayAt(startRaw);
+        if (parsedStart == null) {
+          return const CommandFailure('非法时间值：--start=HH:MM');
+        }
+        startAt = _onDay(existing.startAt, parsedStart);
       }
-      startAt = _onDay(existing.startAt, parsedStart);
     }
     DateTime? endAt;
     final endRaw = options['end'];
     if (endRaw != null) {
-      final parsedEnd = _todayAt(endRaw);
-      if (parsedEnd == null) {
-        return const CommandFailure('非法时间值：--end=HH:MM');
-      }
-      final baseStart = startAt ?? existing.startAt;
-      var resolvedEnd = _onDay(existing.startAt, parsedEnd);
-      if (!resolvedEnd.isAfter(baseStart)) {
-        resolvedEnd = resolvedEnd.add(const Duration(days: 1));
-        if (!resolvedEnd.isAfter(baseStart)) {
-          // +1 天仍不晚于起点：调用方给的时段跨度超过 24 小时且方向颠倒，
-          // 显式失败而非静默再进位。
-          return const CommandFailure('结束时刻必须晚于开始时刻');
+      if (endRaw == 'now') {
+        endAt = _now();
+      } else {
+        final parsedEnd = _todayAt(endRaw);
+        if (parsedEnd == null) {
+          return const CommandFailure('非法时间值：--end=HH:MM');
         }
+        final baseStart = startAt ?? existing.startAt;
+        var resolvedEnd = _onDay(existing.startAt, parsedEnd);
+        if (!resolvedEnd.isAfter(baseStart)) {
+          // 相等不进位（+1 天启发只服务"早于起点"的跨零点方向）。
+          if (resolvedEnd.isAtSameMomentAs(baseStart)) {
+            return const CommandFailure('结束时刻必须晚于开始时刻');
+          }
+          resolvedEnd = resolvedEnd.add(const Duration(days: 1));
+          if (!resolvedEnd.isAfter(baseStart)) {
+            // +1 天仍不晚于起点：调用方给的时段跨度超过 24 小时且方向颠倒，
+            // 显式失败而非静默再进位。
+            return const CommandFailure('结束时刻必须晚于开始时刻');
+          }
+        }
+        endAt = resolvedEnd;
       }
-      endAt = resolvedEnd;
     }
     String? activityId;
     final activityName = options['activity'];

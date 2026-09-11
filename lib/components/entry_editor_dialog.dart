@@ -182,7 +182,9 @@ class _EntryEditorDialogState extends State<_EntryEditorDialog> {
       activityId: widget.currentActivityId ?? '',
       activityName: widget.currentActivityName,
       start: _start,
-      end: _keepRunning ? null : _end!,
+      // 编辑运行中条目再关闭「保持运行中」时 _end 尚未选择——按"结束到
+      // 现在"落库（与 _hasOverlap 的 null-end 兜底一致），防空断言崩溃。
+      end: _keepRunning ? null : (_end ?? DateTime.now()),
       keepRunning: _keepRunning,
       note: _note.text,
     ));

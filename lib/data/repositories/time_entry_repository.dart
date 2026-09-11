@@ -497,7 +497,11 @@ class TimeEntryRepository with RepositoryMappings {
   ///   产生的邻日段是独立条目（时间线可见、可单独编辑/删除），本方法**不
   ///   追溯清理**（挂账：编辑不跨段联动）；undo 集合自洽——停用行仅
   ///   [entry] 自身（停用前状态随结果返回），undo 复活它 + 软删全部新段，
-  ///   redo 反向，共享原 id 由调用方按目标态去重。
+  ///   redo 反向，共享原 id 由调用方按目标态去重；
+  /// - **不做重叠裁剪**（区别于 [createManualEntry] 的 cutOverlaps）：编辑
+  ///   对话框对重叠有显式「重叠确认」流，裁剪会违背用户确认过的重叠；
+  ///   CLI/「延伸到现在」则可能压到邻居条目上留下双计时段（挂账：重叠
+  ///   提示/统计双计口径待产品定夺）。
   Future<AppResult<EntryUpdateOutcome>> updateEntryFields({
     required TimeEntry entry,
     String? activityId,

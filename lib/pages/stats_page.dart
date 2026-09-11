@@ -109,7 +109,9 @@ class _StatsPageState extends State<StatsPage> {
       dimension: _dimension,
       categoryFilterIds:
           _selectedCategories.isEmpty ? null : Set.of(_selectedCategories),
-      includeAuto: _excludeAuto,
+      // 开关语义：勾选「排除自动条目」= 自动不计入（includeAuto=false）；
+      // 未勾选 = 计入。极性不能接反——否则聚合行/环形图与明细口径相反。
+      includeAuto: !_excludeAuto,
     );
   }
 

@@ -82,7 +82,8 @@ final List<CommandDefinition> commandDefinitions = [
     timeOptions: {'start', 'end'},
     description:
         '编辑时间条目（至少一项修改）：entry_update <id> [--activity=<活动名>] '
-        '[--start=HH:MM] [--end=HH:MM] [--note=...]（时间相对条目所在日）',
+        '[--start=HH:MM|now] [--end=HH:MM|now] [--note=...]'
+        '（HH:MM 相对条目所在日；now=当前时刻）',
   ),
 
   // ---- 活动 ----

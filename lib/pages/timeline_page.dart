@@ -55,6 +55,10 @@ class _TimelinePageState extends State<TimelinePage> {
   bool _logsLoaded = false;
   String? _unassignedId;
 
+  /// 编辑对话框打开时的初始活动 id（编辑态）：--activity 仅在用户显式
+  /// 更换活动时传入的比对基准（防预填的首个活动被静默落库）。
+  String? _editorInitialActivityId;
+
   static DateTime _today() {
     final n = DateTime.now();
     return DateTime(n.year, n.month, n.day);
@@ -167,19 +171,23 @@ class _TimelinePageState extends State<TimelinePage> {
     final options = <String, String>{
       'start': _hm(draft.start),
       'end': _hm(draft.end ?? DateTime.now()),
-      if (draft.note.isNotEmpty) 'note': draft.note,
+      // 无条件传（含空串 = 清空备注）——按非空省略会让"删光备注保存"失效。
+      'note': draft.note,
     };
     if (draft.entryId != null) {
       // 编辑 = 单条 entry_update 指令（一条撤销记录，批次 5a 收口）。
-      // 目标活动按名解析；原活动已删/未选中时不传 --activity——保持条目
-      // 现有活动（部分更新语义），不静默改挂到其他活动。
+      // --activity 仅在用户显式更换活动时传（与打开对话框时的初始选择
+      // 比对）：条目原活动不在当前列表（已删/页面加载后新建）时对话框
+      // 会预填首个活动，无条件传会把条目静默改挂——不传 = 部分更新语义
+      // 下的"保持现有活动"。
       final target = _activityById(draft.activityId);
       final r = await app.dispatcher.dispatch(CommandInvocation(
         name: 'entry_update',
         args: [draft.entryId!],
         options: {
           ...options,
-          if (target != null) 'activity': target.name,
+          if (target != null && target.id != _editorInitialActivityId)
+            'activity': target.name,
         },
       ));
       return _ok(r);
@@ -207,6 +215,7 @@ class _TimelinePageState extends State<TimelinePage> {
             orElse: () => _activities.first,
           )
         : (_activityById(entry.activityId) ?? _activities.first);
+    _editorInitialActivityId = entry == null ? null : selected.id;
     await showEntryEditorDialog(
       context,
       use24: _use24,
@@ -234,11 +243,13 @@ class _TimelinePageState extends State<TimelinePage> {
           CommandInvocation(
               name: 'split', args: [id], options: {'at': _hm(at)}))),
       onExtendToNow: (id) async {
-        // 延伸 = 单条 entry_update（end=now；跨零点由分发器 +1 天启发处理）。
+        // 延伸 = 单条 entry_update（--end=now 绝对语义，跨天遗留条目也
+        // 精确结束在当前时刻；HH:MM 会按条目所在日还原，≥2 天前的条目
+        // 会算错）。
         return _ok(await app.dispatcher.dispatch(CommandInvocation(
           name: 'entry_update',
           args: [id],
-          options: {'end': _hm(DateTime.now())},
+          options: const {'end': 'now'},
         )));
       },
     );

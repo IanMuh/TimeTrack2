@@ -3,11 +3,13 @@
 /// 触发规则（设置项见 ProfileSettings）：
 /// - **运行阈值提醒**「仍在进行？」：非未分配的运行条目连续记录达到
 ///   `reminderMinutes` 阈值后触发，按 `reminderIntervalMinutes` 间隔重复，
-///   直至用户「停止」（经 TimerStore 写路径，计入手动会话保持）或确认/
-///   稍后（顺延一个间隔）。切换条目后按新条目起点重新计阈值；
+///   直至用户「停止」（经指令通道 stop，与计时条同一写路径，计入手动
+///   会话保持）或确认/稍后（顺延一个间隔）。切换条目后按新条目起点重新
+///   计阈值；
 /// - **触发时刻提醒**（快速提醒）：`quickReminderEnabled` 开启时，每日
-///   `reminderTimeOfDayMinutes` 时刻若未在记录则提醒开始记录——每日至多
-///   一次（静音方式同样消耗当日标记，视为已提醒）。
+///   `reminderTimeOfDayMinutes` 起当日**首个「未在记录」的 tick** 提醒
+///   开始记录——到点时正在记录则顺延到停止后（当日仍至多一次；静音
+///   方式同样消耗当日标记，视为已提醒）。
 ///
 /// 载体由 `reminderMethod` 决定：dialog（对话框，模态）/ banner（常驻
 /// 横幅，由壳层渲染）/ silent（不产生任何 UI）。同一时刻至多一条待处置
@@ -22,6 +24,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../utils/date_time_ext.dart';
+import '../viewmodels/commands/command_invocation.dart';
 import '../viewmodels/profile_settings.dart' show ReminderMethod;
 import '../viewmodels/time_entry.dart';
 import 'clock_store.dart';
@@ -74,6 +77,7 @@ class ReminderStore extends ChangeNotifier {
     required this.settings,
     required this.timer,
     required this.isUnassignedActivity,
+    required this.dispatch,
     DateTime Function()? now,
   }) : _now = now ?? DateTime.now {
     clock.addListener(_onClockTick);
@@ -82,6 +86,11 @@ class ReminderStore extends ChangeNotifier {
   final ClockStore clock;
   final SettingsStore settings;
   final TimerStore timer;
+
+  /// 指令通道入口（铁律 7）：「停止」等数据写操作经 CommandDispatcher
+  /// 分发（与计时条同一入口/反馈语义）。AppStore 注入 `dispatcher.dispatch`，
+  /// 测试注入记录型闭包。
+  final Future<CommandResult> Function(CommandInvocation invocation) dispatch;
 
   /// 运行条目"未分配活动"判定（ActivityRepository.activityIdIsUnassigned，
   /// AppStore 装配注入——本 store 不直接依赖活动仓储）。
@@ -94,6 +103,15 @@ class ReminderStore extends ChangeNotifier {
   /// 当前待处置提醒；null = 无。
   ReminderRequest? _active;
   ReminderRequest? get active => _active;
+
+  /// 停止写路径进行中的条目 id：stopOngoing 清状态与落库之间存在多次
+  /// await，期间的 tick 不得对该条目重算阈值/重弹提醒（否则刚停止的
+  /// 条目会立即再弹「仍在进行？」）。
+  String? _stoppingEntryId;
+
+  /// handleTick 重入防护（tick 每秒触发，判定含 await——重叠执行可能
+  /// 各自置 _active 叠弹；与 TrackingStore._polling 同款闸门）。
+  bool _ticking = false;
 
   /// 运行条目是否"未分配"判定缓存（activityId → 判定结果；防每 tick 查库，
   /// 与 app_shell 同款模式）。
@@ -127,59 +145,65 @@ class ReminderStore extends ChangeNotifier {
   /// 单次提醒检查（tick 驱动；测试可注入固定时刻后直调）。
   @visibleForTesting
   Future<void> handleTick() async {
-    if (_disposed) return;
-    if (_active != null) return; // 待处置中：不叠加触发
-    final s = settings.current;
-    if (s == null) return; // 设置未加载
-    final now = _now();
-    final recording = await _resolveRecording();
-    if (_disposed) return;
-    final method = s.reminderMethod;
+    if (_disposed || _ticking) return;
+    _ticking = true;
+    try {
+      if (_active != null) return; // 待处置中：不叠加触发
+      if (_stoppingEntryId != null) return; // 停止写路径进行中：不触发任何提醒
+      final s = settings.current;
+      if (s == null) return; // 设置未加载
+      final now = _now();
+      final recording = await _resolveRecording();
+      if (_disposed) return;
+      final method = s.reminderMethod;
 
-    // ---- 1) 运行阈值提醒「仍在进行？」----
-    if (recording) {
-      final running = timer.runningEntry!;
-      if (_thresholdEntryId != running.id || _thresholdNextAt == null) {
-        // 新会话（切换/刚启动）：按该条目起点重计阈值。
-        _thresholdEntryId = running.id;
-        _thresholdNextAt =
-            running.startAt.add(Duration(minutes: s.reminderMinutes));
+      // ---- 1) 运行阈值提醒「仍在进行？」----
+      if (recording) {
+        final running = timer.runningEntry!;
+        if (_thresholdEntryId != running.id || _thresholdNextAt == null) {
+          // 新会话（切换/刚启动）：按该条目起点重计阈值。
+          _thresholdEntryId = running.id;
+          _thresholdNextAt =
+              running.startAt.add(Duration(minutes: s.reminderMinutes));
+        }
+        if (!now.isBefore(_thresholdNextAt!)) {
+          // 触发即顺延一个重复间隔（继续/稍后/关闭共用该节奏）。
+          _thresholdNextAt =
+              now.add(Duration(minutes: s.reminderIntervalMinutes));
+          if (method != ReminderMethod.silent) {
+            _active = OngoingReminder(
+              entryId: running.id,
+              activityName: running.activityNameSnapshot,
+              activityColor: running.activityColorSnapshot,
+              elapsed: now.difference(running.startAt),
+              method: method,
+              id: 'ongoing:${running.id}:${now.millisecondsSinceEpoch}',
+            );
+            notifyListeners();
+            return;
+          }
+        }
+      } else {
+        _thresholdEntryId = null;
+        _thresholdNextAt = null;
       }
-      if (!now.isBefore(_thresholdNextAt!)) {
-        // 触发即顺延一个重复间隔（继续/稍后/关闭共用该节奏）。
-        _thresholdNextAt =
-            now.add(Duration(minutes: s.reminderIntervalMinutes));
-        if (method != ReminderMethod.silent) {
-          _active = OngoingReminder(
-            entryId: running.id,
-            activityName: running.activityNameSnapshot,
-            activityColor: running.activityColorSnapshot,
-            elapsed: now.difference(running.startAt),
-            method: method,
-            id: 'ongoing:${running.id}:${now.millisecondsSinceEpoch}',
-          );
-          notifyListeners();
-          return;
+
+      // ---- 2) 触发时刻提醒（到点提醒开始记录）----
+      if (s.quickReminderEnabled && !recording) {
+        final dayStart = now.startOfDay;
+        final trigger =
+            dayStart.add(Duration(minutes: s.reminderTimeOfDayMinutes));
+        if (!now.isBefore(trigger) && _quickFiredDay != dayStart) {
+          _quickFiredDay = dayStart; // 静音方式同样消耗当日标记
+          if (method != ReminderMethod.silent) {
+            _active = QuickStartReminder(
+                method: method, id: 'quick:${dayStart.toIso8601String()}');
+            notifyListeners();
+          }
         }
       }
-    } else {
-      _thresholdEntryId = null;
-      _thresholdNextAt = null;
-    }
-
-    // ---- 2) 触发时刻提醒（到点提醒开始记录）----
-    if (s.quickReminderEnabled && !recording) {
-      final dayStart = now.startOfDay;
-      final trigger =
-          dayStart.add(Duration(minutes: s.reminderTimeOfDayMinutes));
-      if (!now.isBefore(trigger) && _quickFiredDay != dayStart) {
-        _quickFiredDay = dayStart; // 静音方式同样消耗当日标记
-        if (method != ReminderMethod.silent) {
-          _active = QuickStartReminder(
-              method: method, id: 'quick:${dayStart.toIso8601String()}');
-          notifyListeners();
-        }
-      }
+    } finally {
+      _ticking = false;
     }
   }
 
@@ -205,15 +229,24 @@ class ReminderStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 「停止」：结束当前运行（经 TimerStore 写路径——手动语义，计入会话
-  /// 保持），清提醒与阈值状态。
+  /// 「停止」：经指令通道结束当前运行（铁律 7，与计时条「停止」同一
+  /// 入口），并清提醒与阈值状态。
+  ///
+  /// 状态先清再落库：写路径含多次 await，`_stoppingEntryId` 保证期间
+  /// 的 tick 不对该条目重弹。dispatch 失败时条目仍在运行——状态已清，
+  /// 下一 tick 按阈值节奏重新触发（新提醒 id，用户可重试）。
   Future<void> stopOngoing() async {
     if (_active is! OngoingReminder) return;
+    _stoppingEntryId = (_active! as OngoingReminder).entryId;
     _active = null;
     _thresholdEntryId = null;
     _thresholdNextAt = null;
     notifyListeners();
-    await timer.stopRunning();
+    try {
+      await dispatch(CommandInvocation(name: 'stop'));
+    } finally {
+      _stoppingEntryId = null;
+    }
   }
 
   /// 快速提醒处置（开始记录跳转由壳层负责；此处仅清除待处置态）。

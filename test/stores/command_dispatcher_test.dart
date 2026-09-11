@@ -359,6 +359,98 @@ void main() {
       expect((missing as CommandFailure).reason, contains('不存在'));
     });
 
+    test('entry_update：--end=now 绝对语义（跨天遗留条目精确结束在当前时刻）',
+        () async {
+      final id = await seedEntry();
+      final before = (await h.entries.entryById(id))!;
+      // 挪成 3 天前 22:00–23:00 的遗留条目：HH:MM 锚定条目所在日 + 单次
+      // +1 天进位会把「结束到现在」算错近两天——now 特值不受此影响。
+      final now = DateTime.now();
+      final baseDay = DateTime(now.year, now.month, now.day)
+          .subtract(const Duration(days: 3));
+      await h.entries.updateEntryFields(
+        entry: before,
+        startAt: baseDay.add(const Duration(hours: 22)),
+        endAt: baseDay.add(const Duration(hours: 23)),
+      );
+
+      final result = await run('entry_update $id --end=now');
+      expect(result, isA<CommandSuccess>());
+      // 段模型：跨 3 天延伸按本地日切段落库——最晚 endAt 即"现在"。
+      final segments = await h.entries.entriesForRange(
+          baseDay, baseDay.add(const Duration(days: 4)));
+      final end = segments
+          .map((e) => e.endAt)
+          .whereType<DateTime>()
+          .reduce((a, b) => a.isAfter(b) ? a : b);
+      expect(end.difference(DateTime.now()).abs(),
+          lessThan(const Duration(seconds: 5)),
+          reason: '延伸到注入时钟的当前时刻（绝对语义）');
+      expect(end.day, DateTime.now().day,
+          reason: '落在今天，而非条目所在日的次日凌晨');
+    });
+
+    test('entry_update：--end 等于 --start 显式失败（不静默进位成 24 小时）',
+        () async {
+      final id = await seedEntry();
+      final result = await run('entry_update $id --start=10:00 --end=10:00');
+      expect(result, isA<CommandFailure>());
+      expect((result as CommandFailure).reason, contains('结束时刻'));
+    });
+
+    test('entry_update：空串 --note 清空备注（编辑对话框清空保存路径）', () async {
+      final id = await seedEntry();
+      // 页面直发 CommandInvocation（不经 parser），空串必须按"清空"落库。
+      final result = await h.dispatcher.dispatch(CommandInvocation(
+        name: 'entry_update',
+        args: [id],
+        options: {'note': ''},
+      ));
+      expect(result, isA<CommandSuccess>());
+      expect((await h.entries.entryById(id))!.note, isEmpty);
+    });
+
+    test('entry_update：跨零点编辑的 undo 软删派生段 / redo 复活（对称换血）',
+        () async {
+      final id = await seedEntry();
+      final before = (await h.entries.entryById(id))!;
+      final yesterday = DateTime.now().subtract(const Duration(days: 1));
+      final yDay = DateTime(yesterday.year, yesterday.month, yesterday.day);
+      await h.entries.updateEntryFields(
+        entry: before,
+        startAt: yDay.add(const Duration(hours: 23)),
+        endAt: yDay.add(const Duration(hours: 23, minutes: 30)),
+      );
+
+      // 跨零点延伸：--end=00:30 产生今日派生段（首段原 id + 派生段）。
+      final edit = await run('entry_update $id --end=00:30');
+      expect(edit, isA<CommandSuccess>());
+      final windowEnd = yDay.add(const Duration(days: 2));
+      final segments = await h.entries.entriesForRange(yDay, windowEnd);
+      expect(segments, hasLength(2));
+      final derivedIds = segments.map((e) => e.id).toSet()..remove(id);
+      expect(derivedIds, hasLength(1));
+      final derivedId = derivedIds.single;
+
+      // undo：派生段软删 + 原行复活（回到编辑前 23:00–23:30）。
+      expect(await run('undo'), isA<CommandSuccess>());
+      expect(await h.entries.entryById(derivedId), isNull,
+          reason: 'undo 后派生段不再可见');
+      final restored = await h.entries.entryByIdIncludingDeleted(id);
+      expect(restored!.isDeleted, isFalse);
+      expect(restored.endAt, yDay.add(const Duration(hours: 23, minutes: 30)));
+
+      // redo：新段全集复活——派生段按确定性 id 复活，原行保持切段后时段。
+      expect(await run('redo'), isA<CommandSuccess>());
+      final revivedDerived = await h.entries.entryById(derivedId);
+      expect(revivedDerived, isNotNull, reason: 'redo 复活派生段');
+      expect(revivedDerived!.isDeleted, isFalse);
+      final redone = await h.entries.entryById(id);
+      expect(redone, isNotNull);
+      expect(redone!.endAt, yDay.add(const Duration(days: 1)),
+          reason: '首段切到当日零点');
+    });
+
     test('activity_create：新建 + 载荷 + undo 软删 / redo 复活', () async {
       final result =
           await run('activity_create 阅读 --color=4294967040 --one_off=true');

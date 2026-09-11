@@ -106,7 +106,7 @@ class _AppShellState extends State<AppShell>
     // 可疑条目启动检测：AppStore.init 已 await timer.refresh()，postFrame
     // 时 runningEntry 缓存可用；timer 监听兜底晚到场景（幂等，标志位去重）。
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _checkSuspiciousEntry();
+      unawaited(_checkSuspiciousEntry());
       unawaited(_syncAndroidService());
     });
     widget.app.timer.addListener(_onTimerForSuspicious);
@@ -212,7 +212,7 @@ class _AppShellState extends State<AppShell>
   }
 
   void _onTimerForSuspicious() {
-    _checkSuspiciousEntry();
+    unawaited(_checkSuspiciousEntry());
     // 命中活动变化（自动切换/手动切换）→ 常驻通知文案同步（批次 6b）。
     unawaited(_syncAndroidService());
   }
@@ -356,12 +356,21 @@ class _AppShellState extends State<AppShell>
 
   /// §5.2 场景 3：可疑条目（启动时发现跨会话的遗留运行条目）——须决策
   /// 对话框「保留当前 / 结束到现在」。
-  void _checkSuspiciousEntry() {
+  ///
+  /// 未分配运行段 = 未记录态的记时段，跨会话遗留是正常形态，不属可疑
+  ///（否则每次以「停止」收尾的会话，下次启动都会误弹本对话框）。
+  /// 未分配判定放在标志位之后：await 间隙 timer 变化触发的重入被去重。
+  Future<void> _checkSuspiciousEntry() async {
     if (_suspiciousChecked || !mounted) return;
     final running = widget.app.timer.runningEntry;
     if (running == null) return; // 无运行条目：无需检测
     if (!running.startAt.isBefore(_sessionStart)) return; // 本会话内开始
     _suspiciousChecked = true;
+    if (await widget.app.activities
+        .activityIdIsUnassigned(running.activityId)) {
+      return;
+    }
+    if (!mounted) return;
     showDialog<void>(
       context: context,
       barrierDismissible: false,
@@ -403,10 +412,12 @@ class _AppShellState extends State<AppShell>
             FilledButton(
               onPressed: () {
                 Navigator.of(dialogContext).pop();
+                // --end=now 绝对语义：跨天遗留条目精确结束在当前时刻
+                //（HH:MM 会按条目所在日还原，≥2 天前的条目会算错）。
                 unawaited(_dispatch(CommandInvocation(
                   name: 'entry_update',
                   args: [running.id],
-                  options: {'end': _hm(DateTime.now())},
+                  options: const {'end': 'now'},
                 )));
               },
               child: Text(l10n.endToNow),
@@ -663,7 +674,8 @@ class _AppShellState extends State<AppShell>
     final isWide = MediaQuery.sizeOf(context).width >= AppShell.wideBreakpoint;
     final content = Expanded(child: shell);
     final banner = ListenableBuilder(
-      listenable: widget.app.reminder,
+      // 横幅时长实时显示需跟随时钟 tick 重绘（见 _buildReminderBanner）。
+      listenable: Listenable.merge([widget.app.reminder, widget.app.clock]),
       builder: (context, _) =>
           _buildReminderBanner() ?? const SizedBox.shrink(),
     );
@@ -729,7 +741,13 @@ class _AppShellState extends State<AppShell>
   String? subtitle;
   List<Widget> actions;
     if (active is OngoingReminder) {
-      title = l10n.bannerOngoingTitle(_formatElapsed(active.elapsed));
+      // 横幅常驻期间时长实时计算（触发时刻快照仅在该条目已不运行时兜底）；
+      // 对话框载体无重绘时机，保持触发时刻快照。
+      final running = widget.app.timer.runningEntry;
+      final elapsed = running != null && running.id == active.entryId
+          ? widget.app.clock.now().difference(running.startAt)
+          : active.elapsed;
+      title = l10n.bannerOngoingTitle(_formatElapsed(elapsed));
       subtitle = l10n.bannerOngoingSub(active.activityName);
       actions = [
         TextButton(
