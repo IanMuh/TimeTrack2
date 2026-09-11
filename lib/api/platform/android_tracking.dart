@@ -9,8 +9,7 @@ import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
-import '../../stores/clock_store.dart';
-import '../../stores/tracking_store.dart';
+import '../../viewmodels/foreground_detector.dart';
 
 /// Android 后台记录平台桥。
 class AndroidTrackingBridge {
@@ -140,24 +139,24 @@ class AndroidTrackingBridge {
   }
 }
 
-/// Android 前台检测器：UsageStats 包名缓存 + ClockStore 周期刷新。
+/// Android 前台检测器：UsageStats 包名缓存 + 周期刷新。
 ///
 /// [ForegroundDetector] 接口是同步 getter——本实现持**最近一次查询缓存**
-/// （[refresh] 异步拉取后更新），TrackingStore 的 5s 轮询读到的始终是
-/// ≤ refreshInterval 新鲜度的包名。空串视为"当前不可检测"→ processName
-/// 返回 null（title 类规则自动跳过，process 类规则匹配完整包名）。
+/// （[maybeRefresh]/[refresh] 异步拉取后更新），TrackingStore 的 5s 轮询
+/// 读到的始终是 ≤ refreshInterval 新鲜度的包名。空串视为"当前不可检测"
+/// → processName 返回 null（title 类规则自动跳过，process 类规则匹配完
+/// 整包名）。
+///
+/// 周期驱动由**装配层**（AppStore）挂接 ClockStore 监听调 [maybeRefresh]——
+/// 本类不依赖 ClockStore（依赖方向：api 不得反向依赖 stores）。
 class AndroidForegroundDetector implements ForegroundDetector {
   AndroidForegroundDetector({
-    required this.clock,
     required this.bridge,
     this.refreshInterval = const Duration(seconds: 4),
     this.onPackageChanged,
     DateTime Function()? now,
-  })  : _now = now ?? DateTime.now {
-    clock.addListener(_onTick);
-  }
+  }) : _now = now ?? DateTime.now;
 
-  final ClockStore clock;
   final AndroidTrackingBridge bridge;
   final Duration refreshInterval;
 
@@ -181,7 +180,8 @@ class AndroidForegroundDetector implements ForegroundDetector {
   @override
   String? get windowTitle => null; // Android 无窗口标题语义
 
-  void _onTick() {
+  /// 时钟 tick 入口（装配层挂接）：限频 + 防重入后拉取最新包名。
+  void maybeRefresh() {
     if (_disposed) return;
     final now = _now();
     if (now.difference(_lastRefresh) < refreshInterval) return;
@@ -206,9 +206,8 @@ class AndroidForegroundDetector implements ForegroundDetector {
     }
   }
 
-  /// dispose（ClockStore 监听摘除；AppStore.dispose 调用）。
+  /// dispose（AppStore.dispose 调用；时钟监听由装配层自行摘除）。
   void dispose() {
     _disposed = true;
-    clock.removeListener(_onTick);
   }
 }

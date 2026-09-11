@@ -22,19 +22,15 @@ import 'package:flutter/foundation.dart';
 
 import '../data/repositories/tracking_rule_repository.dart';
 import '../utils/result.dart';
+import '../viewmodels/foreground_detector.dart';
 import '../viewmodels/tracking_rule.dart';
 import 'clock_store.dart';
 import 'data_revision.dart';
 import 'timer_store.dart';
 
-/// 前台检测器（平台实现归阶段 4；测试注入 fake）。
-abstract interface class ForegroundDetector {
-  /// 当前前台进程名（如 `chrome.exe`；不可用返回 null）。
-  String? get processName;
-
-  /// 当前前台窗口标题（可空）。
-  String? get windowTitle;
-}
+// 前台检测器契约已下沉 viewmodels（api 平台实现与本 store 共同依赖——
+// 防 api→stores 反向依赖）；re-export 保持既有导入方兼容。
+export '../viewmodels/foreground_detector.dart' show ForegroundDetector;
 
 /// 后台自动记录 store。
 class TrackingStore extends ChangeNotifier {

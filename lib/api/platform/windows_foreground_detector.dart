@@ -18,7 +18,7 @@ import 'dart:io' show Platform;
 // Utf16（字符串缓冲类型，含 toDartString 扩展）与 calloc 来自本包。
 import 'package:ffi/ffi.dart';
 
-import '../../stores/tracking_store.dart';
+import '../../viewmodels/foreground_detector.dart';
 
 // ---------------------------------------------------------------------------
 // 原生/Dart 签名成对 typedef（lookupFunction 标准模式）

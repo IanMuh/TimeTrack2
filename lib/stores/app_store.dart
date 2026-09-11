@@ -234,15 +234,20 @@ class AppStore {
     final wipe = DataWipeService(database: database);
     // 前台检测器（批次 6 平台层）：按平台注入真实现——Windows FFI 窗口
     // 检测 / Android UsageStats 包名缓存，其余平台保持 Noop（TrackingStore
-    // 零感知）。Android 实现持 ClockStore 监听 → 捕获实例供 dispose。
+    // 零感知）。Android 检测器的周期刷新由本层挂接时钟监听（api 层不依赖
+    // stores 的 ClockStore——依赖方向 api ← stores），dispose 摘除。
     final androidTracking = AndroidTrackingBridge();
-    final ForegroundDetector foregroundDetector =
-        WindowsForegroundDetector.isSupported
-            ? WindowsForegroundDetector()
-            : AndroidTrackingBridge.isSupported
-                ? AndroidForegroundDetector(
-                    clock: clock, bridge: androidTracking)
-                : NoopForegroundDetector();
+    AndroidForegroundDetector? androidDetector;
+    final ForegroundDetector foregroundDetector;
+    if (WindowsForegroundDetector.isSupported) {
+      foregroundDetector = WindowsForegroundDetector();
+    } else if (AndroidTrackingBridge.isSupported) {
+      androidDetector = AndroidForegroundDetector(bridge: androidTracking);
+      foregroundDetector = androidDetector;
+      clock.addListener(androidDetector.maybeRefresh);
+    } else {
+      foregroundDetector = NoopForegroundDetector();
+    }
     final tracking = TrackingStore(
       rules: rules,
       timer: timer,
@@ -368,10 +373,11 @@ class AppStore {
   void dispose() {
     lan.dispose();
     tracking.dispose();
-    // Android 前台检测器持 ClockStore 监听，随 store 一并释放
+    // Android 前台检测器的时钟监听在本层挂接，随 store 一并摘除并释放
     //（Windows/Noop 实现为无状态 no-op dispose）。
     final detector = foregroundDetector;
     if (detector is AndroidForegroundDetector) {
+      clock.removeListener(detector.maybeRefresh);
       detector.dispose();
     }
     update.dispose();

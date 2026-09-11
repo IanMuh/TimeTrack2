@@ -1,6 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timetrack2/api/platform/android_tracking.dart';
-import 'package:timetrack2/stores/clock_store.dart';
 
 /// 可覆写的假桥：绕过真实通道（宿主为 Windows，isSupported=false 时真桥
 /// 全部短路——无法覆盖通道路径；此处以覆写方法模拟 Android 行为）。
@@ -42,19 +41,14 @@ void main() {
 
   group('AndroidForegroundDetector 缓存与刷新', () {
     late _FakeBridge bridge;
-    late ClockStore clock;
 
     setUp(() {
       bridge = _FakeBridge();
-      clock = ClockStore(autoStart: false);
     });
-
-    tearDown(() => clock.dispose());
 
     test('refresh 后缓存包名；空串视为不可检测（null）', () async {
       final seen = <String?>[];
       final detector = AndroidForegroundDetector(
-        clock: clock,
         bridge: bridge,
         now: () => DateTime(2026, 8, 24, 9),
         onPackageChanged: seen.add,
@@ -73,10 +67,9 @@ void main() {
       expect(seen, ['com.android.chrome', '']);
     });
 
-    test('tick 驱动：首拍即刷新；间隔内不重复；达标后更新', () async {
+    test('maybeRefresh 驱动：首拍即刷新；间隔内不重复；达标后更新', () async {
       var now = DateTime(2026, 8, 24, 9);
       final detector = AndroidForegroundDetector(
-        clock: clock,
         bridge: bridge,
         refreshInterval: const Duration(seconds: 4),
         now: () => now,
@@ -86,27 +79,26 @@ void main() {
 
       bridge.foregroundPackage = 'com.android.chrome';
       now = now.add(const Duration(seconds: 1));
-      clock.notifyListeners(); // 首次 tick（_lastRefresh 初始 epoch）→ 立即刷新
+      detector.maybeRefresh(); // 首拍（_lastRefresh 初始 epoch）→ 立即刷新
       await Future<void>.delayed(Duration.zero);
       expect(detector.processName, 'com.android.chrome');
 
       bridge.foregroundPackage = 'com.example.other';
       now = now.add(const Duration(seconds: 2));
-      clock.notifyListeners(); // 距上次刷新 2s < 4s：不刷新
+      detector.maybeRefresh(); // 距上次刷新 2s < 4s：不刷新
       await Future<void>.delayed(Duration.zero);
       expect(detector.processName, 'com.android.chrome',
           reason: '间隔未达不刷新');
 
       now = now.add(const Duration(seconds: 4));
       bridge.foregroundPackage = '';
-      clock.notifyListeners();
+      detector.maybeRefresh();
       await Future<void>.delayed(Duration.zero);
       expect(detector.processName, isNull);
     });
 
-    test('dispose 后 tick/refresh 均静默', () async {
+    test('dispose 后 maybeRefresh/refresh 均静默', () async {
       final detector = AndroidForegroundDetector(
-        clock: clock,
         bridge: bridge,
         now: () => DateTime(2026, 8, 24, 9),
       );
@@ -114,8 +106,8 @@ void main() {
       bridge.foregroundPackage = 'x';
       await detector.refresh();
       expect(detector.processName, isNull);
-      // notifyListeners 路径同样静默（不抛）。
-      clock.notifyListeners();
+      // maybeRefresh 路径同样静默（不抛）。
+      detector.maybeRefresh();
       await Future<void>.delayed(Duration.zero);
     });
   });
