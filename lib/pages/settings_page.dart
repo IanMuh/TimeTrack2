@@ -15,16 +15,40 @@ import 'settings_section_general.dart';
 import 'settings_section_sync.dart';
 import 'settings_section_update.dart';
 
-class SettingsPage extends StatelessWidget {
+class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key, required this.app});
 
   final AppStore app;
 
   @override
+  State<SettingsPage> createState() => _SettingsPageState();
+}
+
+class _SettingsPageState extends State<SettingsPage> {
+  // 分区列表（含 GlobalKey）在 State 生命周期内只建一次：GlobalKey 每次
+  // build 新实例会让 Flutter 判定元素无法复用 → 十个分区随任意重建整棵
+  // 重挂载，分区内部输入态（如 LAN 配对码输入框）全部丢失。
+  List<SettingsSectionSpec> _sections = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    _rebuildSections();
+  }
+
+  @override
+  void didUpdateWidget(SettingsPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.app != oldWidget.app) _rebuildSections();
+  }
+
+  void _rebuildSections() => _sections = buildSettingsSections(widget.app);
+
+  @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final wide = MediaQuery.sizeOf(context).width >= 840;
-    final sections = buildSettingsSections(app);
+    final sections = _sections;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -53,7 +77,6 @@ class SettingsPage extends StatelessWidget {
       ],
     );
   }
-
 }
 
 /// 分区条目（标题 + 卡构建器 + 滚动 key）。

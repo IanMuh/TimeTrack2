@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../l10n/app_localizations.dart';
 import '../stores/app_store.dart';
 import '../stores/update_store.dart';
+import '../viewmodels/commands/command_invocation.dart';
 import 'settings_widgets.dart';
 
 /// 版本更新分区。
@@ -275,9 +276,15 @@ class _UpdateStateCard extends StatelessWidget {
     );
   }
 
-  Future<void> _check() async => app.update.check();
+  /// 经指令通道（铁律 7）：'update_check' 指令已注册——与深链/AI/壳层
+  /// 同入口；结果经 update store 监听驱动 UI，无需在此处理。
+  Future<void> _check() async {
+    await app.dispatcher
+        .dispatch(CommandInvocation(name: 'update_check'));
+  }
 
-  /// 下载 + 内联校验（verifying → install 可用）。
+  /// 下载 + 内联校验（verifying → install 可用）。无同名注册指令，暂直调
+  ///（挂账：update_download 指令化——连同 signOut/ignoreVersion 收口）。
   Future<void> _download() async => app.update.download();
 
   Future<void> _ignoreVersion(BuildContext context) async {
@@ -426,8 +433,9 @@ class AboutSection extends StatelessWidget {
           subtitle: 'v${app.currentVersion}',
           trailing: OutlinedButton(
             onPressed: () {
-              // 跳更新卡（滚动锚点由设置页骨架处理；此处直接触发检查）。
-              app.update.check();
+              // 跳更新卡（滚动锚点由设置页骨架处理）；检查经指令通道。
+              app.dispatcher
+                  .dispatch(CommandInvocation(name: 'update_check'));
             },
             child: Text(l10n.settingsAboutCheckUpdate),
           ),

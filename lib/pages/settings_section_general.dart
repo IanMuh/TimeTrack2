@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import '../l10n/app_localizations.dart';
 import '../utils/result.dart';
 import '../stores/app_store.dart';
+import '../utils/time_format.dart';
 import '../viewmodels/profile_settings.dart';
 import 'settings_widgets.dart';
 
@@ -349,6 +350,8 @@ class _TriggerTimeField extends StatelessWidget {
       hour: minutes ~/ 60,
       minute: minutes % 60,
     );
+    // 跟随 24 小时制偏好（偏好已全局接线，此处曾固定 24h 渲染漏改）。
+    final use24 = app.settings.current?.use24HourFormat ?? true;
     return InkWell(
       onTap: () async {
         final picked = await showTimePicker(context: context, initialTime: time);
@@ -371,8 +374,7 @@ class _TriggerTimeField extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              '${time.hour.toString().padLeft(2, '0')}:'
-              '${time.minute.toString().padLeft(2, '0')}',
+              formatClock(time.hour, time.minute, use24: use24),
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     fontFeatures: const [FontFeature.tabularFigures()],
                   ),

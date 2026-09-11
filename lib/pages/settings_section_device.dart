@@ -168,8 +168,11 @@ class BackupSection extends StatelessWidget {
     await app.today.loadToday();
     await app.timer.refresh();
     await app.tracking.reloadRules();
+    await app.lan.reloadPeer(); // sync_peers 已清空，内存配对态同步失效
     // 时间线/统计页监听 dataRevision 自动失效缓存（bump 即全页一致）。
     app.dataRevision.bump();
+    // 撤销/重做历史指向已物理删除的数据——清空防"可撤销"语义失真。
+    app.undo.clear();
     if (!context.mounted) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()

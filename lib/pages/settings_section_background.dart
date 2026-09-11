@@ -16,8 +16,10 @@ import '../components/activity_picker/activity_picker.dart';
 import '../l10n/app_localizations.dart';
 import '../stores/app_store.dart';
 import '../stores/tracking_store.dart' show NoopForegroundDetector;
+import '../utils/result.dart';
 import '../viewmodels/activity.dart';
 import '../viewmodels/commands/command_invocation.dart';
+import '../viewmodels/profile_settings.dart';
 import '../viewmodels/tracking_rule.dart';
 import 'settings_widgets.dart';
 import 'tracking_guide_page.dart';
@@ -252,7 +254,15 @@ class _BackgroundSectionState extends State<BackgroundSection> {
       await widget.app.androidTracking.requestNotificationPermission();
       if (!mounted) return;
     }
-    await store.save(current.copyWith(backgroundTrackingEnabled: value));
+    final result = await store.save(current.copyWith(backgroundTrackingEnabled: value));
+    // 保存失败必须可见（与通用分区 _save 的失败反馈一致——开关渲染由
+    // store 通知回滚，无反馈会呈现"点了没反应"）。
+    if (!mounted) return;
+    if (result case AppFailure<ProfileSettings> failure) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(failure.message)));
+    }
   }
 
   Future<void> _updateRule(TrackingRule rule, {Map<String, String> options = const {}}) async {

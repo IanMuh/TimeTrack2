@@ -4,8 +4,8 @@ library;
 import 'package:flutter/material.dart';
 
 import '../l10n/app_localizations.dart';
-import '../api/supabase/sync_backend.dart' show SyncReport;
 import '../utils/result.dart';
+import '../viewmodels/commands/command_invocation.dart';
 import '../stores/app_store.dart';
 import 'settings_widgets.dart';
 
@@ -72,14 +72,16 @@ class SyncSection extends StatelessWidget {
   }
 
   Future<void> _syncNow(BuildContext context) async {
-    final result = await app.sync.syncNow();
+    // 经指令通道（铁律 7）：'sync' 指令已注册——与深链/AI/未来快捷键同入口。
+    final result =
+        await app.dispatcher.dispatch(CommandInvocation(name: 'sync'));
     if (!context.mounted) return;
     final l10n = AppLocalizations.of(context)!;
     final messenger = ScaffoldMessenger.of(context);
     messenger.hideCurrentSnackBar();
-    if (result case AppFailure<SyncReport> failure) {
+    if (result case CommandFailure failure) {
       messenger.showSnackBar(
-        SnackBar(content: Text(l10n.settingsSyncFailed(failure.message))),
+        SnackBar(content: Text(l10n.settingsSyncFailed(failure.reason))),
       );
     }
   }
