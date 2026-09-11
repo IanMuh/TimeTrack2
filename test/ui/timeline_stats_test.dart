@@ -67,8 +67,9 @@ Future<void> _addToday(AppStore store, String start, String end) async {
   ));
 }
 
-Future<void> _pump(WidgetTester tester, AppStore store) async {
-  tester.view.physicalSize = const Size(1280, 900);
+Future<void> _pump(WidgetTester tester, AppStore store,
+    {Size size = const Size(1280, 900)}) async {
+  tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.reset);
   await tester.pumpWidget(
@@ -289,6 +290,70 @@ void main() {
     final running = store.timer.runningEntry;
     expect(running, isNotNull, reason: '运行中条目编辑保存后仍应运行（end 不落库）');
     expect(running!.activityId, xuexi.id);
+    store.dispose();
+  });
+
+  testWidgets('紧凑档（390）：时间线/统计造数态渲染无溢出；树行紧凑两行',
+      (tester) async {
+    final store = await _createStore();
+    // 造数：分类 + 关联活动条目（树行数据）+ 未关联条目 + 自动条目。
+    final cat = (await store.category.createCategory(name: '工作', color: 0))
+        .requireValue();
+    final dev = (await store.activities.createActivity(name: '写代码', color: 1))
+        .requireValue();
+    await store.category
+        .setActivityCategories(activityId: dev.id, primaryCategoryId: cat.id);
+    await _addToday(store, '00:00', '00:10'); // 学习（未关联）
+    final add = await store.dispatcher.dispatch(CommandInvocation(
+      name: 'add',
+      args: const ['写代码'],
+      options: {'start': '00:10', 'end': '00:25'},
+    ));
+    expect(add, isA<CommandSuccess>());
+
+    await _pump(tester, store, size: const Size(390, 844));
+    expect(tester.takeException(), isNull);
+
+    // 时间线：紧凑档造数态（轴卡/列表行/汇总条）无溢出。
+    await tester.tap(find.byIcon(Icons.view_timeline_outlined));
+    await tester.pumpAndSettle();
+    expect(find.text('总时长'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    // 统计：默认树维度（StTreeRow 紧凑两行）+ 维度/范围分段（Wrap）无溢出。
+    await tester.tap(find.byIcon(Icons.pie_chart_outline));
+    await tester.pumpAndSettle();
+    expect(find.text('主分类 · 树聚合'), findsOneWidget);
+    expect(find.text('排除自动条目'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    // 维度切"活动"（segmented Wrap 换行路径）仍无溢出。
+    await tester.tap(find.text('活动').last);
+    await tester.pumpAndSettle();
+    expect(find.text('写代码'), findsAtLeastNWidgets(1));
+    expect(tester.takeException(), isNull);
+    store.dispose();
+  });
+
+  testWidgets('紧凑档（390）：条目编辑器无溢出；更换活动走底部抽屉（契约 §5.1）',
+      (tester) async {
+    final store = await _createStore();
+    await _addToday(store, '00:00', '00:10');
+    await _pump(tester, store, size: const Size(390, 844));
+    await tester.tap(find.byIcon(Icons.view_timeline_outlined));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('学习').first);
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    // 更换活动：<600 = 底部抽屉形态（桌面双栏弹窗左栏 232px 在紧凑视口
+    // 只剩几十像素）。编辑器保持在抽屉下层。
+    await tester.tap(find.text('学习').last);
+    await tester.pumpAndSettle();
+    expect(find.byType(BottomSheet), findsOneWidget,
+        reason: '<600 应走移动抽屉形态（契约 §5.1）');
+    expect(tester.takeException(), isNull);
     store.dispose();
   });
 }

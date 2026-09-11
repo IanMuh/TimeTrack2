@@ -240,13 +240,14 @@ void main() {
       );
       // 停止按钮可点；切换按钮禁用（批次 2 提供选择器）——按下不产生动作。
       // 计时条上的切换按钮仍禁用（选择器批次 2 接入页面级；条内按钮批次 5 统一）。
+      // 紧凑档为图标钮：文字钮（en "Switch activity"）会把活动名压到不可读。
+      final switchFinder = find.descendant(
+        of: find.byType(GlobalTimerBar),
+        matching: find.byType(IconButton),
+      );
+      expect(switchFinder, findsOneWidget, reason: '紧凑档切换钮 = 图标形态');
       expect(
-        tester
-            .widget<FilledButton>(find.descendant(
-              of: find.byType(GlobalTimerBar),
-              matching: find.widgetWithText(FilledButton, '切换活动'),
-            ))
-            .onPressed,
+        tester.widget<IconButton>(switchFinder).onPressed,
         isNull,
         reason: '计时条切换按钮仍禁用（tooltip 说明原因）',
       );

@@ -246,4 +246,17 @@ void main() {
     expect(find.text('v${store.currentVersion}'), findsWidgets);
     store.dispose();
   });
+
+  testWidgets('紧凑档（390）：十分区渲染无溢出（锚点条 + 分区卡形态）', (tester) async {
+    final store = await _createStore();
+    await _openSettings(tester, store, size: const Size(390, 844));
+    // 无 RenderFlex overflow（分区卡/SettingsRow/LAN 定宽输入 Wrap 等在
+    // 紧凑档的回归锁）。
+    expect(tester.takeException(), isNull);
+    // 分区标题在紧凑档仍可达（契约 §4.5"任何功能三档均须可达"）。
+    for (final title in ['通用', '提醒', '后台记录', '关于']) {
+      expect(find.text(title), findsWidgets, reason: '分区 "$title" 应渲染');
+    }
+    store.dispose();
+  });
 }
