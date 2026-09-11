@@ -101,6 +101,27 @@ class WindowsForegroundDetector implements ForegroundDetector {
   /// 当前平台是否支持（AppStore 装配判定用）。
   static bool get isSupported => Platform.isWindows;
 
+  /// 本应用进程名（小写）：外部快照过滤基准——用户点击「捕获当前前台」
+  /// 的瞬间本应用必然在前台，不过滤会捕获到 TimeTrack2 自身（建出的
+  /// 规则只匹配自己）。
+  static final String _selfProcessName = Platform.resolvedExecutable
+      .split('\\')
+      .last
+      .toLowerCase();
+
+  /// 最近一次"非本应用"前台快照（跟踪轮询路径读取 [processName] 时刷新；
+  /// 「捕获当前前台」读取此缓存）。
+  String? _lastExternalProcess;
+  String? _lastExternalTitle;
+
+  /// 捕获当前前台（**非本应用**）快照。
+  ///
+  /// 双值皆 null = 尚无外部快照（后台记录轮询未运行过）；windowTitle 可
+  /// 单独为空串/短标题（无前台窗口标题属正常）。Android 实现的等价过滤
+  /// 在 native 查询侧完成。
+  ({String? processName, String? windowTitle}) captureExternal() =>
+      (processName: _lastExternalProcess, windowTitle: _lastExternalTitle);
+
   @override
   String? get processName {
     if (!Platform.isWindows) return null;
@@ -110,7 +131,6 @@ class WindowsForegroundDetector implements ForegroundDetector {
     if (hwnd == 0) return null; // 无前台窗口（锁屏/切换瞬间）
 
     final pidBuf = calloc<Uint32>();
-    final handleBuf = calloc<IntPtr>();
     // 字符串缓冲用 package:ffi 的 Utf16（自带 toDartString）；调用处按
     // Win32 签名 cast 回 Pointer<Uint16>。
     final pathBuf = calloc<Uint16>(_pathBufferSizeChars);
@@ -130,8 +150,17 @@ class WindowsForegroundDetector implements ForegroundDetector {
       if (ok == 0 || sizeBuf.value == 0) return null;
 
       final fullPath = pathBuf.cast<Utf16>().toDartString(length: sizeBuf.value);
-      final fileName = fullPath.split('\\').last;
-      return fileName.isEmpty ? null : fileName.toLowerCase();
+      final fileName = fullPath.split('\\').last.toLowerCase();
+      if (fileName.isNotEmpty) {
+        if (fileName != _selfProcessName) {
+          // 非本应用前台：刷新"最近外部快照"缓存（捕获用）——同时记录
+          // 同一窗口的标题，供标题类规则捕获。
+          _lastExternalProcess = fileName;
+          _lastExternalTitle = _readForegroundTitle(win32, hwnd);
+        }
+        return fileName;
+      }
+      return null;
     } on Error {
       // FFI 层契约外异常：收敛为"不可检测"——后台记录不因平台桥接崩溃。
       // ignore: avoid_print
@@ -142,7 +171,6 @@ class WindowsForegroundDetector implements ForegroundDetector {
         win32.closeHandle(openHandle);
       }
       calloc.free(pidBuf);
-      calloc.free(handleBuf);
       calloc.free(pathBuf);
       calloc.free(sizeBuf);
     }
@@ -156,6 +184,11 @@ class WindowsForegroundDetector implements ForegroundDetector {
     final hwnd = win32.getForegroundWindow();
     if (hwnd == 0) return null;
 
+    return _readForegroundTitle(win32, hwnd);
+  }
+
+  /// 读取指定前台窗口标题（空串 = 无标题窗口；异常收敛为空串）。
+  String _readForegroundTitle(_Win32 win32, int hwnd) {
     final length = win32.getWindowTextLength(hwnd);
     if (length <= 0) return '';
 

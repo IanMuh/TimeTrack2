@@ -845,6 +845,21 @@ class AppLocalizationsZh extends AppLocalizations {
   String get trayMenuExit => '退出';
 
   @override
+  String get bgNotifyTitleRecording => '正在记录';
+
+  @override
+  String get bgNotifyTitlePaused => '自动记录已暂停';
+
+  @override
+  String get bgNotifyPause => '暂停记录';
+
+  @override
+  String get bgNotifyResume => '恢复记录';
+
+  @override
+  String get bgNotifyChannelName => '后台记录';
+
+  @override
   String get stillDoingThis => '仍在进行这个活动？';
 
   @override

@@ -857,6 +857,21 @@ class AppLocalizationsEn extends AppLocalizations {
   String get trayMenuExit => 'Exit';
 
   @override
+  String get bgNotifyTitleRecording => 'Recording';
+
+  @override
+  String get bgNotifyTitlePaused => 'Auto tracking paused';
+
+  @override
+  String get bgNotifyPause => 'Pause tracking';
+
+  @override
+  String get bgNotifyResume => 'Resume tracking';
+
+  @override
+  String get bgNotifyChannelName => 'Background tracking';
+
+  @override
   String get stillDoingThis => 'Still doing this?';
 
   @override

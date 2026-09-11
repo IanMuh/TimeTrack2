@@ -97,15 +97,25 @@ class AndroidTrackingBridge {
   // ---------------------------------------------------------------------------
 
   /// 启动前台服务（重复调用 = 更新通知内容/暂停态，幂等）。
+  ///
+  /// [title]/[content]/[actionLabel]/[channelName] 为用户可见文案（铁律 6：
+  /// ARB 本地化后随 intent 下发，原生不硬编码——中文硬编码会让英文 locale
+  /// 用户在常驻通知上看到中文）。
   Future<void> startTrackingService({
     required bool paused,
+    required String title,
     required String content,
+    required String actionLabel,
+    required String channelName,
   }) async {
     if (!isSupported) return;
     try {
       await _channel.invokeMethod<void>('startTrackingService', <String, dynamic>{
         'paused': paused,
+        'title': title,
         'content': content,
+        'actionLabel': actionLabel,
+        'channelName': channelName,
       });
     } on PlatformException {
       // 服务启动失败（厂商限制等）不阻断 UI。
@@ -119,22 +129,6 @@ class AndroidTrackingBridge {
       await _channel.invokeMethod<void>('stopTrackingService');
     } on PlatformException {
       // 忽略：未运行时停止是 no-op 失败。
-    }
-  }
-
-  /// 更新常驻通知内容/暂停文案（服务未运行时 native 返回 false 静默）。
-  Future<void> updateNotification({
-    required bool paused,
-    required String content,
-  }) async {
-    if (!isSupported) return;
-    try {
-      await _channel.invokeMethod<void>('updateNotification', <String, dynamic>{
-        'paused': paused,
-        'content': content,
-      });
-    } on PlatformException {
-      // 忽略。
     }
   }
 }

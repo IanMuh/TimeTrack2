@@ -16,8 +16,8 @@ import io.flutter.plugin.common.MethodChannel
 ///   设置授予——契约 §6.2）；
 /// - 通知权限运行时请求（API 33+，前台服务常驻通知可见性）；
 /// - UsageStats 最近前台包名查询（后台自动检测的数据源）；
-/// - 前台服务 start/stop/updateNotification；通知「暂停」动作经
-///   [onPauseToggleRequested] 钩子回传 Dart（状态真身在 TrackingStore）。
+/// - 前台服务 start/stop；通知「暂停」动作经 [onPauseToggleRequested]
+///   钩子回传 Dart（状态真身在 TrackingStore）。
 class MainActivity : FlutterActivity() {
     private val channelName = "timetrack/platform/android_tracking"
 
@@ -46,10 +46,18 @@ class MainActivity : FlutterActivity() {
                     }
                     "startTrackingService" -> {
                         val paused = call.argument<Boolean>("paused") ?: false
+                        // 用户可见文案（铁律 6）：Dart 侧 ARB 本地化后随
+                        // intent 下发，原生不硬编码。
+                        val title = call.argument<String>("title").orEmpty()
                         val content = call.argument<String>("content").orEmpty()
+                        val actionLabel = call.argument<String>("actionLabel").orEmpty()
+                        val channelName = call.argument<String>("channelName").orEmpty()
                         val intent = Intent(this, TrackingForegroundService::class.java)
                             .putExtra(TrackingForegroundService.EXTRA_PAUSED, paused)
+                            .putExtra(TrackingForegroundService.EXTRA_TITLE, title)
                             .putExtra(TrackingForegroundService.EXTRA_CONTENT, content)
+                            .putExtra(TrackingForegroundService.EXTRA_ACTION_LABEL, actionLabel)
+                            .putExtra(TrackingForegroundService.EXTRA_CHANNEL_NAME, channelName)
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                             startForegroundService(intent)
                         } else {
@@ -63,17 +71,6 @@ class MainActivity : FlutterActivity() {
                         )
                         result.success(true)
                     }
-                    "updateNotification" -> {
-                        val paused = call.argument<Boolean>("paused") ?: false
-                        val content = call.argument<String>("content").orEmpty()
-                        // 服务可能尚未运行（未授权总开关等）：找不到则静默忽略。
-                        val service = lastServiceInstance
-                        service?.update(content, paused) ?: run {
-                            result.success(false)
-                            return@setMethodCallHandler
-                        }
-                        result.success(true)
-                    }
                     else -> result.notImplemented()
                 }
             }
@@ -85,7 +82,6 @@ class MainActivity : FlutterActivity() {
 
     override fun onDestroy() {
         onPauseToggleRequested = null
-        lastServiceInstance = null
         super.onDestroy()
     }
 
@@ -109,8 +105,8 @@ class MainActivity : FlutterActivity() {
         return mode == AppOpsManager.MODE_ALLOWED
     }
 
-    /// 最近一次进入前台的 应用包名（UsageEvents 取窗口内最后一条
-    /// ACTIVITY_RESUMED / MOVE_TO_FRONT）；未授权或无事件返回空串。
+    /// 最近一次进入前台的 **非本应用** 包名（UsageEvents 取窗口内最后一条
+    /// ACTIVITY_RESUMED）；未授权或无事件返回空串。
     private fun latestForegroundPackage(): String {
         if (!isUsageAccessGranted()) return ""
         return try {
@@ -122,12 +118,15 @@ class MainActivity : FlutterActivity() {
             val event = android.app.usage.UsageEvents.Event()
             while (events.hasNextEvent()) {
                 events.getNextEvent(event)
-                // 原始事件值跨版本稳定：1=ACTIVITY_RESUMED(29+)，2=MOVE_TO_FRONT(旧版)。
-                if (event.eventType == EVENT_TYPE_ACTIVITY_RESUMED ||
-                    event.eventType == EVENT_TYPE_MOVE_TO_FRONT
-                ) {
-                    lastPackage = event.packageName
-                }
+                // 只匹配 ACTIVITY_RESUMED（值 1，跨版本稳定）。旧值 2 是
+                // MOVE_TO_BACKGROUND/PAUSED（退后台）——旧注释误作"到前台"，
+                // 匹配它会把刚切走的应用当成"最后前台包"。
+                // 排除本应用：调用方（「捕获当前前台」）此刻必然在本应用
+                // 前台——不过滤的话捕获结果恒为本包名，建出的规则只匹配
+                // TimeTrack2 自己。
+                if (event.eventType != EVENT_TYPE_ACTIVITY_RESUMED) continue
+                if (event.packageName == packageName) continue
+                lastPackage = event.packageName
             }
             lastPackage ?: ""
         } catch (e: Exception) {
@@ -143,15 +142,10 @@ class MainActivity : FlutterActivity() {
 
         // UsageEvents.Event 事件类型原始值（新 SDK 已移除常量名，值不变）。
         private const val EVENT_TYPE_ACTIVITY_RESUMED = 1
-        private const val EVENT_TYPE_MOVE_TO_FRONT = 2
 
         /// 通知「暂停/恢复」动作 → Dart 翻转 sessionPaused（MainActivity
         /// 与服务同进程同主线程，静态钩子最简可靠）。
         @JvmStatic
         var onPauseToggleRequested: (() -> Unit)? = null
-
-        /// 当前运行中的服务实例引用（updateNotification 直达，免再发 intent）。
-        @JvmStatic
-        var lastServiceInstance: TrackingForegroundService? = null
     }
 }

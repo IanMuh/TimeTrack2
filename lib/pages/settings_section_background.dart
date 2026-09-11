@@ -12,6 +12,8 @@ import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 
+import '../api/platform/windows_foreground_detector.dart'
+    show WindowsForegroundDetector;
 import '../components/activity_picker/activity_picker.dart';
 import '../l10n/app_localizations.dart';
 import '../stores/app_store.dart';
@@ -635,7 +637,16 @@ class _RuleFormDialogState extends State<RuleFormDialog> {
   /// 匹配类型。检测器不可用/无前台时提示。
   void _captureForeground({required bool isTitle}) {
     final detector = widget.app.foregroundDetector;
-    final value = isTitle ? (detector.windowTitle ?? '') : (detector.processName ?? '');
+    String value;
+    if (detector is WindowsForegroundDetector) {
+      // 捕获瞬间本应用必然在前台——读"最近非本应用"快照（跟踪轮询
+      // 持续刷新），实时查询只会得到 TimeTrack2 自身。
+      final snap = detector.captureExternal();
+      value = (isTitle ? snap.windowTitle : snap.processName) ?? '';
+    } else {
+      // Android 检测器已在 native 查询侧过滤本应用包名。
+      value = (isTitle ? detector.windowTitle : detector.processName) ?? '';
+    }
     final l10n = AppLocalizations.of(context)!;
     if (value.isEmpty) {
       ScaffoldMessenger.of(context)

@@ -94,6 +94,11 @@ class _AppShellState extends State<AppShell>
   String _trayCloseMode = TrayCloseMode.ask;
   bool _closeDialogShownThisSession = false;
 
+  /// Android 前台服务同步签名（_syncAndroidService 去重基准；
+  /// `_kStopped` = 服务应处于停止态）。
+  String? _lastAndroidSync;
+  static const String _kStopped = '__stopped__';
+
   @override
   void initState() {
     super.initState();
@@ -143,6 +148,9 @@ class _AppShellState extends State<AppShell>
   /// 依据 总开关+使用情况授权 决定前台服务启停，并同步通知文案
   /// （多状态：命中→活动名；未命中但已识别前台→「前台 包名（未匹配规则）」；
   /// 两者皆无 → native 显示「检测中…」）。
+  ///
+  /// 按全量签名去重：本方法由 timer 监听每秒触发——不去重会造成每秒
+  /// 平台通道 + DB 查询 + startForegroundService 通知重建。
   Future<void> _syncAndroidService() async {
     if (!AndroidTrackingBridge.isSupported || !mounted) return;
     final app = widget.app;
@@ -150,7 +158,10 @@ class _AppShellState extends State<AppShell>
     final granted = await app.androidTracking.isUsageGranted();
     if (!mounted) return;
     if (!(enabled && granted)) {
-      await app.androidTracking.stopTrackingService();
+      if (_lastAndroidSync != _kStopped) {
+        _lastAndroidSync = _kStopped;
+        await app.androidTracking.stopTrackingService();
+      }
       return;
     }
     final l10n = AppLocalizations.of(context)!;
@@ -168,9 +179,18 @@ class _AppShellState extends State<AppShell>
         content = l10n.bgNotifyForeground(detected);
       }
     }
+    final paused = app.tracking.sessionPaused;
+    final signature =
+        'on|$paused|$content|${l10n.bgNotifyTitleRecording}|$l10n.localeName';
+    if (signature == _lastAndroidSync) return;
+    _lastAndroidSync = signature;
     await app.androidTracking.startTrackingService(
-      paused: app.tracking.sessionPaused,
+      paused: paused,
+      // 铁律 6：通知可见文案 ARB 本地化后随 intent 下发，原生不硬编码。
+      title: paused ? l10n.bgNotifyTitlePaused : l10n.bgNotifyTitleRecording,
       content: content,
+      actionLabel: paused ? l10n.bgNotifyResume : l10n.bgNotifyPause,
+      channelName: l10n.bgNotifyChannelName,
     );
   }
 

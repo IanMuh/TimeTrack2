@@ -1,12 +1,16 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
+    <!-- 云同步/认证/更新检查（release 构建不自动继承 debug/profile 的
+         INTERNET 权限——缺失时全部网络请求失败）。 -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <!-- 批次 6b 后台自动记录：「使用情况访问」识别前台应用（特殊权限，
          经系统设置授予，不能运行时弹窗；tools:ignore 抑制受保护权限提示）。 -->
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
         tools:ignore="ProtectedPermissions" />
-    <!-- 批次 6b 前台服务常驻通知（契约 §6.4）。 -->
+    <!-- 批次 6b 前台服务常驻通知（契约 §6.4）。specialUse：dataSync 在
+         Android 15+ 有 24 小时 6 小时累计运行上限，与全天后台记录冲突。 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <application
         android:label="timetrack2"
@@ -44,7 +48,13 @@
         <service
             android:name=".TrackingForegroundService"
             android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="specialUse">
+            <!-- specialUse 子类型声明（Android 14+ 要求，Play 审核依据）：
+                 前台应用自动时间追踪属标准类型外的合法场景。 -->
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Foreground app usage time tracking (user-configured automatic time logging)" />
+        </service>
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

@@ -1694,6 +1694,36 @@ abstract class AppLocalizations {
   /// **'退出'**
   String get trayMenuExit;
 
+  /// No description provided for @bgNotifyTitleRecording.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在记录'**
+  String get bgNotifyTitleRecording;
+
+  /// No description provided for @bgNotifyTitlePaused.
+  ///
+  /// In zh, this message translates to:
+  /// **'自动记录已暂停'**
+  String get bgNotifyTitlePaused;
+
+  /// No description provided for @bgNotifyPause.
+  ///
+  /// In zh, this message translates to:
+  /// **'暂停记录'**
+  String get bgNotifyPause;
+
+  /// No description provided for @bgNotifyResume.
+  ///
+  /// In zh, this message translates to:
+  /// **'恢复记录'**
+  String get bgNotifyResume;
+
+  /// No description provided for @bgNotifyChannelName.
+  ///
+  /// In zh, this message translates to:
+  /// **'后台记录'**
+  String get bgNotifyChannelName;
+
   /// No description provided for @stillDoingThis.
   ///
   /// In zh, this message translates to:
