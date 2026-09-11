@@ -13,14 +13,27 @@ void main() {
 
   late TrayService service;
   final configureCalls = <Map<String, dynamic>>[];
+  final methodCalls = <String>[];
   final commands = <String>[];
   var closeToTrayCount = 0;
+
+  /// 全量本地化文案参数（configure 必填；文案参与去重签名）。
+  Map<String, String> texts = const {
+    'tipRecording': 'Recording: ',
+    'tipPaused': 'Auto tracking paused',
+    'tipIdle': 'Not recording',
+    'menuShow': 'Show main window',
+    'menuPause': 'Pause tracking',
+    'menuResume': 'Resume tracking',
+    'menuExit': 'Exit',
+  };
 
   Future<Object?>? mockHandler(MethodCall call) async {
     if (call.method == 'configure') {
       configureCalls.add(Map<String, dynamic>.from(call.arguments! as Map));
       return null;
     }
+    methodCalls.add(call.method);
     return null;
   }
 
@@ -37,8 +50,18 @@ void main() {
 
   setUp(() {
     configureCalls.clear();
+    methodCalls.clear();
     commands.clear();
     closeToTrayCount = 0;
+    texts = const {
+      'tipRecording': 'Recording: ',
+      'tipPaused': 'Auto tracking paused',
+      'tipIdle': 'Not recording',
+      'menuShow': 'Show main window',
+      'menuPause': 'Pause tracking',
+      'menuResume': 'Resume tracking',
+      'menuExit': 'Exit',
+    };
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, mockHandler);
     service = TrayService();
@@ -51,23 +74,82 @@ void main() {
         .setMockMethodCallHandler(channel, null);
   });
 
-  test('configure 推送状态载荷；同值去重不重复过通道', () async {
+  test('configure 推送状态+文案载荷；同值去重不重复过通道', () async {
     await service.configure(
-        mode: 'ask', recording: true, paused: false, activity: '学习');
+        mode: 'ask',
+        recording: true,
+        paused: false,
+        activity: '学习',
+        tipRecording: texts['tipRecording']!,
+        tipPaused: texts['tipPaused']!,
+        tipIdle: texts['tipIdle']!,
+        menuShow: texts['menuShow']!,
+        menuPause: texts['menuPause']!,
+        menuResume: texts['menuResume']!,
+        menuExit: texts['menuExit']!);
     expect(configureCalls, hasLength(1));
     expect(configureCalls.first['mode'], 'ask');
     expect(configureCalls.first['activity'], '学习');
+    expect(configureCalls.first['menuExit'], 'Exit');
+    expect(configureCalls.first['tipRecording'], 'Recording: ');
 
     // 完全同参：去重。
     await service.configure(
-        mode: 'ask', recording: true, paused: false, activity: '学习');
+        mode: 'ask',
+        recording: true,
+        paused: false,
+        activity: '学习',
+        tipRecording: texts['tipRecording']!,
+        tipPaused: texts['tipPaused']!,
+        tipIdle: texts['tipIdle']!,
+        menuShow: texts['menuShow']!,
+        menuPause: texts['menuPause']!,
+        menuResume: texts['menuResume']!,
+        menuExit: texts['menuExit']!);
     expect(configureCalls, hasLength(1));
 
     // 任一值变化：再次推送。
     await service.configure(
-        mode: 'ask', recording: false, paused: true, activity: '');
+        mode: 'ask',
+        recording: false,
+        paused: true,
+        activity: '',
+        tipRecording: texts['tipRecording']!,
+        tipPaused: texts['tipPaused']!,
+        tipIdle: texts['tipIdle']!,
+        menuShow: texts['menuShow']!,
+        menuPause: texts['menuPause']!,
+        menuResume: texts['menuResume']!,
+        menuExit: texts['menuExit']!);
     expect(configureCalls, hasLength(2));
     expect(configureCalls.last['paused'], true);
+  });
+
+  test('文案变化（locale 切换）参与去重签名：新文案重推', () async {
+    Future<void> push(String tipPaused) => service.configure(
+        mode: 'ask',
+        recording: false,
+        paused: true,
+        activity: '',
+        tipRecording: texts['tipRecording']!,
+        tipPaused: tipPaused,
+        tipIdle: texts['tipIdle']!,
+        menuShow: texts['menuShow']!,
+        menuPause: texts['menuPause']!,
+        menuResume: texts['menuResume']!,
+        menuExit: texts['menuExit']!);
+    await push('Auto tracking paused');
+    await push('Auto tracking paused');
+    expect(configureCalls, hasLength(1), reason: '同文案去重');
+    await push('自动记录已暂停');
+    expect(configureCalls, hasLength(2), reason: 'locale 切换后新文案必须重推');
+    expect(configureCalls.last['tipPaused'], '自动记录已暂停');
+  });
+
+  test('hideToTray / exitApp 出站到对应通道方法', () async {
+    await service.hideToTray();
+    await service.exitApp();
+    expect(methodCalls, ['hideToTray', 'exitApp']);
   });
 
   test('native 命令与关闭事件路由到回调', () async {
@@ -85,14 +167,37 @@ void main() {
     await pumpInbound(const MethodCall('onCloseToTray'));
   });
 
-  test('无平台实现：configure 吞 MissingPluginException 静默 no-op', () async {
+  test('无平台实现：configure/hideToTray/exitApp 吞 MissingPluginException 静默 no-op',
+      () async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, null);
     final bare = TrayService();
     await bare.configure(
-        mode: 'minimize', recording: false, paused: false, activity: '');
+        mode: 'minimize',
+        recording: false,
+        paused: false,
+        activity: '',
+        tipRecording: texts['tipRecording']!,
+        tipPaused: texts['tipPaused']!,
+        tipIdle: texts['tipIdle']!,
+        menuShow: texts['menuShow']!,
+        menuPause: texts['menuPause']!,
+        menuResume: texts['menuResume']!,
+        menuExit: texts['menuExit']!);
     // 失败推送不更新去重基准：同参数下次仍会尝试（恢复后可达）。
     await bare.configure(
-        mode: 'minimize', recording: false, paused: false, activity: '');
+        mode: 'minimize',
+        recording: false,
+        paused: false,
+        activity: '',
+        tipRecording: texts['tipRecording']!,
+        tipPaused: texts['tipPaused']!,
+        tipIdle: texts['tipIdle']!,
+        menuShow: texts['menuShow']!,
+        menuPause: texts['menuPause']!,
+        menuResume: texts['menuResume']!,
+        menuExit: texts['menuExit']!);
+    await bare.hideToTray();
+    await bare.exitApp();
   });
 }

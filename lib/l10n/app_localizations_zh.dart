@@ -824,6 +824,27 @@ class AppLocalizationsZh extends AppLocalizations {
   String get trayCloseRemember => '记住我的选择，不再询问';
 
   @override
+  String get trayTipRecordingPrefix => '正在记录：';
+
+  @override
+  String get trayTipPaused => '自动记录已暂停';
+
+  @override
+  String get trayTipIdle => '未在记录';
+
+  @override
+  String get trayMenuShow => '显示主窗口';
+
+  @override
+  String get trayMenuPause => '暂停记录';
+
+  @override
+  String get trayMenuResume => '恢复记录';
+
+  @override
+  String get trayMenuExit => '退出';
+
+  @override
   String get stillDoingThis => '仍在进行这个活动？';
 
   @override

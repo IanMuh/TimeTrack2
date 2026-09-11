@@ -97,9 +97,37 @@ bool FlutterWindow::OnCreate() {
                 activity_name_ = Utf8ToWide(*s);
               }
             }
+            // 用户可见文案（铁律 6）：Dart 侧 ARB 本地化后下发，原生不硬编码。
+            const auto set_text = [&args](const char* key,
+                                          std::wstring* target) {
+              const auto it = args->find(flutter::EncodableValue(key));
+              if (it != args->end()) {
+                if (const auto* s = std::get_if<std::string>(&it->second)) {
+                  *target = Utf8ToWide(*s);
+                }
+              }
+            };
+            set_text("tipRecording", &tip_recording_prefix_);
+            set_text("tipPaused", &tip_paused_);
+            set_text("tipIdle", &tip_idle_);
+            set_text("menuShow", &menu_show_);
+            set_text("menuPause", &menu_pause_);
+            set_text("menuResume", &menu_resume_);
+            set_text("menuExit", &menu_exit_);
           }
           EnsureTrayIcon();
           UpdateTrayTip();
+          result->Success();
+        } else if (call.method_name() == "hideToTray") {
+          // ask 模式对话框选择"最小化"后的落点（native 不在 WM_CLOSE 里先
+          // 隐藏——那会让 Dart 弹的对话框渲染在隐藏窗口内不可见）。
+          ShowWindow(GetHandle(), SW_HIDE);
+          result->Success();
+        } else if (call.method_name() == "exitApp") {
+          // ask 模式对话框选择"退出"：直接走正常销毁路径（OnDestroy 清理
+          // 托盘/通道）。不回发 WM_CLOSE——close_mode_ 仍为 ask 时会再触发
+          // 一次关闭对话框。
+          DestroyWindow(GetHandle());
           result->Success();
         } else {
           result->NotImplemented();
@@ -150,13 +178,18 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
     // ---- 托盘（批次 6）----
 
     case WM_CLOSE:
-      // 关窗拦截：exit 模式走正常销毁退出；其余隐藏到托盘并通知 Dart
-      // （ask 模式下 Dart 弹首次选择对话框）。返回非零表示已处理。
+      // 关窗拦截（批次 6）：exit 走正常销毁退出；minimize 静默隐藏；
+      // ask 保持窗口可见并通知 Dart 弹首次选择对话框——选择结果经
+      // hideToTray / exitApp 通道方法回传（此前"先隐藏再通知"会让对话框
+      // 渲染在隐藏窗口内不可见，偏好永远无法建立）。返回非零表示已处理。
       if (close_mode_ == L"exit") {
         DestroyWindow(hwnd);
         return 0;
       }
-      ShowWindow(hwnd, SW_HIDE);
+      if (close_mode_ == L"minimize") {
+        ShowWindow(hwnd, SW_HIDE);
+        return 0;
+      }
       if (tray_channel_) {
         tray_channel_->InvokeMethod("onCloseToTray", nullptr);
       }
@@ -202,11 +235,11 @@ void FlutterWindow::UpdateTrayTip() {
   }
   std::wstring tip;
   if (recording_) {
-    tip = L"正在记录：" + activity_name_;
+    tip = tip_recording_prefix_ + activity_name_;
   } else if (tracking_paused_) {
-    tip = L"自动记录已暂停";
+    tip = tip_paused_;
   } else {
-    tip = L"未在记录";
+    tip = tip_idle_;
   }
   tray_.uFlags = NIF_TIP;
   lstrcpynW(tray_.szTip, tip.c_str(), ARRAYSIZE(tray_.szTip));
@@ -250,12 +283,12 @@ void FlutterWindow::ShowTrayMenu() {
   SetForegroundWindow(hwnd);
 
   HMENU menu = CreatePopupMenu();
-  AppendMenuW(menu, MF_STRING, kTrayCmdShow, L"显示主窗口");
+  AppendMenuW(menu, MF_STRING, kTrayCmdShow, menu_show_.c_str());
   AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
   AppendMenuW(menu, MF_STRING, kTrayCmdTogglePause,
-              tracking_paused_ ? L"恢复记录" : L"暂停记录");
+              (tracking_paused_ ? menu_resume_ : menu_pause_).c_str());
   AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-  AppendMenuW(menu, MF_STRING, kTrayCmdExit, L"退出");
+  AppendMenuW(menu, MF_STRING, kTrayCmdExit, menu_exit_.c_str());
 
   POINT point;
   GetCursorPos(&point);

@@ -836,6 +836,27 @@ class AppLocalizationsEn extends AppLocalizations {
   String get trayCloseRemember => 'Remember my choice, don\'t ask again';
 
   @override
+  String get trayTipRecordingPrefix => 'Recording: ';
+
+  @override
+  String get trayTipPaused => 'Auto tracking paused';
+
+  @override
+  String get trayTipIdle => 'Not recording';
+
+  @override
+  String get trayMenuShow => 'Show main window';
+
+  @override
+  String get trayMenuPause => 'Pause tracking';
+
+  @override
+  String get trayMenuResume => 'Resume tracking';
+
+  @override
+  String get trayMenuExit => 'Exit';
+
+  @override
   String get stillDoingThis => 'Still doing this?';
 
   @override

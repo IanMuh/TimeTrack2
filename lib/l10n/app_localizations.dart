@@ -1652,6 +1652,48 @@ abstract class AppLocalizations {
   /// **'记住我的选择，不再询问'**
   String get trayCloseRemember;
 
+  /// No description provided for @trayTipRecordingPrefix.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在记录：'**
+  String get trayTipRecordingPrefix;
+
+  /// No description provided for @trayTipPaused.
+  ///
+  /// In zh, this message translates to:
+  /// **'自动记录已暂停'**
+  String get trayTipPaused;
+
+  /// No description provided for @trayTipIdle.
+  ///
+  /// In zh, this message translates to:
+  /// **'未在记录'**
+  String get trayTipIdle;
+
+  /// No description provided for @trayMenuShow.
+  ///
+  /// In zh, this message translates to:
+  /// **'显示主窗口'**
+  String get trayMenuShow;
+
+  /// No description provided for @trayMenuPause.
+  ///
+  /// In zh, this message translates to:
+  /// **'暂停记录'**
+  String get trayMenuPause;
+
+  /// No description provided for @trayMenuResume.
+  ///
+  /// In zh, this message translates to:
+  /// **'恢复记录'**
+  String get trayMenuResume;
+
+  /// No description provided for @trayMenuExit.
+  ///
+  /// In zh, this message translates to:
+  /// **'退出'**
+  String get trayMenuExit;
+
   /// No description provided for @stillDoingThis.
   ///
   /// In zh, this message translates to:

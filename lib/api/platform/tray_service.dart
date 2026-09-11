@@ -2,12 +2,14 @@
 /// 的双向 MethodChannel 封装。
 ///
 /// 协议（channel `timetrack/platform/tray`）：
-/// - Dart → native `configure`：`{mode: ask|minimize|exit, recording: bool,
-///   paused: bool, activity: String}`——关窗模式 + 托盘 tooltip/菜单文案状态；
-/// - native → Dart `onCloseToTray`：用户点关闭且已隐藏到托盘（壳层据此在
-///   `ask` 模式下弹首次选择对话框）；
-/// - native → Dart `trayCommand`：`show`（显示主窗口）/ `togglePause`
-///   （切换会话级暂停）——壳层路由到对应 store。
+/// - Dart → native `configure`：`{mode, recording, paused, activity,
+///   tipRecording/tipPaused/tipIdle/menuShow/menuPause/menuResume/menuExit}`——
+///   关窗模式 + 记录状态 + 用户可见文案（铁律 6：ARB 本地化后下发，原生
+///   不硬编码文字）；
+/// - Dart → native `hideToTray` / `exitApp`：ask 模式首次选择对话框的落点
+///   （native WM_CLOSE 不再自行隐藏——对话框必须渲染在可见窗口内）；
+/// - native → Dart `onCloseToTray`：ask 模式下用户点关闭（壳层弹选择对话框）；
+/// - native → Dart `trayCommand`：`show` / `togglePause`——壳层路由。
 ///
 /// 非 Windows 平台：全部调用吞 [MissingPluginException] 静默 no-op
 /// （通道不存在即无托盘能力，业务零感知）。重复状态推送在本类内去重，
@@ -35,26 +37,32 @@ class TrayService {
   /// 托盘命令回调：`show` / `togglePause`（由壳层路由到导航/store）。
   void Function(String command)? onCommand;
 
-  /// 窗口已被关窗动作隐藏到托盘（壳层据此处理首次选择对话框）。
+  /// ask 模式下用户点关闭（壳层据此弹出首次选择对话框；窗口保持可见）。
   void Function()? onCloseToTray;
 
-  /// 最近一次成功/尝试推送的状态（去重基准）。
-  String? _lastMode;
-  bool? _lastRecording;
-  bool? _lastPaused;
-  String? _lastActivity;
+  /// 最近一次成功/尝试推送的状态（去重基准；文案参与去重——locale 切换
+  /// 后新文案必须重推）。
+  String? _lastSignature;
 
-  /// 推送托盘配置与记录状态（内部按值去重；非 Windows 静默 no-op）。
+  /// 推送托盘配置、记录状态与本地化文案（内部按全量签名去重；非 Windows
+  /// 静默 no-op）。
   Future<void> configure({
     required String mode,
     required bool recording,
     required bool paused,
     required String activity,
+    required String tipRecording,
+    required String tipPaused,
+    required String tipIdle,
+    required String menuShow,
+    required String menuPause,
+    required String menuResume,
+    required String menuExit,
   }) async {
-    if (mode == _lastMode &&
-        recording == _lastRecording &&
-        paused == _lastPaused &&
-        activity == _lastActivity) {
+    final signature =
+        '$mode|$recording|$paused|$activity|$tipRecording|$tipPaused|'
+        '$tipIdle|$menuShow|$menuPause|$menuResume|$menuExit';
+    if (signature == _lastSignature) {
       return; // 状态未变：不重复过通道（秒级刷新路径的节流）
     }
     try {
@@ -63,16 +71,43 @@ class TrayService {
         'recording': recording,
         'paused': paused,
         'activity': activity,
+        'tipRecording': tipRecording,
+        'tipPaused': tipPaused,
+        'tipIdle': tipIdle,
+        'menuShow': menuShow,
+        'menuPause': menuPause,
+        'menuResume': menuResume,
+        'menuExit': menuExit,
       });
-      _lastMode = mode;
-      _lastRecording = recording;
-      _lastPaused = paused;
-      _lastActivity = activity;
+      _lastSignature = signature;
     } on MissingPluginException {
       // 非 Windows 平台 / 测试环境无实现：静默 no-op。
     } on PlatformException {
       // native 侧异常：不阻断 UI（下轮状态变化会重试推送）。
       debugPrint('[tray] configure 推送失败');
+    }
+  }
+
+  /// 隐藏窗口到托盘（ask 模式对话框选择"最小化"后由壳层调用）。
+  Future<void> hideToTray() async {
+    try {
+      await _channel.invokeMethod<void>('hideToTray');
+    } on MissingPluginException {
+      // 非 Windows：no-op。
+    } on PlatformException {
+      debugPrint('[tray] hideToTray 失败');
+    }
+  }
+
+  /// 退出应用（ask 模式对话框选择"退出"后由壳层调用；native 走正常销毁
+  /// 路径清理托盘/通道）。窗口销毁后响应不再返回——调用方 fire-and-forget。
+  Future<void> exitApp() async {
+    try {
+      await _channel.invokeMethod<void>('exitApp');
+    } on MissingPluginException {
+      // 非 Windows：no-op。
+    } on PlatformException {
+      debugPrint('[tray] exitApp 失败');
     }
   }
 

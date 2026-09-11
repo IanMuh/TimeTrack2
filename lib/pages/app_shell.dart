@@ -288,7 +288,7 @@ class _AppShellState extends State<AppShell>
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(),
-              child: Text(l10n.ok),
+              child: Text(l10n.cancel),
             ),
             FilledButton(
               onPressed: () async {
@@ -299,6 +299,13 @@ class _AppShellState extends State<AppShell>
                 if (!mounted) return;
                 setState(() => _trayCloseMode = selected);
                 _pushTrayStatus();
+                // native WM_CLOSE 不再自行隐藏（ask 模式）——动作经通道落点：
+                // 最小化 → hideToTray；退出 → exitApp（正常销毁路径清理托盘）。
+                if (selected == TrayCloseMode.exit) {
+                  unawaited(widget.app.tray.exitApp());
+                } else {
+                  await widget.app.tray.hideToTray();
+                }
               },
               child: Text(l10n.ok),
             ),
@@ -308,18 +315,27 @@ class _AppShellState extends State<AppShell>
     );
   }
 
-  /// 推送托盘状态（模式 + 记录态 + 暂停态；服务内去重）。在计时条构建器
-  /// 中每秒调用——重复推送被 TrayService 拦截，无通道流量。
+  /// 推送托盘状态（模式 + 记录态 + 暂停态 + 本地化文案；服务内按全量签名
+  /// 去重）。在计时条构建器中每秒调用——重复推送被 TrayService 拦截。
   void _pushTrayStatus() {
     final running = widget.app.timer.runningEntry;
     final recording =
         running != null && !_entryIsUnassigned;
     final activity = recording ? running.activityNameSnapshot : '';
+    final l10n = AppLocalizations.of(context);
     unawaited(widget.app.tray.configure(
       mode: _trayCloseMode,
       recording: recording,
       paused: widget.app.tracking.sessionPaused,
       activity: activity,
+      // 铁律 6：托盘可见文案 ARB 本地化后下发，原生不硬编码。
+      tipRecording: l10n?.trayTipRecordingPrefix ?? 'Recording: ',
+      tipPaused: l10n?.trayTipPaused ?? 'Auto tracking paused',
+      tipIdle: l10n?.trayTipIdle ?? 'Not recording',
+      menuShow: l10n?.trayMenuShow ?? 'Show main window',
+      menuPause: l10n?.trayMenuPause ?? 'Pause tracking',
+      menuResume: l10n?.trayMenuResume ?? 'Resume tracking',
+      menuExit: l10n?.trayMenuExit ?? 'Exit',
     ));
   }
 

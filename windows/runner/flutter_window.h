@@ -44,14 +44,24 @@ class FlutterWindow : public Win32Window {
   NOTIFYICONDATA tray_ = {};
   bool tray_added_ = false;
 
-  // 关窗模式（Dart 推送；ask=隐藏+通知 Dart 弹首次选择框 / minimize=静默
-  // 隐藏 / exit=直接退出）。默认 ask——契约"关闭窗口默认最小化到托盘"。
+  // 关窗模式（Dart 推送；ask=通知 Dart 弹首次选择框（窗口保持可见）/
+  // minimize=静默隐藏 / exit=直接退出）。默认 ask。
   std::wstring close_mode_ = L"ask";
 
   // 记录状态（tooltip/菜单文案）：是否在记录、活动名、自动检测是否挂起。
   bool recording_ = false;
   bool tracking_paused_ = false;
   std::wstring activity_name_;
+
+  // 托盘/菜单用户可见文案（Dart 经 configure 下发——铁律 6：原生不硬编码
+  // 用户可见文字；托盘图标仅在 Dart 首次 configure 后创建，默认值不可见）。
+  std::wstring tip_recording_prefix_ = L"Recording: ";
+  std::wstring tip_paused_ = L"Auto tracking paused";
+  std::wstring tip_idle_ = L"Not recording";
+  std::wstring menu_show_ = L"Show main window";
+  std::wstring menu_pause_ = L"Pause tracking";
+  std::wstring menu_resume_ = L"Resume tracking";
+  std::wstring menu_exit_ = L"Exit";
 
   // 任务栏重建消息（explorer 重启后托盘图标需重加）。
   UINT taskbar_created_msg_ = 0;
