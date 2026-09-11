@@ -16,6 +16,7 @@ class EntryEditDraft {
     required this.keepRunning,
     required this.note,
     this.entryId,
+    this.endIsNow = false,
   });
 
   final String? entryId; // null = 新增
@@ -25,6 +26,10 @@ class EntryEditDraft {
 
   /// null + keepRunning=true = 运行中。
   final DateTime? end;
+
+  /// 未选结束时刻的"结束到现在"语义（宿主据此传指令特值 `now`——绝对
+  /// 时刻，跨天条目不受 HH:MM 按条目所在日还原影响）。
+  final bool endIsNow;
   final bool keepRunning;
   final String note;
 }
@@ -182,9 +187,10 @@ class _EntryEditorDialogState extends State<_EntryEditorDialog> {
       activityId: widget.currentActivityId ?? '',
       activityName: widget.currentActivityName,
       start: _start,
-      // 编辑运行中条目再关闭「保持运行中」时 _end 尚未选择——按"结束到
-      // 现在"落库（与 _hasOverlap 的 null-end 兜底一致），防空断言崩溃。
-      end: _keepRunning ? null : (_end ?? DateTime.now()),
+      // keepRunning=true → end 保持 null（运行中）；关闭「保持运行中」但
+      // 未选结束时刻 → endIsNow（宿主传 `now` 特值），不在此截断成 HH:MM。
+      end: _keepRunning ? null : _end,
+      endIsNow: !_keepRunning && _end == null,
       keepRunning: _keepRunning,
       note: _note.text,
     ));

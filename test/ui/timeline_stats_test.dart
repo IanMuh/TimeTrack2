@@ -253,4 +253,42 @@ void main() {
         reason: '遗留条目已结束（end=now 落库成功；若指令失败条目仍在运行）');
     store.dispose();
   });
+
+  testWidgets('时间线：编辑运行中条目保存后仍运行（keepRunning 不被 --end 静默结束）',
+      (tester) async {
+    final store = await _createStore();
+    await store.settings.reload();
+    await store.settings
+        .save(store.settings.current!.copyWith(reminderMinutes: 600));
+    final dayStart =
+        DateTime(_harnessNow.year, _harnessNow.month, _harnessNow.day);
+    // 会话起点（00:30）之后开始，避开可疑条目检测对话框。
+    final xuexi = (await store.activities.activities())
+        .requireValue()
+        .firstWhere((a) => a.name == '学习');
+    await store.timer
+        .switchToActivity(xuexi.id, at: dayStart.add(const Duration(minutes: 35)));
+    await _pump(tester, store);
+    // 会话起点采样自真实时钟，而条目起点是注入时刻——可疑条目检测可能
+    // 先弹（跨会话遗留判定）。先处置再导航，保证后续 tap 不被 barrier 挡。
+    if (tester.any(find.text('发现遗留运行条目'))) {
+      await tester.tap(find.text('保留当前'));
+      await tester.pumpAndSettle();
+    }
+    await tester.tap(find.byIcon(Icons.view_timeline_outlined));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('学习').first);
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsOneWidget);
+
+    // 运行中条目默认勾选「保持运行中」；不改任何字段直接保存。
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsNothing,
+        reason: '保存成功（若 keepRunning 被丢弃、指令报错，对话框不会关闭）');
+    final running = store.timer.runningEntry;
+    expect(running, isNotNull, reason: '运行中条目编辑保存后仍应运行（end 不落库）');
+    expect(running!.activityId, xuexi.id);
+    store.dispose();
+  });
 }

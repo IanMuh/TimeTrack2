@@ -168,9 +168,13 @@ class _TimelinePageState extends State<TimelinePage> {
       );
 
   Future<bool> _submitEntry(EntryEditDraft draft) async {
+    // --end 三态：keepRunning = 不传（部分更新语义下运行条目保持无 end，
+    // 防"编辑运行中条目保存即被结束"）；endIsNow = 特值 'now'（绝对当前
+    // 时刻，跨天条目不受 HH:MM 按条目所在日还原影响）；其余 = HH:MM。
     final options = <String, String>{
       'start': _hm(draft.start),
-      'end': _hm(draft.end ?? DateTime.now()),
+      if (!draft.keepRunning) //
+        'end': draft.endIsNow ? 'now' : _hm(draft.end!),
       // 无条件传（含空串 = 清空备注）——按非空省略会让"删光备注保存"失效。
       'note': draft.note,
     };
@@ -195,7 +199,12 @@ class _TimelinePageState extends State<TimelinePage> {
     final targetNew = _activityById(draft.activityId) ?? _activities.firstOrNull;
     if (targetNew == null) return false;
     final r = await app.dispatcher.dispatch(
-      CommandInvocation(name: 'add', args: [targetNew.name], options: options),
+      CommandInvocation(name: 'add', args: [targetNew.name], options: {
+        ...options,
+        // add 指令需要 HH:MM（不支持 now 特值）；新条目必在今日，HH:MM
+        // 锚定无漂移。
+        'end': _hm(draft.end ?? DateTime.now()),
+      }),
     );
     return _ok(r);
   }
