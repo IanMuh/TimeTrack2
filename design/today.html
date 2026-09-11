@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TimeTrack · 今日</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = { darkMode: 'class' }
+</script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<style>
+  body { font-family: Inter, "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif; }
+  .tnum { font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body class="bg-zinc-50 text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100">
+
+  <!-- ================= 移动顶栏（< 840，含品牌 / 撤销菜单 / 深色切换） ================= -->
+  <header class="fixed inset-x-0 top-0 z-40 flex h-14 items-center justify-between border-b border-zinc-200 bg-white/85 px-3 backdrop-blur min-[840px]:hidden dark:border-zinc-800 dark:bg-zinc-950/85">
+    <div class="relative">
+      <div class="flex items-center gap-0.5">
+        <button id="mobileUndoBtn" onclick="toggleUndoMenu(event)" class="rounded-lg p-2 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100" title="撤销 / 重做" aria-label="撤销 / 重做">
+          <i data-lucide="undo-2" class="h-4 w-4"></i>
+        </button>
+        <span class="text-[17px] font-semibold tracking-tight">TimeTrack</span>
+      </div>
+      <!-- 移动端撤销/重做收纳菜单 -->
+      <div id="undoMenu" class="absolute left-0 top-full z-50 mt-2 hidden w-64 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+        <div class="flex items-center justify-between border-b border-zinc-100 px-3 py-2.5 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+          <span>撤销 / 重做</span>
+          <span class="tnum text-[10px]">Ctrl+Z / Ctrl+Y</span>
+        </div>
+        <button class="flex w-full items-center justify-between px-3 py-2 text-sm transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800">
+          <span class="flex items-center gap-2"><i data-lucide="undo-2" class="h-3.5 w-3.5 text-zinc-500 dark:text-zinc-400"></i>撤销 · 切换活动</span>
+        </button>
+        <button disabled class="flex w-full items-center justify-between px-3 py-2 text-sm text-zinc-300 dark:text-zinc-600">
+          <span class="flex items-center gap-2"><i data-lucide="redo-2" class="h-3.5 w-3.5"></i>重做（无可撤销）</span>
+        </button>
+      </div>
+    </div>
+    <button onclick="toggleDark()" class="rounded-lg p-2 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100" aria-label="切换深浅色">
+      <i data-lucide="moon" class="icon-moon h-4 w-4"></i>
+      <i data-lucide="sun" class="icon-sun hidden h-4 w-4"></i>
+    </button>
+  </header>
+
+  <!-- ================= 侧向导航（≥ 840，含撤销/重做 + 同步指示） ================= -->
+  <aside class="fixed inset-y-0 left-0 z-30 hidden w-[232px] flex-col border-r border-zinc-200 bg-white min-[840px]:flex dark:border-zinc-800 dark:bg-zinc-900">
+    <div class="flex h-16 shrink-0 items-center px-5">
+      <span class="text-lg font-semibold tracking-tight">TimeTrack</span>
+    </div>
+    <nav class="flex-1 space-y-1 px-3 pt-2">
+      <a href="timer.html" class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100">
+        <i data-lucide="timer" class="h-4 w-4"></i> 计时
+      </a>
+      <a href="today.html" class="flex items-center gap-2.5 rounded-lg bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-600 transition-colors dark:bg-indigo-500/10 dark:text-indigo-400">
+        <i data-lucide="calendar-days" class="h-4 w-4"></i> 今日
+      </a>
+      <a href="#" class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100">
+        <i data-lucide="rows-3" class="h-4 w-4"></i> 时间线
+      </a>
+      <a href="#" class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100">
+        <i data-lucide="pie-chart" class="h-4 w-4"></i> 统计
+      </a>
+      <a href="#" class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100">
+        <i data-lucide="settings" class="h-4 w-4"></i> 设置
+      </a>
+    </nav>
+    <div class="shrink-0 border-t border-zinc-100 p-3 dark:border-zinc-800">
+      <div class="flex items-center gap-1">
+        <button class="rounded-lg p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100" title="撤销：切换活动（Ctrl+Z）" aria-label="撤销">
+          <i data-lucide="undo-2" class="h-4 w-4"></i>
+        </button>
+        <button disabled class="rounded-lg p-1.5 text-zinc-300 dark:text-zinc-600" title="重做：暂无操作（Ctrl+Y）" aria-label="重做">
+          <i data-lucide="redo-2" class="h-4 w-4"></i>
+        </button>
+        <div class="ml-auto flex items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
+          <i data-lucide="cloud" class="h-3.5 w-3.5"></i>
+          <span>已同步</span>
+        </div>
+      </div>
+      <p class="mt-2 px-1 text-[10px] leading-relaxed text-zinc-400 dark:text-zinc-500">
+        最近操作：切换活动<br>输入框聚焦时快捷键自动让位
+      </p>
+    </div>
+  </aside>
+
+  <!-- ================= 全局计时条（常驻，运行中） ================= -->
+  <div class="fixed inset-x-0 bottom-16 z-40 h-14 border-t border-zinc-200 bg-white/95 backdrop-blur min-[840px]:bottom-0 min-[840px]:left-[232px] dark:border-zinc-800 dark:bg-zinc-900/95">
+    <div class="mx-auto flex h-full max-w-5xl items-center gap-3 px-4 min-[840px]:px-8">
+      <a href="timer.html" class="flex min-w-0 items-center gap-2.5" title="回到计时页">
+        <span class="relative flex h-2.5 w-2.5 shrink-0">
+          <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-500 opacity-60"></span>
+          <span class="relative inline-flex h-2.5 w-2.5 rounded-full bg-rose-500"></span>
+        </span>
+        <span class="truncate text-sm font-medium">设计评审</span>
+        <span class="hidden truncate text-xs text-zinc-500 min-[600px]:inline dark:text-zinc-400">工作 / 项目A</span>
+      </a>
+      <span class="tnum shrink-0 text-sm font-semibold tracking-tight">01:24:36</span>
+      <div class="ml-auto flex shrink-0 items-center gap-2">
+        <button class="rounded-lg border border-zinc-200 px-2.5 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 dark:border-zinc-700 dark:text-red-400 dark:hover:bg-red-500/10">停止</button>
+        <button class="rounded-lg bg-indigo-600 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-indigo-500">切换活动</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 主内容 ================= -->
+  <main class="min-h-screen pb-40 pt-14 min-[840px]:ml-[232px] min-[840px]:pb-28 min-[840px]:pt-0">
+    <div class="mx-auto w-full max-w-5xl px-4 min-[840px]:px-8">
+
+      <!-- 日期头：日历选择 + 前后步进 + 日期大字 -->
+      <section class="flex flex-wrap items-end justify-between gap-4 pt-6 min-[840px]:pt-10">
+        <div>
+          <div class="flex items-center gap-2">
+            <button class="rounded-lg p-1.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-300" aria-label="前一天">
+              <i data-lucide="chevron-left" class="h-5 w-5"></i>
+            </button>
+            <h1 class="tnum text-2xl font-semibold tracking-tight min-[600px]:text-3xl">8月16日 周日</h1>
+            <button class="rounded-lg p-1.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-300" aria-label="后一天">
+              <i data-lucide="chevron-right" class="h-5 w-5"></i>
+            </button>
+          </div>
+          <p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">今天 · 点击"选择日期"可查看任意一天</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <button class="rounded-lg border border-zinc-200 px-3 py-1.5 text-xs font-medium text-indigo-600 transition-colors hover:bg-indigo-50 dark:border-zinc-700 dark:text-indigo-400 dark:hover:bg-indigo-500/10">今天</button>
+          <button class="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-indigo-500">
+            <i data-lucide="calendar" class="h-3.5 w-3.5"></i> 选择日期
+          </button>
+        </div>
+      </section>
+
+      <!-- 指标 4 卡（含较前一日对比） -->
+      <section class="mt-6 grid grid-cols-2 gap-3 min-[840px]:grid-cols-4">
+        <div class="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-medium text-zinc-500 dark:text-zinc-400">总时长</span>
+            <span class="flex h-6 w-6 items-center justify-center rounded-md bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
+              <i data-lucide="clock" class="h-3.5 w-3.5"></i>
+            </span>
+          </div>
+          <div class="tnum mt-2 text-2xl font-semibold tracking-tight">9:50</div>
+          <span class="mt-1.5 inline-flex items-center gap-0.5 self-start rounded-full bg-emerald-50 px-1.5 py-0.5 text-[11px] font-medium text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400">
+            <i data-lucide="trending-up" class="h-3 w-3"></i>12.4%
+            <span class="font-normal text-emerald-600/60 dark:text-emerald-400/60">较昨日</span>
+          </span>
+        </div>
+        <div class="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-medium text-zinc-500 dark:text-zinc-400">会话数</span>
+            <span class="flex h-6 w-6 items-center justify-center rounded-md bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
+              <i data-lucide="layers" class="h-3.5 w-3.5"></i>
+            </span>
+          </div>
+          <div class="tnum mt-2 text-2xl font-semibold tracking-tight">9</div>
+          <span class="mt-1.5 inline-flex items-center gap-0.5 self-start rounded-full bg-zinc-100 px-1.5 py-0.5 text-[11px] font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
+            <i data-lucide="trending-down" class="h-3 w-3"></i>6.3%
+            <span class="font-normal text-zinc-400 dark:text-zinc-500">较昨日</span>
+          </span>
+        </div>
+        <div class="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-medium text-zinc-500 dark:text-zinc-400">专注时长</span>
+            <span class="flex h-6 w-6 items-center justify-center rounded-md bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
+              <i data-lucide="zap" class="h-3.5 w-3.5"></i>
+            </span>
+          </div>
+          <div class="tnum mt-2 text-2xl font-semibold tracking-tight">8:03</div>
+          <span class="mt-1.5 inline-flex items-center gap-0.5 self-start rounded-full bg-emerald-50 px-1.5 py-0.5 text-[11px] font-medium text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400">
+            <i data-lucide="trending-up" class="h-3 w-3"></i>21.0%
+            <span class="font-normal text-emerald-600/60 dark:text-emerald-400/60">较昨日</span>
+          </span>
+        </div>
+        <div class="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-medium text-zinc-500 dark:text-zinc-400">休息时长</span>
+            <span class="flex h-6 w-6 items-center justify-center rounded-md bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
+              <i data-lucide="coffee" class="h-3.5 w-3.5"></i>
+            </span>
+          </div>
+          <div class="tnum mt-2 text-2xl font-semibold tracking-tight">1:20</div>
+          <span class="mt-1.5 inline-flex items-center gap-0.5 self-start rounded-full bg-zinc-100 px-1.5 py-0.5 text-[11px] font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
+            <i data-lucide="trending-down" class="h-3 w-3"></i>12.5%
+            <span class="font-normal text-zinc-400 dark:text-zinc-500">较昨日</span>
+          </span>
+        </div>
+      </section>
+
+      <!-- 分类筛选行（多选 chip，默认全选，选中/未选中可辨识） -->
+      <section class="mt-7">
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="mr-1 text-xs font-medium text-zinc-500 dark:text-zinc-400">分类筛选</span>
+          <button class="inline-flex items-center gap-1.5 rounded-full bg-zinc-900 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200">
+            全部
+          </button>
+          <button class="inline-flex items-center gap-1.5 rounded-full bg-zinc-900 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200">
+            <span class="h-2 w-2 rounded-full bg-indigo-500"></span>工作
+          </button>
+          <button class="inline-flex items-center gap-1.5 rounded-full bg-zinc-900 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200">
+            <span class="h-2 w-2 rounded-full bg-emerald-500"></span>个人
+          </button>
+          <button class="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-medium text-zinc-600 transition-colors hover:border-zinc-300 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-zinc-600 dark:hover:bg-zinc-800">
+            <span class="h-2 w-2 rounded-full bg-orange-500"></span>通勤
+          </button>
+          <button class="inline-flex items-center gap-1.5 rounded-full bg-zinc-900 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200">
+            <span class="h-2 w-2 rounded-full bg-zinc-400"></span>未分类
+          </button>
+        </div>
+        <p class="mt-2 text-xs text-zinc-400 dark:text-zinc-500">
+          多选联动：下方分组列表与上方 4 项指标随筛选实时重算（当前排除"通勤"，共 4/5 项生效）· 默认全选 = 全天完整数据。
+        </p>
+      </section>
+
+      <!-- 分类分组聚合列表 + 宽屏时间线预览 -->
+      <div class="mt-6 flex flex-col gap-6 min-[840px]:flex-row min-[840px]:items-start">
+
+        <!-- 左：分组聚合列表 -->
+        <div class="min-w-0 flex-1 space-y-3">
+
+          <!-- 组 1：工作 / 项目A（展开，祖先链路径） -->
+          <div class="grp rounded-2xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+            <button onclick="toggleGroup(this)" class="flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/60">
+              <i data-lucide="chevron-down" class="grp-chev h-4 w-4 shrink-0 text-zinc-400 transition-transform"></i>
+              <span class="h-2.5 w-2.5 shrink-0 rounded-full bg-indigo-500"></span>
+              <span class="min-w-0 flex-1">
+                <span class="block truncate text-sm font-medium"><span class="font-normal text-zinc-500 dark:text-zinc-400">工作 / </span>项目A</span>
+                <span class="mt-0.5 block text-xs text-zinc-500 dark:text-zinc-400">4 个活动</span>
+              </span>
+              <span class="tnum text-xs font-medium text-zinc-500 dark:text-zinc-400">69%</span>
+              <span class="tnum w-14 shrink-0 text-right text-sm font-medium">6:48</span>
+            </button>
+            <div class="grp-body px-4 pb-4">
+              <div class="mb-3 h-1 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
+                <div class="h-full rounded-full bg-indigo-500" style="width:69%"></div>
+              </div>
+              <div class="space-y-1.5">
+                <div class="flex items-center gap-3 rounded-lg px-2 py-1.5 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/60">
+                  <span class="h-2 w-2 shrink-0 rounded-full bg-rose-500"></span>
+                  <span class="min-w-0 flex-1 truncate text-sm">设计评审</span>
+                  <span class="tnum w-9 shrink-0 text-right text-xs text-zinc-500 dark:text-zinc-400">21%</span>
+                  <span class="tnum w-12 shrink-0 text-right text-sm font-medium">1:24</span>
+                </div>
+                <div class="flex items-center gap-3 rounded-lg px-2 py-1.5 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/60">
+                  <span class="h-2 w-2 shrink-0 rounded-full bg-emerald-500"></span>
+                  <span class="min-w-0 flex-1 truncate text-sm">写代码</span>
+                  <span class="tnum w-9 shrink-0 text-right text-xs text-zinc-500 dark:text-zinc-400">62%</span>
+                  <span class="tnum w-12 shrink-0 text-right text-sm font-medium">4:12</span>
+                </div>
+                <div class="flex items-center gap-3 rounded-lg px-2 py-1.5 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/60">
+                  <span class="h-2 w-2 shrink-0 rounded-full bg-indigo-500"></span>
+                  <span class="min-w-0 flex-1 truncate text-sm">文档编写</span>
+                  <span class="tnum w-9 shrink-0 text-right text-xs text-zinc-500 dark:text-zinc-400">12%</span>
+                  <span class="tnum w-12 shrink-0 text-right text-sm font-medium">0:52</span>
+                </div>
+                <div class="flex items-center gap-3 rounded-lg px-2 py-1.5 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/60">
+                  <span class="h-2 w-2 shrink-0 rounded-full bg-sky-500"></span>
+                  <span class="min-w-0 flex-1 truncate text-sm">站会</span>
+                  <span class="tnum w-9 shrink-0 text-right text-xs text-zinc-500 dark:text-zinc-400">5%</span>
+                  <span class="tnum w-12 shrink-0 text-right text-sm font-medium">0:20</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 组 2：工作 / 平台组（展开，祖先链路径） -->
+          <div class="grp rounded-2xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+            <button onclick="toggleGroup(this)" class="flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/60">
+              <i data-lucide="chevron-down" class="grp-chev h-4 w-4 shrink-0 text-zinc-400 transition-transform"></i>
+              <span class="h-2.5 w-2.5 shrink-0 rounded-full bg-violet-500"></span>
+              <span class="min-w-0 flex-1">
+                <span class="block truncate text-sm font-medium"><span class="font-normal text-zinc-500 dark:text-zinc-400">工作 / </span>平台组</span>
+                <span class="mt-0.5 block text-xs text-zinc-500 dark:text-zinc-400">2 个活动</span>
+              </span>
+              <span class="tnum text-xs font-medium text-zinc-500 dark:text-zinc-400">13%</span>
+              <span class="tnum w-14 shrink-0 text-right text-sm font-medium">1:15</span>
+            </button>
+            <div class="grp-body px-4 pb-4">
+              <div class="mb-3 h-1 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
+                <div class="h-full rounded-full bg-violet-500" style="width:13%"></div>
+              </div>
+              <div class="space-y-1.5">
+                <div class="flex items-center gap-3 rounded-lg px-2 py-1.5 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/60">
+                  <span class="h-2 w-2 shrink-0 rounded-full bg-violet-500"></span>
+                  <span class="min-w-0 flex-1 truncate text-sm">代码评审</span>
+                  <span class="tnum w-9 shrink-0 text-right text-xs text-zinc-500 dark:text-zinc-400">60%</span>
+                  <span class="tnum w-12 shrink-0 text-right text-sm font-medium">0:45</span>
+                </div>
+                <div class="flex items-center gap-3 rounded-lg px-2 py-1.5 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/60">
+                  <span class="h-2 w-2 shrink-0 rounded-full bg-amber-500"></span>
+                  <span class="min-w-0 flex-1 truncate text-sm">答疑沟通</span>
+                  <span class="tnum w-9 shrink-0 text-right text-xs text-zinc-500 dark:text-zinc-400">40%</span>
+                  <span class="tnum w-12 shrink-0 text-right text-sm font-medium">0:30</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 组 3：个人（折叠态） -->
+          <div class="grp rounded-2xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+            <button onclick="toggleGroup(this)" class="flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/60">
+              <i data-lucide="chevron-down" class="grp-chev h-4 w-4 shrink-0 -rotate-90 text-zinc-400 transition-transform"></i>
+              <span class="h-2.5 w-2.5 shrink-0 rounded-full bg-emerald-500"></span>
+              <span class="min-w-0 flex-1">
+                <span class="block truncate text-sm font-medium">个人</span>
+                <span class="mt-0.5 block text-xs text-zinc-500 dark:text-zinc-400">2 个活动</span>
+              </span>
+              <span class="tnum text-xs font-medium text-zinc-500 dark:text-zinc-400">13%</span>
+              <span class="tnum w-14 shrink-0 text-right text-sm font-medium">1:20</span>
+            </button>
+            <div class="grp-body hidden px-4 pb-4">
+              <div class="mb-3 h-1 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
+                <div class="h-full rounded-full bg-emerald-500" style="width:13%"></div>
+              </div>
+              <div class="space-y-1.5">
+                <div class="flex items-center gap-3 rounded-lg px-2 py-1.5 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/60">
+                  <span class="h-2 w-2 shrink-0 rounded-full bg-teal-500"></span>
+                  <span class="min-w-0 flex-1 truncate text-sm">休息</span>
+                  <span class="tnum w-9 shrink-0 text-right text-xs text-zinc-500 dark:text-zinc-400">81%</span>
+                  <span class="tnum w-12 shrink-0 text-right text-sm font-medium">1:05</span>
+                </div>
+                <div class="flex items-center gap-3 rounded-lg px-2 py-1.5 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/60">
+                  <span class="h-2 w-2 shrink-0 rounded-full bg-teal-500"></span>
+                  <span class="min-w-0 flex-1 truncate text-sm">午休</span>
+                  <span class="tnum w-9 shrink-0 text-right text-xs text-zinc-500 dark:text-zinc-400">19%</span>
+                  <span class="tnum w-12 shrink-0 text-right text-sm font-medium">0:15</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 组 4：未分类（置底） -->
+          <div class="grp rounded-2xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+            <button onclick="toggleGroup(this)" class="flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/60">
+              <i data-lucide="chevron-down" class="grp-chev h-4 w-4 shrink-0 text-zinc-400 transition-transform"></i>
+              <span class="h-2.5 w-2.5 shrink-0 rounded-full bg-zinc-400"></span>
+              <span class="min-w-0 flex-1">
+                <span class="block truncate text-sm font-medium">未分类</span>
+                <span class="mt-0.5 block text-xs text-zinc-500 dark:text-zinc-400">1 个活动</span>
+              </span>
+              <span class="tnum text-xs font-medium text-zinc-500 dark:text-zinc-400">5%</span>
+              <span class="tnum w-14 shrink-0 text-right text-sm font-medium">0:27</span>
+            </button>
+            <div class="grp-body px-4 pb-4">
+              <div class="mb-3 h-1 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
+                <div class="h-full rounded-full bg-zinc-400" style="width:5%"></div>
+              </div>
+              <div class="space-y-1.5">
+                <div class="flex items-center gap-3 rounded-lg px-2 py-1.5 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/60">
+                  <span class="h-2 w-2 shrink-0 rounded-full bg-zinc-400"></span>
+                  <span class="min-w-0 flex-1 truncate text-sm">临时活动</span>
+                  <span class="tnum w-9 shrink-0 text-right text-xs text-zinc-500 dark:text-zinc-400">100%</span>
+                  <span class="tnum w-12 shrink-0 text-right text-sm font-medium">0:27</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <p class="pt-1 text-xs text-zinc-400 dark:text-zinc-500">
+            组内占比 = 活动占所属分类的时长比例；组头进度条 = 分类占当日总时长的比例。
+          </p>
+        </div>
+
+        <!-- 右：时间线预览（仅 ≥ 840） -->
+        <aside class="hidden w-72 shrink-0 min-[840px]:block">
+          <div class="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+            <div class="flex items-center justify-between">
+              <h3 class="text-sm font-medium tracking-tight">时间线预览</h3>
+              <span class="text-xs text-zinc-400 dark:text-zinc-500">今天</span>
+            </div>
+            <div class="mt-4 space-y-3.5">
+              <div class="flex items-center gap-2.5 text-sm">
+                <span class="tnum w-9 shrink-0 text-xs text-zinc-500 dark:text-zinc-400">09:00</span>
+                <span class="h-2 w-2 shrink-0 rounded-full bg-sky-500"></span>
+                <span class="min-w-0 flex-1 truncate">站会</span>
+                <span class="tnum shrink-0 text-xs text-zinc-500 dark:text-zinc-400">20m</span>
+              </div>
+              <div class="flex items-center gap-2.5 text-sm">
+                <span class="tnum w-9 shrink-0 text-xs text-zinc-500 dark:text-zinc-400">09:20</span>
+                <span class="h-2 w-2 shrink-0 rounded-full bg-emerald-500"></span>
+                <span class="min-w-0 flex-1 truncate">写代码</span>
+                <span class="tnum shrink-0 text-xs text-zinc-500 dark:text-zinc-400">2:10</span>
+              </div>
+              <div class="flex items-center gap-2.5 text-sm">
+                <span class="tnum w-9 shrink-0 text-xs text-zinc-500 dark:text-zinc-400">12:30</span>
+                <span class="h-2 w-2 shrink-0 rounded-full bg-teal-500"></span>
+                <span class="flex min-w-0 flex-1 items-center gap-1.5 truncate">
+                  休息
+                  <span class="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-sky-50 px-1.5 py-px text-[10px] font-medium text-sky-600 dark:bg-sky-500/10 dark:text-sky-400">
+                    <i data-lucide="sparkles" class="h-2.5 w-2.5"></i>自动
+                  </span>
+                </span>
+                <span class="tnum shrink-0 text-xs text-zinc-500 dark:text-zinc-400">1:05</span>
+              </div>
+              <div class="flex items-center gap-2.5 text-sm">
+                <span class="tnum w-9 shrink-0 text-xs text-zinc-500 dark:text-zinc-400">13:35</span>
+                <span class="h-2 w-2 shrink-0 rounded-full bg-emerald-500"></span>
+                <span class="min-w-0 flex-1 truncate">写代码</span>
+                <span class="tnum shrink-0 text-xs text-zinc-500 dark:text-zinc-400">2:02</span>
+              </div>
+              <div class="flex items-center gap-2.5 text-sm">
+                <span class="tnum w-9 shrink-0 text-xs text-zinc-500 dark:text-zinc-400">16:10</span>
+                <span class="h-2 w-2 shrink-0 rounded-full bg-rose-500"></span>
+                <span class="min-w-0 flex-1 truncate">设计评审</span>
+                <span class="tnum shrink-0 text-xs text-zinc-500 dark:text-zinc-400">1:24</span>
+              </div>
+            </div>
+            <a href="#" class="mt-5 flex items-center justify-center gap-1 border-t border-zinc-100 pt-4 text-sm font-medium text-indigo-600 transition-colors hover:text-indigo-500 dark:border-zinc-800 dark:text-indigo-400">
+              查看完整时间线 <i data-lucide="arrow-right" class="h-3.5 w-3.5"></i>
+            </a>
+          </div>
+        </aside>
+      </div>
+
+      <!-- 状态变体：空态 / 错误态 缩样 -->
+      <section class="mt-12 pb-4 min-[840px]:mt-14">
+        <div class="mb-4">
+          <h2 class="text-base font-medium tracking-tight">状态变体</h2>
+          <p class="mt-1 text-xs text-zinc-400 dark:text-zinc-500">页面级三态 · 本页上方为正常态（当日有记录）；以下平铺展示空态与错误态缩样。</p>
+        </div>
+        <div class="grid gap-4 sm:grid-cols-2">
+
+          <!-- 空态缩样 -->
+          <div class="overflow-hidden rounded-2xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+            <div class="flex items-center justify-between border-b border-zinc-100 px-4 py-2.5 dark:border-zinc-800">
+              <span class="text-xs font-medium text-zinc-500 dark:text-zinc-400">空态 · 当日无记录</span>
+              <span class="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">缩样</span>
+            </div>
+            <div class="flex flex-col items-center px-6 py-8 text-center">
+              <div class="flex h-11 w-11 items-center justify-center rounded-full bg-zinc-100 dark:bg-zinc-800">
+                <i data-lucide="calendar-days" class="h-5 w-5 text-zinc-400"></i>
+              </div>
+              <p class="mt-3 text-sm font-medium">今天还没有记录</p>
+              <p class="mt-1 max-w-[230px] text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
+                开始记录吧——从"计时"页启动一个活动，数据就会出现在这里。
+              </p>
+              <a href="timer.html" class="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-indigo-500">
+                <i data-lucide="play" class="h-3 w-3"></i> 去开始记录
+              </a>
+              <div class="mt-5 w-full rounded-xl border border-dashed border-zinc-300 px-3 py-2.5 text-center text-xs text-zinc-400 dark:border-zinc-700">
+                指标与分组列表 · 空
+              </div>
+            </div>
+          </div>
+
+          <!-- 错误态缩样 -->
+          <div class="overflow-hidden rounded-2xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+            <div class="flex items-center justify-between border-b border-zinc-100 px-4 py-2.5 dark:border-zinc-800">
+              <span class="text-xs font-medium text-zinc-500 dark:text-zinc-400">错误态 · 页面级加载失败</span>
+              <span class="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">缩样</span>
+            </div>
+            <div class="flex flex-col items-center px-6 py-8 text-center">
+              <div class="flex h-11 w-11 items-center justify-center rounded-full bg-red-50 dark:bg-red-500/10">
+                <i data-lucide="alert-triangle" class="h-5 w-5 text-red-500"></i>
+              </div>
+              <p class="mt-3 text-sm font-medium">加载失败</p>
+              <p class="mt-1 max-w-[230px] text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
+                无法读取今日数据，请稍后重试。本地数据未受影响。
+              </p>
+              <button class="mt-4 inline-flex items-center gap-1 rounded-lg border border-zinc-200 px-3 py-1.5 text-xs font-medium transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800">
+                <i data-lucide="refresh-cw" class="h-3 w-3"></i> 重试
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <!-- ================= 底部导航（< 840） ================= -->
+  <nav class="fixed inset-x-0 bottom-0 z-40 flex h-16 items-stretch border-t border-zinc-200 bg-white min-[840px]:hidden dark:border-zinc-800 dark:bg-zinc-900">
+    <a href="timer.html" class="flex flex-1 flex-col items-center justify-center gap-1 text-[11px] font-medium text-zinc-500 transition-colors hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100">
+      <i data-lucide="timer" class="h-5 w-5"></i>
+      <span>计时</span>
+    </a>
+    <a href="today.html" class="relative flex flex-1 flex-col items-center justify-center gap-1 text-[11px] font-medium text-indigo-600 dark:text-indigo-400">
+      <span class="absolute top-0 h-0.5 w-6 rounded-full bg-indigo-600"></span>
+      <i data-lucide="calendar-days" class="h-5 w-5"></i>
+      <span>今日</span>
+    </a>
+    <a href="#" class="flex flex-1 flex-col items-center justify-center gap-1 text-[11px] font-medium text-zinc-500 transition-colors hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100">
+      <i data-lucide="rows-3" class="h-5 w-5"></i>
+      <span>时间线</span>
+    </a>
+    <a href="#" class="flex flex-1 flex-col items-center justify-center gap-1 text-[11px] font-medium text-zinc-500 transition-colors hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100">
+      <i data-lucide="pie-chart" class="h-5 w-5"></i>
+      <span>统计</span>
+    </a>
+    <a href="#" class="flex flex-1 flex-col items-center justify-center gap-1 text-[11px] font-medium text-zinc-500 transition-colors hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100">
+      <i data-lucide="settings" class="h-5 w-5"></i>
+      <span>设置</span>
+    </a>
+  </nav>
+
+  <!-- 桌面深色切换（≥840，右上角） -->
+  <button onclick="toggleDark()" class="fixed right-4 top-4 z-50 hidden h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 bg-white text-zinc-500 shadow-sm transition-colors hover:text-zinc-900 min-[840px]:flex dark:border-zinc-700 dark:bg-zinc-900 dark:hover:text-zinc-100" aria-label="切换深浅色">
+    <i data-lucide="moon" class="icon-moon h-4 w-4"></i>
+    <i data-lucide="sun" class="icon-sun hidden h-4 w-4"></i>
+  </button>
+
+  <script>
+    function toggleDark() {
+      const root = document.documentElement;
+      root.classList.toggle('dark');
+      const dark = root.classList.contains('dark');
+      document.querySelectorAll('.icon-moon').forEach(function (el) { el.classList.toggle('hidden', dark); });
+      document.querySelectorAll('.icon-sun').forEach(function (el) { el.classList.toggle('hidden', !dark); });
+    }
+    function toggleUndoMenu(e) {
+      e.stopPropagation();
+      document.getElementById('undoMenu').classList.toggle('hidden');
+    }
+    function toggleGroup(btn) {
+      const card = btn.closest('.grp');
+      card.querySelector('.grp-body').classList.toggle('hidden');
+      btn.querySelector('.grp-chev').classList.toggle('-rotate-90');
+    }
+    document.addEventListener('click', function (ev) {
+      const m = document.getElementById('undoMenu');
+      const btn = document.getElementById('mobileUndoBtn');
+      if (m && !m.classList.contains('hidden') && !ev.target.closest('#undoMenu') && !ev.target.closest('#mobileUndoBtn')) {
+        m.classList.add('hidden');
+      }
+    });
+    lucide.createIcons();
+  </script>
+</body>
+</html>

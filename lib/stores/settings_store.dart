@@ -143,6 +143,18 @@ class SettingsStore extends ChangeNotifier {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Windows 关窗到托盘模式（批次 6 托盘；透传仓储，非 ProfileSettings 字段
+  // ——不参与 undo/同步，落 app_metadata 键值）。
+  // ---------------------------------------------------------------------------
+
+  /// 读取关窗模式：`ask`（默认）/ `minimize` / `exit`（白名单见仓储）。
+  Future<String> trayCloseMode() => settings.trayCloseMode();
+
+  /// 写入关窗模式（非法取值由仓储抛 ArgumentError）。
+  Future<void> setTrayCloseMode(String mode) =>
+      settings.setTrayCloseMode(mode);
+
   /// 业务字段相等判定（排除 updatedAt/userId——恢复写库推进时间戳不代表
   /// 配置内容变化）。
   static bool _sameBusinessFields(ProfileSettings a, ProfileSettings b) {
@@ -151,6 +163,12 @@ class SettingsStore extends ChangeNotifier {
         a.reminderMethod == b.reminderMethod &&
         a.reminderTimeOfDayMinutes == b.reminderTimeOfDayMinutes &&
         a.mergeNeighborThresholdMinutes == b.mergeNeighborThresholdMinutes &&
+        a.themeMode == b.themeMode &&
+        a.weekStartDay == b.weekStartDay &&
+        a.use24HourFormat == b.use24HourFormat &&
+        a.defaultRecordMinutes == b.defaultRecordMinutes &&
+        a.quickReminderEnabled == b.quickReminderEnabled &&
+        a.backgroundTrackingEnabled == b.backgroundTrackingEnabled &&
         a.timezone == b.timezone;
   }
 

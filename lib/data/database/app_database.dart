@@ -81,6 +81,9 @@ class TrackingRules extends Table {
   /// 无意义）。
   TextColumn get activityId => text().references(Activities, #id)();
   BoolColumn get syncEnabled => boolean().withDefault(const Constant(true))();
+  /// 规则启停（批次 4 schema v3）：false = 规则保留但不参与匹配（区别于
+  /// 软删——软删是删除语义，启停是临时停用）；随行 LWW 同步。
+  BoolColumn get enabled => boolean().withDefault(const Constant(true))();
   TextColumn get updatedAt => text()();
   TextColumn get deletedAt => text().nullable()();
 
@@ -137,6 +140,24 @@ class ProfileSettings extends Table {
       integer().withDefault(const Constant(540))();
   IntColumn get mergeNeighborThresholdMinutes =>
       integer().withDefault(const Constant(1))();
+  // ---- 批次 4（schema v3）通用偏好列 ----
+  /// 主题模式（ThemeModeSetting.storageValue：light/dark/system，默认浅色）。
+  TextColumn get themeMode =>
+      text().withDefault(const Constant('light'))();
+  /// 每周起始日（ISO：1=周一 … 7=周日，默认周一）。
+  IntColumn get weekStartDay => integer().withDefault(const Constant(1))();
+  /// 24 小时制（默认 true）。
+  BoolColumn get use24HourFormat =>
+      boolean().withDefault(const Constant(true))();
+  /// 默认记录时长（分钟，临时活动等快捷启动默认时长）。
+  IntColumn get defaultRecordMinutes =>
+      integer().withDefault(const Constant(25))();
+  /// 快速提醒开关（触发时刻提醒开始记录）。
+  BoolColumn get quickReminderEnabled =>
+      boolean().withDefault(const Constant(true))();
+  /// 后台自动记录总开关（默认关——用户显式开启）。
+  BoolColumn get backgroundTrackingEnabled =>
+      boolean().withDefault(const Constant(false))();
   TextColumn get timezone => text()();
   TextColumn get updatedAt => text()();
 
@@ -206,7 +227,7 @@ class AppDatabase extends _$AppDatabase {
   factory AppDatabase.open() => AppDatabase(driftDatabase(name: 'timetrack'));
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -243,6 +264,49 @@ class AppDatabase extends _$AppDatabase {
             // 迁移路径：tracking_rules 索引由 beforeOpen 的 [_ensureIndexes]
             // 无条件补齐（@TableIndex 仅 onCreate 的 createAll 建，m.createTable
             // 不建），此处不重复。
+          }
+          // 批次 4（schema v3）：ProfileSettings 通用偏好 6 列 +
+          // TrackingRules 启停列。沿用 is_auto 的手工 ALTER 经验（模块 2c'：
+          // drift addColumn 对带默认值/约束的列可能生成 SQLite 拒绝的 DDL，
+          // 手工 ALTER 省略 CHECK 不影响读写正确性）。
+          if (from < 3) {
+            await customStatement(
+              'ALTER TABLE profile_settings ADD COLUMN theme_mode '
+              "TEXT NOT NULL DEFAULT 'light'",
+            );
+            await customStatement(
+              'ALTER TABLE profile_settings ADD COLUMN week_start_day '
+              'INTEGER NOT NULL DEFAULT 1',
+            );
+            await customStatement(
+              'ALTER TABLE profile_settings ADD COLUMN use_24_hour_format '
+              'BOOLEAN NOT NULL DEFAULT 1',
+            );
+            await customStatement(
+              'ALTER TABLE profile_settings ADD COLUMN default_record_minutes '
+              'INTEGER NOT NULL DEFAULT 25',
+            );
+            await customStatement(
+              'ALTER TABLE profile_settings ADD COLUMN quick_reminder_enabled '
+              'BOOLEAN NOT NULL DEFAULT 1',
+            );
+            await customStatement(
+              'ALTER TABLE profile_settings ADD COLUMN '
+              'background_tracking_enabled BOOLEAN NOT NULL DEFAULT 0',
+            );
+            // tracking_rules.enabled：v1 升级路径（from < 2）的
+            // m.createTable 已按最新表定义建表（含 enabled），仅 v2 存量库
+            // 需要补列——检查列存在性幂等执行（防 duplicate column）。
+            final hasEnabled = await customSelect(
+              "SELECT 1 FROM pragma_table_info('tracking_rules') "
+              "WHERE name = 'enabled'",
+            ).get();
+            if (hasEnabled.isEmpty) {
+              await customStatement(
+                'ALTER TABLE tracking_rules ADD COLUMN enabled '
+                'BOOLEAN NOT NULL DEFAULT 1',
+              );
+            }
           }
         },
       );

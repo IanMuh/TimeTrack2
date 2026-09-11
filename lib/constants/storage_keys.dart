@@ -4,6 +4,22 @@
 /// 持久化统一落 `app_metadata` 表（数据随库备份）。键名语义见各常量注释。
 library;
 
+/// Windows 关窗到托盘模式（批次 6 托盘）：
+/// - `ask`（默认）：每次关窗隐藏到托盘并由壳层弹一次选择对话框；
+/// - `minimize`：关窗静默最小化到托盘；
+/// - `exit`：关窗直接退出应用。
+/// 取值白名单唯一权威见本类（[AppMetadataKeys.closeToTrayMode] 的合法值域）。
+class TrayCloseMode {
+  TrayCloseMode._();
+
+  static const ask = 'ask';
+  static const minimize = 'minimize';
+  static const exit = 'exit';
+
+  /// 全部合法取值。
+  static const all = <String>[ask, minimize, exit];
+}
+
 class AppMetadataKeys {
   AppMetadataKeys._();
 
@@ -39,6 +55,13 @@ class AppMetadataKeys {
   /// 默认（唯一权威契约见 CleanupService.retentionDays）。
   static const deletedRetentionDays = 'deleted_retention_days';
 
+  /// Windows 关窗到托盘模式（批次 6 托盘）：
+  /// - `ask`（默认）：每次关窗隐藏到托盘并由壳层弹一次选择对话框；
+  /// - `minimize`：关窗静默最小化到托盘；
+  /// - `exit`：关窗直接退出应用。
+  /// 取值白名单唯一权威见 [SettingsRepository] 的读写方法。
+  static const closeToTrayMode = 'close_to_tray_mode';
+
   /// 全部键名（与定义同处维护；测试遍历做唯一性/非空校验，**新增键常量
   /// 必须同步加入本列表**——漏加会漏掉该键的校验覆盖）。
   static const all = <String>[
@@ -50,5 +73,6 @@ class AppMetadataKeys {
     lastCheckedManifestVersion,
     lastCleanupAt,
     deletedRetentionDays,
+    closeToTrayMode,
   ];
 }

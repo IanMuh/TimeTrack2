@@ -51,6 +51,7 @@ class _TestHarness {
       detector: detector,
       pollInterval: const Duration(seconds: 5), // 显式传（防隐式默认耦合）
       now: () => _fixedNow,
+      trackingEnabled: () => gateEnabled,
     );
   }
 
@@ -66,6 +67,9 @@ class _TestHarness {
   late final TimerStore timer;
   late final _FakeDetector detector;
   late final TrackingStore tracking;
+
+  /// 总开关（批次 4）：false 时 poll 前置闸门拦截。
+  bool gateEnabled = true;
 
   DateTime _fixedNow = DateTime(2026, 8, 14, 12);
 
@@ -237,9 +241,11 @@ void main() {
       expect((await h.entries.runningEntry())!.activityId, a.id);
 
       // 5s 间隔内 tick：不轮询（切到 B 后 poll 不动作）。
+      // 用 auto 切换制造 B 会话（批次 5c 起：手动切换会进入会话保持，
+      // 自动记录不得抢占——那是独立用例，此处只验证限频）。
       final b = (await h.activities.createActivity(name: 'B', color: 0))
           .requireValue();
-      await h.timer.switchToActivity(b.id);
+      await h.timer.switchToActivity(b.id, isAuto: true);
       h._fixedNow = h._fixedNow.add(const Duration(seconds: 2));
       h.clock.notifyListeners();
       await Future<void>.delayed(Duration.zero);
@@ -271,6 +277,121 @@ void main() {
       expect(h.revision.value, before + 1); // 规则变更 bump
       await h.tracking.deleteRule(saved);
       expect(h.revision.value, before + 2);
+    });
+
+    test('总开关关闭：命中规则也不切换（批次 4 闸门）', () async {
+      final h = _TestHarness();
+      addTearDown(h.close);
+      final a =
+          (await h.activities.createActivity(name: 'A', color: 0)).requireValue();
+      await h.seedRule(process: 'chrome.exe', activityId: a.id);
+      h.gateEnabled = false; // 设置页后台记录总开关关闭
+
+      h.detector.processName = 'chrome.exe';
+      await h.tracking.poll();
+      final running = await h.entries.runningEntry();
+      expect(running, isNull, reason: '总开关关闭时不产生自动切换');
+    });
+
+    test('停用规则（enabled=false）不参与匹配（schema v3）', () async {
+      final h = _TestHarness();
+      addTearDown(h.close);
+      final a =
+          (await h.activities.createActivity(name: 'A', color: 0)).requireValue();
+      final b =
+          (await h.activities.createActivity(name: 'B', color: 1)).requireValue();
+      final disabled = await h.seedRule(process: 'chrome.exe', activityId: a.id);
+      await h.rules.saveRule(disabled.copyWith(enabled: false));
+      await h.seedRule(process: 'chrome.exe', activityId: b.id);
+
+      h.detector.processName = 'chrome.exe';
+      await h.tracking.poll();
+      final running = await h.entries.runningEntry();
+      expect(running?.activityId, b.id,
+          reason: '停用规则跳过，后续规则继续命中');
+    });
+
+    test('reloadRules/ruleList：CRUD 后列表自动刷新', () async {
+      final h = _TestHarness();
+      addTearDown(h.close);
+      final a =
+          (await h.activities.createActivity(name: 'A', color: 0)).requireValue();
+      expect(h.tracking.ruleList, isEmpty);
+      await h.tracking.saveRule(TrackingRule(
+        id: 'r-x',
+        pattern: 'code.exe',
+        matchKind: TrackingRuleMatchKind.process,
+        activityId: a.id,
+        updatedAt: DateTime(2026, 8, 14),
+      ));
+      expect(h.tracking.ruleList, hasLength(1), reason: 'saveRule 后自动 reload');
+      await h.tracking.deleteRule(h.tracking.ruleList.first);
+      expect(h.tracking.ruleList, isEmpty, reason: 'deleteRule 后自动 reload');
+    });
+  });
+
+  group('TrackingStore 手动会话保持（批次 5c 切换防冲突）', () {
+    test('auto 切换不置保持；手动切换/停止后 poll 不抢占', () async {
+      final h = _TestHarness();
+      addTearDown(h.close);
+      final a =
+          (await h.activities.createActivity(name: 'A', color: 0)).requireValue();
+      final b =
+          (await h.activities.createActivity(name: 'B', color: 1)).requireValue();
+      await h.seedRule(process: 'chrome.exe', activityId: b.id);
+
+      // 自动切换：isAuto 路径不进入保持态。
+      h.detector.processName = 'chrome.exe';
+      await h.tracking.poll();
+      expect(h.timer.manualSessionHold, isFalse);
+      expect((await h.entries.runningEntry())!.activityId, b.id);
+
+      // 用户手动切到 A：前台仍命中 B 规则也不得抢占。
+      await h.timer.switchToActivity(a.id);
+      expect(h.timer.manualSessionHold, isTrue);
+      await h.tracking.poll();
+      expect((await h.entries.runningEntry())!.activityId, a.id,
+          reason: 'auto 不覆盖手动选择');
+
+      // 手动停止（切到未分配）：同样受保护，不被自动记录重新拉起。
+      await h.timer.stopRunning();
+      expect(h.timer.manualSessionHold, isTrue);
+      await h.tracking.poll();
+      final running = await h.entries.runningEntry();
+      expect(
+        await h.activities.activityIdIsUnassigned(running!.activityId),
+        isTrue,
+        reason: '停在未分配（未记录态），自动记录不得重新拉起',
+      );
+    });
+  });
+
+  group('TrackingStore 会话级暂停（批次 6 托盘「暂停记录」）', () {
+    test('暂停后 poll 不切换；恢复后正常工作；幂等设置不重复通知', () async {
+      final h = _TestHarness();
+      addTearDown(h.close);
+      final a =
+          (await h.activities.createActivity(name: 'A', color: 0)).requireValue();
+      await h.seedRule(process: 'chrome.exe', activityId: a.id);
+      h.detector.processName = 'chrome.exe';
+
+      // 暂停：命中规则也不切换（且不进入手动保持——两闸门独立）。
+      var notifyCount = 0;
+      void listener() => notifyCount++;
+      h.tracking.addListener(listener);
+      h.tracking.setSessionPaused(true);
+      expect(h.tracking.sessionPaused, isTrue);
+      h.tracking.setSessionPaused(true); // 幂等：同值不再通知
+      expect(notifyCount, 1);
+
+      await h.tracking.poll();
+      expect(await h.entries.runningEntry(), isNull, reason: '挂起时不自动开始');
+
+      // 恢复：自动检测照常工作。
+      h.tracking.removeListener(listener);
+      h.tracking.setSessionPaused(false);
+      await h.tracking.poll();
+      expect((await h.entries.runningEntry())!.activityId, a.id);
     });
   });
 }

@@ -11,6 +11,11 @@ import 'activity_repository.dart';
 import 'repository_mappings.dart';
 import 'settings_repository.dart';
 
+/// 编辑条目的落库结果（批次 5）：[saved] 为编辑后存活段全集（新时段跨天
+/// 时按日切段，首段沿用原 id）；[deactivated] 为被编辑行自身的**停用前
+/// 状态**快照（undo 复原用）。邻日旧段属独立条目，不在编辑操作范围内。
+typedef EntryUpdateOutcome = ({List<TimeEntry> saved, List<TimeEntry> deactivated});
+
 /// 时间条目仓储（阶段 1 核心）：跨日拆分、重叠裁剪、跨日滚转、
 /// 相邻未分配合并、switch/stop/split/merge/delete/manual、查询、LWW。
 ///
@@ -475,6 +480,98 @@ class TimeEntryRepository with RepositoryMappings {
       return const AppSuccess(null);
     } catch (e) {
       return AppFailure('删除时间段失败：$e');
+    }
+  }
+
+  /// 编辑条目字段（批次 5 entry_update 指令落点）：活动/起止/备注部分更新。
+  ///
+  /// 语义：
+  /// - [activityId] 非空且不同 → 换活动并**刷新 name/color 快照**（不变式 4：
+  ///   条目携带快照，展示不依赖活动存活）；
+  /// - [startAt]/[endAt]/[note] null = 保持原值；endAt 显式传入（运行中条目
+  ///   补 end = 结束）；校验 start < end；
+  /// - updatedAt 推进到 now（LWW 传播）+ ActionLog(edit)；
+  /// - **段模型**：编辑以单个条目行为单位。新时段跨天时按本地日切段落库
+  ///   （不变式 3，首段沿用原 id、其余确定性派生 id——同父同段起点重复写
+  ///   入命中同 id 覆盖，不叠加）；因此返回**新段全集**。此前跨零点延伸
+  ///   产生的邻日段是独立条目（时间线可见、可单独编辑/删除），本方法**不
+  ///   追溯清理**（挂账：编辑不跨段联动）；undo 集合自洽——停用行仅
+  ///   [entry] 自身（停用前状态随结果返回），undo 复活它 + 软删全部新段，
+  ///   redo 反向，共享原 id 由调用方按目标态去重；
+  /// - **不做重叠裁剪**（区别于 [createManualEntry] 的 cutOverlaps）：编辑
+  ///   对话框对重叠有显式「重叠确认」流，裁剪会违背用户确认过的重叠；
+  ///   CLI/「延伸到现在」则可能压到邻居条目上留下双计时段（挂账：重叠
+  ///   提示/统计双计口径待产品定夺）。
+  Future<AppResult<EntryUpdateOutcome>> updateEntryFields({
+    required TimeEntry entry,
+    String? activityId,
+    DateTime? startAt,
+    DateTime? endAt,
+    bool clearEnd = false,
+    String? note,
+  }) async {
+    try {
+      final nextStart = startAt ?? entry.startAt;
+      final nextEnd = clearEnd ? null : (endAt ?? entry.endAt);
+      if (nextEnd != null && !nextStart.isBefore(nextEnd)) {
+        return const AppFailure('开始时刻必须早于结束时刻');
+      }
+      String nextActivityId = entry.activityId;
+      String nextName = entry.activityNameSnapshot;
+      int? nextColor = entry.activityColorSnapshot;
+      if (activityId != null && activityId != entry.activityId) {
+        final activity = await _activityRepo.activityById(activityId);
+        if (activity == null || activity.isDeleted) {
+          return const AppFailure('目标活动不存在或已删除');
+        }
+        nextActivityId = activity.id;
+        nextName = activity.name;
+        nextColor = activity.color;
+      }
+      final now = _now();
+      final updated = entry.copyWith(
+        activityId: nextActivityId,
+        activityNameSnapshot: nextName,
+        activityColorSnapshot: nextColor,
+        startAt: nextStart,
+        // clearEnd 语义：nextEnd == null 时显式清空 endAt（copyWith 默认
+        // null = 保持原值，必须配合 clearEndAt 才能落"运行中"状态）。
+        endAt: nextEnd,
+        clearEndAt: clearEnd,
+        note: note ?? entry.note,
+        updatedAt: now,
+      );
+      final outcome = await database.transaction(() async {
+        // 快照补全 + 跨天切段写入（首段沿用原 id，其余确定性派生）。
+        final normalized = await _activityRepo.entryWithActivitySnapshot(
+          updated,
+          executor: database,
+        );
+        final saved = <TimeEntry>[];
+        for (final row in _entryRowsForStorage(normalized)) {
+          await database.into(database.timeEntries).insert(
+                timeEntryToCompanion(row),
+                mode: InsertMode.insertOrReplace,
+              );
+          saved.add(row);
+        }
+        // 停用集 = 被编辑行自身（停用前状态，供 undo 复原）。首段命中原 id
+        // 由 insertOrReplace 直接覆盖；邻日旧段属独立条目，不在本操作范围。
+        return (saved: saved, deactivated: <TimeEntry>[entry]);
+      });
+      if (outcome.saved.isEmpty) {
+        return const AppFailure('编辑时间段失败：未产生任何落库行');
+      }
+      await _insertActionLog(
+        actionType: ActionType.edit,
+        activityId: nextActivityId,
+        entryId: outcome.saved.first.id,
+        occurredAt: now,
+        message: '编辑时间段',
+      );
+      return AppSuccess(outcome);
+    } catch (e) {
+      return AppFailure('编辑时间段失败：$e');
     }
   }
 

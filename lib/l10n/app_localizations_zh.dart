@@ -1,0 +1,2060 @@
+// ignore: unused_import
+import 'package:intl/intl.dart' as intl;
+import 'app_localizations.dart';
+
+// ignore_for_file: type=lint
+
+/// The translations for Chinese (`zh`).
+class AppLocalizationsZh extends AppLocalizations {
+  AppLocalizationsZh([String locale = 'zh']) : super(locale);
+
+  @override
+  String get appTitle => 'TimeTrack2';
+
+  @override
+  String get appBrand => 'TimeTrack';
+
+  @override
+  String get appSubtitle => '时间追踪';
+
+  @override
+  String get navTimer => '计时';
+
+  @override
+  String get navToday => '今日';
+
+  @override
+  String get navTimeline => '时间线';
+
+  @override
+  String get navStats => '统计';
+
+  @override
+  String get navSettings => '设置';
+
+  @override
+  String get pagePlaceholder => '骨架占位——此区域由后续模块填充';
+
+  @override
+  String get settingsGeneral => '通用';
+
+  @override
+  String get settingsData => '备份与导出';
+
+  @override
+  String get settingsReminders => '提醒';
+
+  @override
+  String get settingsTimeline => '时间线';
+
+  @override
+  String get settingsCloudSync => '云同步';
+
+  @override
+  String get settingsInterop => '设备互通';
+
+  @override
+  String get settingsUpdate => '版本更新';
+
+  @override
+  String sectionPlaceholder(Object section) {
+    return '“$section”设置分区（骨架占位）';
+  }
+
+  @override
+  String get back => '返回';
+
+  @override
+  String get loading => '加载中…';
+
+  @override
+  String get noData => '暂无数据';
+
+  @override
+  String get save => '保存';
+
+  @override
+  String get cancel => '取消';
+
+  @override
+  String get delete => '删除';
+
+  @override
+  String get ok => '确定';
+
+  @override
+  String get commandDone => '已完成';
+
+  @override
+  String get notStartedRecord => '未开始记录';
+
+  @override
+  String get notRecording => '未在记录';
+
+  @override
+  String get timerBarGoToTimer => '回到计时页';
+
+  @override
+  String get timerBarSwitchHint => '点击切换活动';
+
+  @override
+  String get timerBarSwitch => '切换活动';
+
+  @override
+  String get timerBarSwitchUnavailable => '切换活动选择器将在后续版本提供';
+
+  @override
+  String get undo => '撤销';
+
+  @override
+  String get redo => '重做';
+
+  @override
+  String get undoHint => '撤销上一步操作';
+
+  @override
+  String get redoHint => '重做上一步操作';
+
+  @override
+  String undoWithLabel(Object label) {
+    return '撤销：$label';
+  }
+
+  @override
+  String redoWithLabel(Object label) {
+    return '重做：$label';
+  }
+
+  @override
+  String get history => '历史';
+
+  @override
+  String get currentDoing => '正在做什么';
+
+  @override
+  String get recording => '记录中';
+
+  @override
+  String get notStarted => '未开始';
+
+  @override
+  String get stop => '停止';
+
+  @override
+  String get switchActivity => '切换活动';
+
+  @override
+  String get today => '今天';
+
+  @override
+  String get sessions => '会话数';
+
+  @override
+  String get quickActivity => '快捷活动';
+
+  @override
+  String get oneOff => '临时';
+
+  @override
+  String get newActivity => '新建活动';
+
+  @override
+  String get editActivity => '编辑活动';
+
+  @override
+  String get editTooltip => '编辑';
+
+  @override
+  String get stopCurrentActivity => '停止当前活动';
+
+  @override
+  String get currentSession => '当前会话';
+
+  @override
+  String get confirmSwitch => '再次点击确认切换';
+
+  @override
+  String switchToSemantics(Object name) {
+    return '切换到 $name';
+  }
+
+  @override
+  String currentActivitySemantics(Object name) {
+    return '当前活动：$name';
+  }
+
+  @override
+  String confirmSwitchSemantics(Object name) {
+    return '确认切换到 $name';
+  }
+
+  @override
+  String get selectDate => '选择日期';
+
+  @override
+  String get previousDay => '前一天';
+
+  @override
+  String get nextDay => '后一天';
+
+  @override
+  String get emptyDayEntries => '今日暂无记录';
+
+  @override
+  String get emptyRangeEntries => '该时段暂无记录';
+
+  @override
+  String get emptyDayActions => '今日暂无操作';
+
+  @override
+  String get emptyRangeActions => '该时段暂无操作';
+
+  @override
+  String get addEntry => '添加条目';
+
+  @override
+  String get entries => '条目';
+
+  @override
+  String get actions => '日志';
+
+  @override
+  String get singleDay => '当天';
+
+  @override
+  String get threeDays => '三天';
+
+  @override
+  String get thisWeek => '本周';
+
+  @override
+  String get sevenDays => '七天';
+
+  @override
+  String get viewMode => '视图模式';
+
+  @override
+  String get timeline => '时间线';
+
+  @override
+  String get zoomableTimeline => '时间线画布';
+
+  @override
+  String get entryList => '条目列表';
+
+  @override
+  String get entryListHint => '按时间排列的详细记录';
+
+  @override
+  String get totalRangeRecords => '总时长';
+
+  @override
+  String get longestStreak => '最长连续';
+
+  @override
+  String get inProgress => '进行中';
+
+  @override
+  String futureDayBanner(Object date) {
+    return '“$date”是未来日期，暂无可记录';
+  }
+
+  @override
+  String get noDataToVisualize => '暂无数据可展示';
+
+  @override
+  String get startRecordingHint => '开始记录你的时间吧';
+
+  @override
+  String get recordHint => '记录从计时页开始';
+
+  @override
+  String get switchToRecordHint => '去计时页开始记录';
+
+  @override
+  String get stats => '统计';
+
+  @override
+  String statsSubtitle(Object range) {
+    return '统计范围：$range';
+  }
+
+  @override
+  String get todayLabel => '今天';
+
+  @override
+  String get yesterday => '昨天';
+
+  @override
+  String get lastWeek => '上周';
+
+  @override
+  String get customDay => '自定义';
+
+  @override
+  String get statsDimension => '统计维度';
+
+  @override
+  String get activityDimension => '按活动';
+
+  @override
+  String get primaryCategoryDimension => '按主分类';
+
+  @override
+  String get durationBucketDimension => '按时长区间';
+
+  @override
+  String get categoryDurationDimension => '分类×时长';
+
+  @override
+  String get dailyTotal => '每日总计';
+
+  @override
+  String get dailyTotalHint => '范围内逐日累计时长';
+
+  @override
+  String distributionChartTitle(Object range) {
+    return '$range 时间分布';
+  }
+
+  @override
+  String get activityColorLegend => '颜色对应活动';
+
+  @override
+  String get statsCountTimes => ' 次';
+
+  @override
+  String get settings => '设置';
+
+  @override
+  String get settingsSubtitle => '应用偏好与数据管理';
+
+  @override
+  String get checkUpdates => '检查更新';
+
+  @override
+  String get openDownloadPage => '打开下载页';
+
+  @override
+  String get currentVersion => '当前版本';
+
+  @override
+  String get latestVersion => '最新版本';
+
+  @override
+  String get updateStatusIdle => '空闲';
+
+  @override
+  String get updateStatusChecking => '检查中…';
+
+  @override
+  String get updateStatusUpToDate => '已是最新';
+
+  @override
+  String get updateStatusAvailable => '有可用更新';
+
+  @override
+  String get updateStatusFailed => '检查失败';
+
+  @override
+  String get syncNow => '立即同步';
+
+  @override
+  String get syncing => '同步中…';
+
+  @override
+  String get syncStatusCloud => '云同步';
+
+  @override
+  String get syncStatusLocal => '本地模式';
+
+  @override
+  String get syncStatus => '同步状态';
+
+  @override
+  String get syncStatusSynced => '已同步';
+
+  @override
+  String get lastSyncNever => '从未同步';
+
+  @override
+  String lastSyncAt(Object time) {
+    return '上次同步：$time';
+  }
+
+  @override
+  String lastSyncError(Object error) {
+    return '上次同步出错：$error';
+  }
+
+  @override
+  String get signOut => '退出登录';
+
+  @override
+  String get notLoggedIn => '未登录';
+
+  @override
+  String get loggedIn => '已登录';
+
+  @override
+  String get supabaseConfigured => '云同步已配置';
+
+  @override
+  String get supabaseNotConfigured => '云同步未配置';
+
+  @override
+  String get reminderSettings => '提醒设置';
+
+  @override
+  String get reminderSettingsHint => '设置运行提醒的时机与方式';
+
+  @override
+  String get triggerTime => '触发时刻';
+
+  @override
+  String get durationLabel => '运行时长';
+
+  @override
+  String get interval => '重复间隔';
+
+  @override
+  String get method => '提醒方式';
+
+  @override
+  String get methodDialog => '对话框';
+
+  @override
+  String get methodBanner => '横幅';
+
+  @override
+  String get methodSilent => '静音';
+
+  @override
+  String minutesFormat(Object minutes) {
+    return '$minutes 分钟';
+  }
+
+  @override
+  String hoursMinutesFormat(Object hours, Object minutes) {
+    return '$hours 小时 $minutes 分钟';
+  }
+
+  @override
+  String get mergeThreshold => '合并阈值';
+
+  @override
+  String get cloudSync => '云同步';
+
+  @override
+  String get cloudSyncHint => '登录并同步你的数据';
+
+  @override
+  String get deviceInterop => '设备互通';
+
+  @override
+  String get deviceInteropHint => '局域网配对与文件导入导出';
+
+  @override
+  String get versionUpdate => '版本更新';
+
+  @override
+  String get versionUpdateHint => '检查并安装应用更新';
+
+  @override
+  String get lanHost => '局域网主机';
+
+  @override
+  String get connectLanHost => '连接主机';
+
+  @override
+  String get startHost => '启动主机';
+
+  @override
+  String get stopHost => '停止主机';
+
+  @override
+  String get windowsOnly => '仅 Windows 可用';
+
+  @override
+  String get pairAndSync => '配对并同步';
+
+  @override
+  String get hostAddress => '主机地址';
+
+  @override
+  String get pairingCodeInput => '配对码';
+
+  @override
+  String get importFile => '导入文件';
+
+  @override
+  String get exportFile => '导出文件';
+
+  @override
+  String get lanHostStartNote => '启动后在局域网内提供同步服务';
+
+  @override
+  String get lanHostWindowsNote => 'Windows 桌面端作为主机';
+
+  @override
+  String get connectLanHostHint => '输入主机地址与配对码建立连接';
+
+  @override
+  String get lanHostAndroidNote => '主机已运行，等待设备连接';
+
+  @override
+  String pairedWith(Object name) {
+    return '已配对：$name';
+  }
+
+  @override
+  String get removePairing => '解除配对';
+
+  @override
+  String get selectValidActivity => '请选择有效的活动';
+
+  @override
+  String get start => '开始';
+
+  @override
+  String get endTime => '结束';
+
+  @override
+  String get note => '备注';
+
+  @override
+  String get keepRunning => '保持运行';
+
+  @override
+  String get closeToSaveHint => '关闭开关以设置结束时间';
+
+  @override
+  String get deleteEntry => '删除条目';
+
+  @override
+  String get editEntryTitle => '编辑条目';
+
+  @override
+  String get addEntryTitle => '添加条目';
+
+  @override
+  String get createActivityTitle => '新建活动';
+
+  @override
+  String get persistent => '持续';
+
+  @override
+  String get create => '创建';
+
+  @override
+  String get split => '拆分';
+
+  @override
+  String get mergeLeft => '与左合并';
+
+  @override
+  String get mergeRight => '与右合并';
+
+  @override
+  String get extendToNow => '延伸到当前';
+
+  @override
+  String mergeConfirm(Object duration, Object name) {
+    return '与「$name」（$duration）合并？';
+  }
+
+  @override
+  String get splitEntryTitle => '拆分条目';
+
+  @override
+  String get splitPoint => '拆分时刻';
+
+  @override
+  String get splitPointError => '拆分时刻必须在条目范围内';
+
+  @override
+  String get endMustBeAfterStart => '结束时间必须晚于开始时间';
+
+  @override
+  String get runningCannotStartFuture => '运行中的条目开始时间不能在未来';
+
+  @override
+  String get overlapWarning => '与既有条目时间重叠';
+
+  @override
+  String get primaryCategory => '主分类';
+
+  @override
+  String get uncategorized => '未分类';
+
+  @override
+  String get categoryName => '分类名称';
+
+  @override
+  String get categoryColor => '分类颜色';
+
+  @override
+  String get createCategory => '创建分类';
+
+  @override
+  String get newCategory => '新建分类';
+
+  @override
+  String get deleteCategoryTitle => '删除分类';
+
+  @override
+  String confirmDeleteCategory(Object name) {
+    return '删除分类「$name」将同时删除其子分类与关联，确定？';
+  }
+
+  @override
+  String get name => '名称';
+
+  @override
+  String get color => '颜色';
+
+  @override
+  String get sortBy => '排序方式';
+
+  @override
+  String get sortAscending => '升序';
+
+  @override
+  String get sortDescending => '降序';
+
+  @override
+  String get recentlyUpdated => '最近更新';
+
+  @override
+  String get all => '全部';
+
+  @override
+  String get retry => '重试';
+
+  @override
+  String errorOccurred(Object message) {
+    return '出错了：$message';
+  }
+
+  @override
+  String get viewFullTimeline => '查看完整时间线';
+
+  @override
+  String get topActivities => '顶部活动';
+
+  @override
+  String get totalTime => '总时长';
+
+  @override
+  String get focusTime => '专注时间';
+
+  @override
+  String get breakTime => '休息时间';
+
+  @override
+  String get dailyAvg => '日均';
+
+  @override
+  String get vsPreviousDay => '较前日';
+
+  @override
+  String get vsLastWeek => '较上周';
+
+  @override
+  String get timeByDay => '每日时间';
+
+  @override
+  String get timeByActivity => '事项时间';
+
+  @override
+  String get aiSummary => 'AI 总结';
+
+  @override
+  String get aiSummaryHint => '用一句话总结你的时间记录';
+
+  @override
+  String get aiNotConfigured => '配置 AI 密钥后可用';
+
+  @override
+  String get aiGoSettings => '去设置';
+
+  @override
+  String get aiAskPlaceholder => '问问你的时间…';
+
+  @override
+  String get aiGenerate => '生成总结';
+
+  @override
+  String get aiRegenerate => '重新生成';
+
+  @override
+  String get aiSummaryThisWeek => '本周总结';
+
+  @override
+  String get aiSummaryToday => '今天做了什么';
+
+  @override
+  String get aiSummaryCompare => '较上周对比';
+
+  @override
+  String get aiExecuting => '执行中…';
+
+  @override
+  String get aiResultError => '总结生成失败';
+
+  @override
+  String get backgroundTracking => '后台记录';
+
+  @override
+  String get backgroundTrackingHint => '按规则自动记录前台应用';
+
+  @override
+  String get trackingRule => '规则';
+
+  @override
+  String get newRule => '新建规则';
+
+  @override
+  String get editRule => '编辑规则';
+
+  @override
+  String get rulePattern => '匹配模式';
+
+  @override
+  String get ruleKind => '匹配类型';
+
+  @override
+  String get ruleKindProcess => '进程名';
+
+  @override
+  String get ruleKindTitle => '窗口标题';
+
+  @override
+  String get ruleActivity => '目标活动';
+
+  @override
+  String get ruleSyncEnabled => '进云同步';
+
+  @override
+  String get ruleSyncHint => '该规则产生的记录是否参与云同步';
+
+  @override
+  String get rulePriorityHint => '匹配优先级：精确 > 通配 > 标题';
+
+  @override
+  String get deleteRule => '删除规则';
+
+  @override
+  String confirmDeleteRule(Object pattern) {
+    return '删除规则「$pattern」？';
+  }
+
+  @override
+  String get usageAccess => '使用情况访问';
+
+  @override
+  String get usageAccessGranted => '已授权';
+
+  @override
+  String get usageAccessNotGranted => '未授权';
+
+  @override
+  String get usageAccessGuide => '需要“使用情况访问”权限才能自动记录前台应用';
+
+  @override
+  String get usageAccessButton => '去系统设置开启';
+
+  @override
+  String get usageAccessLater => '暂不开启';
+
+  @override
+  String get bgCaptureCurrentApp => '捕获当前应用';
+
+  @override
+  String get bgCaptureProcess => '捕获进程名';
+
+  @override
+  String get bgCaptureTitle => '捕获窗口标题';
+
+  @override
+  String get bgManualHoldBanner => '自动切换已因手动选择暂时挂起';
+
+  @override
+  String get bgManualHoldResume => '恢复自动切换';
+
+  @override
+  String get settingsBgCaptureFailed => '未能获取当前前台（请稍后重试）';
+
+  @override
+  String bgNotifyForeground(String package) {
+    return '前台 $package（未匹配规则）';
+  }
+
+  @override
+  String get bgGuideWhy => '为何需要此权限';
+
+  @override
+  String get bgGuideWhyBody => '自动记录通过系统「使用情况访问」识别当前前台应用，并按你配置的规则自动切换计时活动。';
+
+  @override
+  String get bgGuidePrivacy => '隐私承诺：仅读取前台应用包名用于本地规则匹配；不读取屏幕内容，不上传任何使用数据。';
+
+  @override
+  String get bgGuideNote => '暂不开启可稍后在 设置 → 后台记录 中再次授权。';
+
+  @override
+  String get trackingWindowsNote => 'Windows 端通过检测前台窗口自动记录';
+
+  @override
+  String get trackingNotEnabled => '后台记录未启用';
+
+  @override
+  String get closeAppTitle => '最小化到托盘？';
+
+  @override
+  String get closeAppContent => '最小化到托盘可继续后台记录';
+
+  @override
+  String get minimizeToTray => '最小化到托盘';
+
+  @override
+  String get exitApp => '退出应用';
+
+  @override
+  String get trayCloseRemember => '记住我的选择，不再询问';
+
+  @override
+  String get trayTipRecordingPrefix => '正在记录：';
+
+  @override
+  String get trayTipPaused => '自动记录已暂停';
+
+  @override
+  String get trayTipIdle => '未在记录';
+
+  @override
+  String get trayMenuShow => '显示主窗口';
+
+  @override
+  String get trayMenuPause => '暂停记录';
+
+  @override
+  String get trayMenuResume => '恢复记录';
+
+  @override
+  String get trayMenuExit => '退出';
+
+  @override
+  String get bgNotifyTitleRecording => '正在记录';
+
+  @override
+  String get bgNotifyTitlePaused => '自动记录已暂停';
+
+  @override
+  String get bgNotifyPause => '暂停记录';
+
+  @override
+  String get bgNotifyResume => '恢复记录';
+
+  @override
+  String get bgNotifyChannelName => '后台记录';
+
+  @override
+  String get stillDoingThis => '仍在进行这个活动？';
+
+  @override
+  String activityRunningMinutes(Object minutes) {
+    return '已运行 $minutes 分钟';
+  }
+
+  @override
+  String get remindLater => '稍后提醒';
+
+  @override
+  String get continueLabel => '继续';
+
+  @override
+  String get confirmPreviousPeriod => '确认上一时段记录？';
+
+  @override
+  String suspiciousEntryContent(Object time) {
+    return '检测到从 $time 开始的活动仍处于运行状态';
+  }
+
+  @override
+  String get keepCurrent => '保留当前';
+
+  @override
+  String get endToNow => '结束到现在';
+
+  @override
+  String updateAvailablePrompt(Object version) {
+    return '发现新版本 $version';
+  }
+
+  @override
+  String get viewInSettings => '去查看';
+
+  @override
+  String get themeAppearance => '外观';
+
+  @override
+  String get themeModeSystem => '跟随系统';
+
+  @override
+  String get themeModeLight => '浅色';
+
+  @override
+  String get themeModeDark => '深色';
+
+  @override
+  String get appearancePending => '主题切换随系统自动生效';
+
+  @override
+  String get aiSettings => 'AI 配置';
+
+  @override
+  String get aiSettingsHint => '配置 AI 密钥与模型（二期启用总结能力）';
+
+  @override
+  String get aiKeyLabel => 'AI 密钥';
+
+  @override
+  String get aiModelLabel => '模型';
+
+  @override
+  String get aiEndpointLabel => '端点';
+
+  @override
+  String get aiTestConnection => '测试连接';
+
+  @override
+  String get aiClearKey => '清除密钥';
+
+  @override
+  String get exportData => '导出数据';
+
+  @override
+  String get importData => '导入数据';
+
+  @override
+  String get clearAllData => '清除全部数据';
+
+  @override
+  String get clearAllDataHint => '清除本地记录前，请先导出备份';
+
+  @override
+  String get firstDayOfWeek => '每周起始日';
+
+  @override
+  String get timeFormat => '时间格式';
+
+  @override
+  String get defaultSessionLength => '默认记录时长';
+
+  @override
+  String get quickReminder => '快速提醒';
+
+  @override
+  String get on => '开';
+
+  @override
+  String get off => '关';
+
+  @override
+  String get monday => '周一';
+
+  @override
+  String get twelveHour => '12 小时';
+
+  @override
+  String get settingsCategories => '分类管理';
+
+  @override
+  String get editCategory => '编辑分类';
+
+  @override
+  String get deleteCategory => '删除分类';
+
+  @override
+  String get parentCategory => '父级分类';
+
+  @override
+  String get topLevelCategory => '顶级分类';
+
+  @override
+  String get close => '关闭';
+
+  @override
+  String get errorTitle => '出错了';
+
+  @override
+  String get unassignedActivity => '未分配';
+
+  @override
+  String get timerAll => '全部';
+
+  @override
+  String get timerTodayTotal => '今日累计';
+
+  @override
+  String get timerTodaySessions => '会话数';
+
+  @override
+  String get timerRunning => '运行中';
+
+  @override
+  String get timerTapToConfirm => '再击确认切换';
+
+  @override
+  String get timerTemporaryActivity => '临时活动';
+
+  @override
+  String get timerNewActivity => '新增活动';
+
+  @override
+  String get timerInteractionHint => '单击选中 · 再击确认 · 双击直接切换 · 长按编辑';
+
+  @override
+  String get timerNoActivities => '暂无活动，先创建一个吧';
+
+  @override
+  String get timerCategoryEmpty => '此分类暂无活动';
+
+  @override
+  String get todayTotalDuration => '总时长';
+
+  @override
+  String get todayFocusDuration => '专注时长';
+
+  @override
+  String get todayRestDuration => '休息时长';
+
+  @override
+  String get todayVsPrevious => '较前日';
+
+  @override
+  String get todayPreviewTitle => '时间线预览';
+
+  @override
+  String todayPreviewCount(int count) {
+    return '$count 条';
+  }
+
+  @override
+  String get todayViewFullTimeline => '查看完整时间线';
+
+  @override
+  String get todayBackToToday => '回到今天';
+
+  @override
+  String get todayStartRecording => '开始记录吧';
+
+  @override
+  String get todayEmptyDay => '该日暂无记录';
+
+  @override
+  String get todayCreateCategory => '新建分类';
+
+  @override
+  String get edit => '编辑';
+
+  @override
+  String get ongoing => '持续';
+
+  @override
+  String get secondaryCategories => '副分类';
+
+  @override
+  String get rootCategory => '根分类';
+
+  @override
+  String get searchActivities => '搜索活动与分类…';
+
+  @override
+  String get activityNameRequired => '名称不能为空';
+
+  @override
+  String get categoryEmptyActivities => '此分类暂无活动';
+
+  @override
+  String get categoryCreated => '分类已创建';
+
+  @override
+  String get activityCreated => '活动已创建';
+
+  @override
+  String get activityEdited => '活动已更新';
+
+  @override
+  String get categoryDeleted => '分类已删除，可撤销';
+
+  @override
+  String get deleteFailed => '操作失败';
+
+  @override
+  String get createFailed => '创建失败';
+
+  @override
+  String get currentActivity => '当前';
+
+  @override
+  String get active => '已选中';
+
+  @override
+  String get categoryDeleteHint => '将删除此分类、N 个子分类与 N 个活动的关联（可撤销）';
+
+  @override
+  String get categoryUpdated => '分类已更新';
+
+  @override
+  String get timerStartRecording => '开始记录';
+
+  @override
+  String get timerLoadFailed => '数据加载失败，请重试';
+
+  @override
+  String get todayPrevDay => '前一天';
+
+  @override
+  String get todayNextDay => '后一天';
+
+  @override
+  String get todayPickDate => '选择日期';
+
+  @override
+  String get todayClearFilters => '清除筛选';
+
+  @override
+  String get timerQuickSection => '快捷活动';
+
+  @override
+  String get timerAllActivities => '全部活动';
+
+  @override
+  String get timerTodayShort => '今日';
+
+  @override
+  String timerGroupCount(Object n) {
+    return '共 $n 个活动';
+  }
+
+  @override
+  String get timerSwitchHint =>
+      '切换 = 结束当前会话并立即开始新活动（原子操作，不留空档）；两种操作均可通过全局撤销恢复。';
+
+  @override
+  String get entryEditorEdit => '编辑条目';
+
+  @override
+  String get entryEditorNew => '添加条目';
+
+  @override
+  String get entryChangeActivity => '更换';
+
+  @override
+  String get entryStartAt => '开始';
+
+  @override
+  String get entryEndAt => '结束';
+
+  @override
+  String get entryKeepRunning => '保持运行';
+
+  @override
+  String get entryNoteHint => '备注…';
+
+  @override
+  String get entryErrEndBeforeStart => '结束时间必须晚于开始时间';
+
+  @override
+  String get entryErrRunningInFuture => '运行中的条目不能落在将来';
+
+  @override
+  String get entryWarnOverlap => '与既有条目时间重叠，仍要保存吗？';
+
+  @override
+  String get entryOverlapContinue => '仍要保存';
+
+  @override
+  String get entryHintSplit => '跨越 0 点，保存后将自动拆分为两条';
+
+  @override
+  String get entryEditOps => '相邻条目操作';
+
+  @override
+  String get entryMergePrev => '与前一条合并';
+
+  @override
+  String get entryMergeNext => '与后一条合并';
+
+  @override
+  String get entrySplit => '按时刻拆分';
+
+  @override
+  String get entryExtendNow => '延伸到现在';
+
+  @override
+  String get entryDeleteTitle => '删除这条记录？';
+
+  @override
+  String get entryDeleteHint => '删除后可通过全局撤销恢复。';
+
+  @override
+  String get tlAdd => '添加条目';
+
+  @override
+  String get tlSpanToday => '今天';
+
+  @override
+  String get tlSpanThree => '三天';
+
+  @override
+  String get tlSpanWeek => '本周';
+
+  @override
+  String get tlViewEntries => '条目';
+
+  @override
+  String get tlViewLogs => '日志';
+
+  @override
+  String get tlLongest => '最长连续';
+
+  @override
+  String get tlAuto => '自动';
+
+  @override
+  String get tlMerged => '已合并';
+
+  @override
+  String get tlRunningTag => '进行中';
+
+  @override
+  String get tlContinueNext => '延续至次日';
+
+  @override
+  String get tlFutureBanner => '未来日期暂无记录——这是正常状态，开始记录后这里会显示条目。';
+
+  @override
+  String get tlLegendAuto => '自动';
+
+  @override
+  String get tlLegendUnassigned => '未分配';
+
+  @override
+  String get tlLegendContinue => '延续次日';
+
+  @override
+  String get tlZoom => '缩放';
+
+  @override
+  String get tlSegments => '分段/日';
+
+  @override
+  String get tlNow => '现在';
+
+  @override
+  String get tlAxisTab => '时间轴';
+
+  @override
+  String get tlStripTab => '比例条';
+
+  @override
+  String get tlGroupEntries => '条';
+
+  @override
+  String get tlLogsEmpty => '暂无操作日志';
+
+  @override
+  String tlEntriesCount(Object n) {
+    return '$n 条记录';
+  }
+
+  @override
+  String get tlSplitPickTime => '选择拆分时刻';
+
+  @override
+  String get tlNoActivity => '未选择活动';
+
+  @override
+  String get logSwitch => '切换';
+
+  @override
+  String get logStop => '停止';
+
+  @override
+  String get logEdit => '编辑';
+
+  @override
+  String get logDelete => '删除';
+
+  @override
+  String get logUndo => '撤销';
+
+  @override
+  String get logRedo => '重做';
+
+  @override
+  String get logMerge => '合并';
+
+  @override
+  String get logManual => '手动';
+
+  @override
+  String get logSplit => '拆分';
+
+  @override
+  String get logActivityDelete => '删除活动';
+
+  @override
+  String get logCategoryCreate => '新建分类';
+
+  @override
+  String get logCategoryUpdate => '更新分类';
+
+  @override
+  String get logCategoryDelete => '删除分类';
+
+  @override
+  String get logRuleUpdate => '规则变更';
+
+  @override
+  String get logSync => '同步';
+
+  @override
+  String get stRangeToday => '今天';
+
+  @override
+  String get stRangeYesterday => '昨天';
+
+  @override
+  String get stRangeThisWeek => '本周';
+
+  @override
+  String get stRangeLastWeek => '上周';
+
+  @override
+  String get stRangeCustom => '自定义';
+
+  @override
+  String get stDimActivity => '活动';
+
+  @override
+  String get stDimTree => '主分类 · 树聚合';
+
+  @override
+  String get stDimBucket => '时长区间';
+
+  @override
+  String get stDimCross => '分类 × 时长';
+
+  @override
+  String get stFilterTitle => '分类筛选';
+
+  @override
+  String get stFilterAll => '全选';
+
+  @override
+  String get stFilterNone => '清空';
+
+  @override
+  String get stDailyChart => '每日分布';
+
+  @override
+  String get stShareChart => '占比分布';
+
+  @override
+  String get stDailyDetail => '每日明细';
+
+  @override
+  String get stLegendOther => '其他';
+
+  @override
+  String get stExcludeAuto => '排除自动条目';
+
+  @override
+  String get stExcludeAutoHint => '后台自动记录的条目不参与统计（明细、图表与聚合行同口径生效）';
+
+  @override
+  String get stAiButton => 'AI 总结';
+
+  @override
+  String get stAiPhase2 => '二期';
+
+  @override
+  String get stAiGuideTitle => 'AI 总结尚未配置';
+
+  @override
+  String get stAiGuideMessage => '需要先在「设置 → AI 配置」中开启并测试模型连接。你的数据仍优先保存在本地。';
+
+  @override
+  String get stAiGoSettings => '去设置';
+
+  @override
+  String get stAiNotNow => '暂不';
+
+  @override
+  String get stEmpty => '开始记录吧';
+
+  @override
+  String get stEmptyHint => '记录几天后，这里会呈现你的时间去向';
+
+  @override
+  String get stBucketShort => '<30 分';
+
+  @override
+  String get stBucketMedium => '30 分–1 时';
+
+  @override
+  String get stBucketLong => '1–3 时';
+
+  @override
+  String get stBucketXl => '3 时以上';
+
+  @override
+  String stCountShort(Object n) {
+    return '$n 次';
+  }
+
+  @override
+  String get stPickStart => '选择开始日期';
+
+  @override
+  String get stPickEnd => '选择结束日期';
+
+  @override
+  String get settingsSecGeneral => '通用';
+
+  @override
+  String get settingsSecGeneralSub => '外观、时间显示与全局默认值';
+
+  @override
+  String get settingsSecBackup => '备份与导出';
+
+  @override
+  String get settingsSecBackupSub => '数据迁移与新设备恢复的唯一通道';
+
+  @override
+  String get settingsSecReminder => '提醒';
+
+  @override
+  String get settingsSecReminderSub => '何时提醒、多久一次、用什么方式';
+
+  @override
+  String get settingsSecTimeline => '时间线';
+
+  @override
+  String get settingsSecTimelineSub => '相邻条目自动合并的判定阈值';
+
+  @override
+  String get settingsSecSync => '云同步';
+
+  @override
+  String get settingsSecSyncSub => '多设备数据双向同步，本地优先、异步进行';
+
+  @override
+  String get settingsSecAi => 'AI 配置';
+
+  @override
+  String get settingsSecAiSub => '总结与自然语言记录（一期仅预留入口位）';
+
+  @override
+  String get settingsAiBadge => '二期';
+
+  @override
+  String get settingsSecBackground => '后台记录';
+
+  @override
+  String get settingsSecBackgroundSub => '按规则自动计时；自动条目带「自动」标识，可识别、可排除';
+
+  @override
+  String get settingsSecDevice => '设备互通';
+
+  @override
+  String get settingsSecDeviceSub => '同一局域网内的设备间同步与文件互通';
+
+  @override
+  String get settingsSecUpdate => '版本更新';
+
+  @override
+  String get settingsSecUpdateSub => '下载校验一致才安装 · 失败逐层降级 · 强制更新不可跳过';
+
+  @override
+  String get settingsSecAbout => '关于';
+
+  @override
+  String get settingsSecAboutSub => '版本、开源信息与许可';
+
+  @override
+  String get settingsAppearance => '外观';
+
+  @override
+  String get settingsAppearanceHint => '默认浅色，可切深色或跟随系统';
+
+  @override
+  String get settingsThemeLight => '浅色';
+
+  @override
+  String get settingsThemeDark => '深色';
+
+  @override
+  String get settingsThemeSystem => '跟随系统';
+
+  @override
+  String get settingsWeekStart => '每周起始日';
+
+  @override
+  String get settingsWeekStartHint => '统计页「本周」从哪天开始';
+
+  @override
+  String get settingsWeekMonday => '周一';
+
+  @override
+  String get settingsWeekSunday => '周日';
+
+  @override
+  String get settingsWeekSaturday => '周六';
+
+  @override
+  String get settingsTimeFormat => '时间格式';
+
+  @override
+  String get settingsTimeFormatHint => '时间线条目与计时的显示格式';
+
+  @override
+  String get settingsHour12 => '12 小时';
+
+  @override
+  String get settingsHour24 => '24 小时';
+
+  @override
+  String get settingsDefaultDuration => '默认记录时长';
+
+  @override
+  String get settingsDefaultDurationHint => '「临时活动」等快捷启动的默认时长';
+
+  @override
+  String get settingsQuickReminder => '快速提醒';
+
+  @override
+  String get settingsQuickReminderHint => '到触发时刻提醒开始记录（见「提醒」分区）';
+
+  @override
+  String settingsMinutesShort(int minutes) {
+    return '$minutes 分钟';
+  }
+
+  @override
+  String get settingsTriggerTime => '触发时刻';
+
+  @override
+  String get settingsTriggerTimeHint => '每日到设定时间后提醒开始记录';
+
+  @override
+  String get settingsDurationThreshold => '持续时长阈值';
+
+  @override
+  String get settingsDurationThresholdHint => '会话运行达到该时长后触发提醒';
+
+  @override
+  String get settingsRepeatInterval => '重复间隔';
+
+  @override
+  String get settingsRepeatIntervalHint => '提醒后每隔该时长再次提醒，直到手动结束会话';
+
+  @override
+  String get settingsReminderMethod => '提醒方式';
+
+  @override
+  String get settingsMethodDialog => '对话框';
+
+  @override
+  String get settingsMethodDialogDesc => '需决策';
+
+  @override
+  String get settingsMethodBanner => '横幅';
+
+  @override
+  String get settingsMethodBannerDesc => '轻打扰';
+
+  @override
+  String get settingsMethodSilent => '静音';
+
+  @override
+  String get settingsMethodSilentDesc => '不打扰';
+
+  @override
+  String get settingsMergeThreshold => '相邻条目合并阈值';
+
+  @override
+  String get settingsMergeThresholdHint => '间隔小于该阈值时自动合并';
+
+  @override
+  String get settingsUnassignedNote =>
+      '系统有且仅有一个「未分配」活动。时间线上与它相邻的未分配条目，在间隔小于该阈值时会自动合并为一条连续记录，避免碎片化。';
+
+  @override
+  String get settingsExport => '导出备份';
+
+  @override
+  String get settingsExportHint => '导出为 .timetrack.json 单个文件，包含全部时间条目、活动与设置';
+
+  @override
+  String get settingsExportBtn => '导出';
+
+  @override
+  String get settingsImport => '导入数据';
+
+  @override
+  String get settingsImportHint => '从 .timetrack.json 恢复，导入的数据将与现有数据合并';
+
+  @override
+  String get settingsImportBtn => '导入';
+
+  @override
+  String get settingsDangerTitle => '清除全部数据';
+
+  @override
+  String get settingsDangerMessage => '永久删除本机全部时间条目、活动与设置，且不可撤销。执行前必须先导出备份。';
+
+  @override
+  String get settingsDangerBtn => '清除全部数据';
+
+  @override
+  String get settingsWipeDialogTitle => '清除全部数据';
+
+  @override
+  String get settingsWipeDialogBody =>
+      '此操作将永久删除全部时间条目、活动与设置，无法撤销。清除前请先导出备份，以免数据丢失。';
+
+  @override
+  String get settingsWipeCancel => '取消';
+
+  @override
+  String get settingsWipeExportFirst => '先导出备份';
+
+  @override
+  String get settingsWipeConfirm => '仍然清除';
+
+  @override
+  String get settingsWipeDone => '已清除全部数据';
+
+  @override
+  String get settingsWipeFailed => '清除失败';
+
+  @override
+  String settingsExportDone(String path) {
+    return '已导出到 $path';
+  }
+
+  @override
+  String settingsImportDone(int count) {
+    return '已导入 $count 条记录';
+  }
+
+  @override
+  String settingsOpFailed(String message) {
+    return '操作失败：$message';
+  }
+
+  @override
+  String get settingsSyncConfigured => '已配置 Supabase';
+
+  @override
+  String get settingsSyncNotConfigured => '未配置云服务';
+
+  @override
+  String get settingsSyncNotConfiguredHint => '编译期未注入 SUPABASE_URL，应用以离线模式运行';
+
+  @override
+  String get settingsSyncOnline => '在线';
+
+  @override
+  String get settingsSyncOffline => '离线';
+
+  @override
+  String settingsSyncLoggedInAs(String email) {
+    return '已登录 $email';
+  }
+
+  @override
+  String get settingsSyncNotLoggedIn => '未登录';
+
+  @override
+  String get settingsSyncLastAt => '上次同步';
+
+  @override
+  String get settingsSyncJustNow => '刚刚';
+
+  @override
+  String get settingsSyncNever => '从未';
+
+  @override
+  String settingsSyncPulled(int count) {
+    return '拉取 $count 条';
+  }
+
+  @override
+  String settingsSyncPushed(int count) {
+    return '推送 $count 条';
+  }
+
+  @override
+  String get settingsSyncNow => '立即同步';
+
+  @override
+  String get settingsSyncSignOut => '登出';
+
+  @override
+  String get settingsLoginTitle => '登录';
+
+  @override
+  String get settingsLoginSubtitle => '输入邮箱，通过验证码登录以同步数据到云端';
+
+  @override
+  String get settingsLoginEmail => '邮箱';
+
+  @override
+  String get settingsLoginSendCode => '发送验证码';
+
+  @override
+  String get settingsLoginSending => '发送中…';
+
+  @override
+  String get settingsLoginCodeSent => '验证码已发送，请查收邮箱';
+
+  @override
+  String get settingsLoginCode => '6 位验证码';
+
+  @override
+  String get settingsLoginVerify => '验证并登录';
+
+  @override
+  String get settingsLoginVerifying => '登录中…';
+
+  @override
+  String settingsLoginFailed(String message) {
+    return '登录失败：$message';
+  }
+
+  @override
+  String get settingsLoginCancel => '取消';
+
+  @override
+  String get settingsSignedOut => '已登出';
+
+  @override
+  String settingsSyncFailed(String message) {
+    return '同步失败：$message';
+  }
+
+  @override
+  String get settingsAiPhase2Note =>
+      'AI 配置将在二期开放：API 密钥（安全存储）、OpenAI 兼容端点/模型、测试连接与数据出境披露。一期统计页已预留 AI 入口引导。';
+
+  @override
+  String get settingsBgWindowsTitle => 'Windows 版 · 后台驻留';
+
+  @override
+  String get settingsBgWindowsBody => '关闭主窗口时默认最小化到系统托盘；托盘右键菜单可显示主窗口、暂停记录或退出。';
+
+  @override
+  String settingsBgDetectorState(String state) {
+    return '检测状态：$state';
+  }
+
+  @override
+  String get settingsBgDetectorRunning => '运行中';
+
+  @override
+  String get settingsBgDetectorPending => '待平台层接入（批次 6）';
+
+  @override
+  String settingsBgLastMatch(String note) {
+    return '最近命中：$note';
+  }
+
+  @override
+  String get settingsBgMasterSwitch => '后台自动记录';
+
+  @override
+  String get settingsBgMasterHint => '按规则自动计时；未匹配任何规则时不产生条目';
+
+  @override
+  String get settingsBgRules => '规则';
+
+  @override
+  String settingsBgRulesCount(int count) {
+    return '匹配模式 → 目标活动 · 共 $count 条规则';
+  }
+
+  @override
+  String get settingsBgNewRule => '新建规则';
+
+  @override
+  String get settingsBgEmptyRules => '暂无规则。新建规则后，匹配到对应进程或窗口标题时会自动开始计时。';
+
+  @override
+  String get settingsBgKindProcess => '进程名';
+
+  @override
+  String get settingsBgKindTitle => '窗口标题';
+
+  @override
+  String get settingsBgSyncToggle => '云同步';
+
+  @override
+  String get settingsBgEnabledToggle => '启用';
+
+  @override
+  String get settingsBgEdit => '编辑规则';
+
+  @override
+  String get settingsBgDelete => '删除规则';
+
+  @override
+  String get settingsBgRuleFormTitleNew => '新建规则';
+
+  @override
+  String get settingsBgRuleFormTitleEdit => '编辑规则';
+
+  @override
+  String get settingsBgPattern => '匹配模式';
+
+  @override
+  String get settingsBgPatternHint => '进程名（如 code.exe）或标题模式（如 *微信*）';
+
+  @override
+  String get settingsBgMatchKind => '匹配类型';
+
+  @override
+  String get settingsBgTargetActivity => '目标活动';
+
+  @override
+  String get settingsBgPickActivity => '打开活动选择器';
+
+  @override
+  String get settingsBgSyncThisRule => '云同步此规则';
+
+  @override
+  String get settingsBgPriorityNote => '匹配优先级：精确 > 通配 > 标题。请避免过宽的匹配模式以减少误匹配。';
+
+  @override
+  String get settingsBgSave => '保存';
+
+  @override
+  String get settingsBgCancel => '取消';
+
+  @override
+  String get settingsBgRuleSaved => '规则已保存';
+
+  @override
+  String get settingsBgRuleDeleted => '规则已删除';
+
+  @override
+  String get settingsBgFormInvalid => '请填写匹配模式并选择目标活动';
+
+  @override
+  String get settingsLanHost => 'LAN 主机';
+
+  @override
+  String get settingsLanHostHint => '允许局域网内其他设备经配对码连接并同步';
+
+  @override
+  String get settingsLanStart => '启动主机';
+
+  @override
+  String get settingsLanStop => '停止';
+
+  @override
+  String get settingsLanRunning => '运行中';
+
+  @override
+  String get settingsLanStopped => '已停止';
+
+  @override
+  String get settingsLanPort => '端口';
+
+  @override
+  String get settingsLanPairingCode => '配对码';
+
+  @override
+  String get settingsLanCodeOnce => '配对码单次有效，过期或使用后需重新生成';
+
+  @override
+  String get settingsLanClient => 'LAN 客户端';
+
+  @override
+  String get settingsLanClientHint => '连接其他设备开启的主机';
+
+  @override
+  String get settingsLanHostInput => '主机地址（如 192.168.1.5 或 192.168.1.5:8787）';
+
+  @override
+  String get settingsLanCodeInput => '6 位配对码';
+
+  @override
+  String get settingsLanPair => '配对';
+
+  @override
+  String settingsLanPairedAs(String name) {
+    return '已配对：$name';
+  }
+
+  @override
+  String get settingsLanSyncNow => '立即同步';
+
+  @override
+  String get settingsLanManualOnly => '主机仅手动启动，无任何自动开启路径。';
+
+  @override
+  String get settingsLanFileInterop => '文件互通';
+
+  @override
+  String get settingsLanFileInteropHint => '通过 .timetrack.json 在设备间手动转移数据';
+
+  @override
+  String get settingsUpdateCurrent => '当前版本';
+
+  @override
+  String get settingsUpdateLatest => '最新版本';
+
+  @override
+  String get settingsUpdateState => '状态';
+
+  @override
+  String get settingsUpdateCheck => '检查更新';
+
+  @override
+  String get settingsUpdateChecking => '正在检查新版本…';
+
+  @override
+  String get settingsUpdateUpToDate => '已是最新版本';
+
+  @override
+  String get settingsUpdateAvailable => '发现新版本';
+
+  @override
+  String get settingsUpdateDownload => '下载更新';
+
+  @override
+  String get settingsUpdateDownloading => '下载中…';
+
+  @override
+  String get settingsUpdateVerifying => '正在校验 SHA-256…';
+
+  @override
+  String get settingsUpdateInstalling => '正在安装更新…';
+
+  @override
+  String get settingsUpdateRestartRequired => '重启后生效';
+
+  @override
+  String get settingsUpdateRestartBody => '安装完成，下次启动应用时生效';
+
+  @override
+  String get settingsUpdateRestartNow => '立即重启';
+
+  @override
+  String get settingsUpdateFailed => '更新失败';
+
+  @override
+  String get settingsUpdateIgnoreVersion => '忽略此版本';
+
+  @override
+  String get settingsUpdateLater => '稍后提醒';
+
+  @override
+  String get settingsUpdateInstallNote =>
+      '安装差异：Windows 下载校验通过后提示「重启后生效」，更新在下次启动应用时应用；Android 拉起系统安装器，未授权「安装未知应用」时引导前往系统设置开启。';
+
+  @override
+  String get settingsUpdateVerifyNote => '下载完成后自动校验 SHA-256，校验一致才安装';
+
+  @override
+  String get settingsUpdateNoArtifact => '当前平台无可用更新包';
+
+  @override
+  String get settingsUpdateIgnoredDone => '已忽略此版本';
+
+  @override
+  String get settingsUpdateIdle => '已就绪';
+
+  @override
+  String get settingsAboutTagline => '离线优先 · 个人时间追踪';
+
+  @override
+  String get settingsAboutVersion => '当前版本';
+
+  @override
+  String get settingsAboutOpenSource => '开源信息';
+
+  @override
+  String get settingsAboutOpenSourceHint => '本项目基于 MIT License 开源，欢迎参与贡献';
+
+  @override
+  String get settingsAboutLicense => '许可';
+
+  @override
+  String get settingsAboutLicenseHint => 'MIT License · 含第三方依赖许可';
+
+  @override
+  String get settingsAboutCheckUpdate => '检查更新';
+
+  @override
+  String get settingsInstantHint => '所有设置即时生效并自动保存，更改后相关页面即时一致。';
+
+  @override
+  String get remOngoingSubtitle => '运行提醒 · 提醒方式：对话框';
+
+  @override
+  String remOngoingBody(String activity, String elapsed) {
+    return '「$activity」已记录 $elapsed，是否仍在进行？';
+  }
+
+  @override
+  String get remQuickTitle => '到开始记录的时间了';
+
+  @override
+  String get remQuickBody => '触发时刻提醒：现在在做什么？记一笔吧。';
+
+  @override
+  String get remDismiss => '知道了';
+
+  @override
+  String bannerOngoingTitle(String duration) {
+    return '已连续记录 $duration';
+  }
+
+  @override
+  String bannerOngoingSub(String activity) {
+    return '「$activity」 · 提醒方式：横幅';
+  }
+
+  @override
+  String get suspiciousTitle => '发现遗留运行条目';
+
+  @override
+  String get suspiciousSubtitle => '上次退出时仍在记录';
+
+  @override
+  String get updateAvailableSubtle => '静默检查，不打断当前操作';
+
+  @override
+  String get updateIgnoreAction => '忽略';
+
+  @override
+  String get forcedUpdateTitle => '需要立即更新';
+
+  @override
+  String get forcedUpdateSubtitle => '此更新不可跳过';
+
+  @override
+  String forcedUpdateBody(String current, String version) {
+    return '当前版本 v$current 已停止支持。必须更新到 v$version 后才能继续使用，下载将自动开始。';
+  }
+
+  @override
+  String get forcedUpdateAction => '立即更新';
+}

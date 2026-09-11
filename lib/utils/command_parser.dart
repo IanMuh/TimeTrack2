@@ -157,10 +157,12 @@ class CommandParser {
       }
     }
 
-    // 时间选项归一化（`下午3点` → `15:00`）。
+    // 时间选项归一化（`下午3点` → `15:00`）。特值 `now` 原样透传——
+    // 语义为"分发器注入时钟的当前时刻"（绝对时间），非当日 HH:MM。
     for (final timeOption in definition.timeOptions) {
       final value = options[timeOption];
       if (value == null) continue;
+      if (value == 'now') continue;
       final minutes = parseTimeOfDay(value);
       if (minutes == null) {
         return AppFailure(

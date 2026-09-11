@@ -13,31 +13,39 @@ library;
 import 'dart:async';
 import 'dart:io' show Directory, Platform;
 
+import '../api/platform/android_tracking.dart';
+import '../api/platform/tray_service.dart';
+import '../api/platform/windows_foreground_detector.dart';
 import '../api/supabase/sync_backend.dart';
 import '../api/supabase/sync_status_store.dart';
 import '../api/update/update_downloader.dart';
 import '../api/update/update_manifest_service.dart';
 import '../api/update/update_verifier.dart';
 import '../data/cleanup/cleanup_service.dart';
+import '../data/cleanup/data_wipe_service.dart';
 import '../data/database/app_database.dart' hide ProfileSettings;
 import '../data/interop/file_interop_service.dart';
 import '../data/repositories/action_log_repository.dart';
 import '../data/repositories/activity_repository.dart';
 import '../data/repositories/category_repository.dart';
 import '../data/repositories/settings_repository.dart';
+import '../data/repositories/sync_peer_store.dart';
 import '../data/repositories/stats_repository.dart';
 import '../data/repositories/time_entry_repository.dart';
 import '../data/repositories/tracking_rule_repository.dart';
 import '../data/sync/sync_bundle_repository.dart';
 import '../data/update/windows_installer.dart';
 import '../utils/result.dart';
+import 'activity_store.dart';
 import 'category_store.dart';
 import 'clock_store.dart';
 import 'command_dispatcher.dart';
 import 'data_revision.dart';
+import 'reminder_store.dart';
 import 'settings_store.dart';
 import 'stats_store.dart';
 import 'sync_store.dart';
+import 'lan_store.dart';
 import 'timeline_store.dart';
 import 'timer_store.dart';
 import 'today_store.dart';
@@ -49,24 +57,36 @@ import 'update_store.dart';
 class AppStore {
   AppStore._({
     required this.database,
+    required this.currentVersion,
     required this.activities,
     required this.undo,
     required this.clock,
     required this.dataRevision,
     required this.timer,
     required this.category,
+    required this.activity,
     required this.settings,
+    required this.reminder,
     required this.today,
     required this.timeline,
     required this.stats,
     required this.sync,
     required this.update,
     required this.tracking,
+    required this.foregroundDetector,
+    required this.lan,
+    required this.wipe,
+    required this.tray,
+    required this.androidTracking,
     required this.dispatcher,
     required this.fileInterop,
   });
 
   final AppDatabase database;
+
+  /// 当前应用版本（设置页关于/更新卡展示；pubspec 注入，阶段 4 平台层
+  /// 可换 package_info）。
+  final String currentVersion;
 
   /// 活动仓储（启动 seed 与指令活动名解析共用）。
   final ActivityRepository activities;
@@ -76,13 +96,34 @@ class AppStore {
   final DataRevision dataRevision;
   final TimerStore timer;
   final CategoryStore category;
+
+  /// 活动 store（批次 5a：activity_create 指令落点 + 新建撤销）。
+  final ActivityStore activity;
   final SettingsStore settings;
+
+  /// 提醒 store（批次 5c 弹窗体系：运行阈值「仍在进行？」+ 触发时刻提醒）。
+  final ReminderStore reminder;
   final TodayStore today;
   final TimelineStore timeline;
   final StatsStore stats;
   final SyncStore sync;
   final UpdateStore update;
   final TrackingStore tracking;
+
+  /// 前台检测器实例（批次 6：Android 实现持 ClockStore 监听，dispose 摘除）。
+  final ForegroundDetector foregroundDetector;
+
+  /// LAN 设备互通编排（批次 4 设置页）。
+  final LanStore lan;
+
+  /// 数据全清服务（设置页危险区）。
+  final DataWipeService wipe;
+
+  /// Windows 托盘桥接（批次 6；非 Windows 平台全部 no-op）。
+  final TrayService tray;
+
+  /// Android 后台记录桥（批次 6b：使用情况权限/前台包名查询）。
+  final AndroidTrackingBridge androidTracking;
   final CommandDispatcher dispatcher;
   final FileInteropService fileInterop;
 
@@ -139,6 +180,11 @@ class AppStore {
       undo: undo,
       dataRevision: revision,
     );
+    final activity = ActivityStore(
+      activities: activities,
+      undo: undo,
+      dataRevision: revision,
+    );
     final settings = SettingsStore(
       settings: settingsRepo,
       undo: undo,
@@ -178,13 +224,43 @@ class AppStore {
       windowsInstaller: windowsInstaller ?? _defaultWindowsInstaller(),
       database: database,
     );
+    final lan = LanStore(
+      bundleRepository: syncBundleRepo,
+      peerStore: SyncPeerStore(database: database),
+      database: database,
+      dataRevision: revision,
+      appVersion: currentVersion,
+    );
+    final wipe = DataWipeService(database: database);
+    // 前台检测器（批次 6 平台层）：按平台注入真实现——Windows FFI 窗口
+    // 检测 / Android UsageStats 包名缓存，其余平台保持 Noop（TrackingStore
+    // 零感知）。Android 检测器的周期刷新由本层挂接时钟监听（api 层不依赖
+    // stores 的 ClockStore——依赖方向 api ← stores），dispose 摘除。
+    final androidTracking = AndroidTrackingBridge();
+    AndroidForegroundDetector? androidDetector;
+    final ForegroundDetector foregroundDetector;
+    if (WindowsForegroundDetector.isSupported) {
+      foregroundDetector = WindowsForegroundDetector();
+    } else if (AndroidTrackingBridge.isSupported) {
+      androidDetector = AndroidForegroundDetector(bridge: androidTracking);
+      foregroundDetector = androidDetector;
+      clock.addListener(androidDetector.maybeRefresh);
+    } else {
+      foregroundDetector = NoopForegroundDetector();
+    }
     final tracking = TrackingStore(
       rules: rules,
       timer: timer,
       dataRevision: revision,
       clock: clock,
       now: now,
+      detector: foregroundDetector,
+      pollInterval: const Duration(seconds: 5),
+      // 总开关闸门（批次 4）：设置页后台记录总开关（默认关）关闭时不轮询。
+      trackingEnabled: () =>
+          settings.current?.backgroundTrackingEnabled ?? false,
     );
+    final tray = TrayService();
 
     final dispatcher = CommandDispatcher(
       undo: undo,
@@ -192,28 +268,48 @@ class AppStore {
       sync: sync,
       update: update,
       category: category,
+      activity: activity,
       tracking: tracking,
       activities: activities,
       fileInterop: fileInterop,
       database: database,
       dataRevision: revision, // 三类来源收口：import 成功后 bump
+      now: now, // entry_update --start/--end=now 的绝对语义来源
+    );
+    // 提醒 store 依赖指令通道（铁律 7：「停止」经 stop 指令分发），
+    // 故在 dispatcher 之后装配。
+    final reminder = ReminderStore(
+      clock: clock,
+      settings: settings,
+      timer: timer,
+      isUnassignedActivity: activities.activityIdIsUnassigned,
+      dispatch: dispatcher.dispatch,
+      now: now,
     );
 
     final store = AppStore._(
       database: database,
+      currentVersion: currentVersion,
       activities: activities,
       undo: undo,
       clock: clock,
       dataRevision: revision,
       timer: timer,
       category: category,
+      activity: activity,
       settings: settings,
+      reminder: reminder,
       today: today,
       timeline: timeline,
       stats: stats,
       sync: sync,
       update: update,
       tracking: tracking,
+      foregroundDetector: foregroundDetector,
+      lan: lan,
+      wipe: wipe,
+      tray: tray,
+      androidTracking: androidTracking,
       dispatcher: dispatcher,
       fileInterop: fileInterop,
     );
@@ -256,7 +352,14 @@ class AppStore {
   /// 备份外的一切（不排除 dataDir）；占位 dataDir 若仍在程序目录内，默认路径
   /// 触发安装更新会连带清空用户数据。占位 dataDir 落到系统临时目录
   /// （timetrack2/data），与程序目录天然分离。
-  static WindowsInstaller _defaultWindowsInstaller() {
+  ///
+  /// **仅 Windows 构造（批次 6b 真机修复）**：Android 上 `Directory.current`
+  /// 为根目录 `/`，安装器构造校验抛 ArgumentError 并阻断整个启动——非
+  /// Windows 返回 null（UpdateStore.install 已按平台分发优雅降级）。
+  static WindowsInstaller? _defaultWindowsInstaller() {
+    if (!Platform.isWindows) {
+      return null;
+    }
     final base = Directory.current.path;
     return WindowsInstaller(
       programDir: base,
@@ -268,14 +371,24 @@ class AppStore {
 
   /// 释放全部 store（退出/测试清理）。
   void dispose() {
+    lan.dispose();
     tracking.dispose();
+    // Android 前台检测器的时钟监听在本层挂接，随 store 一并摘除并释放
+    //（Windows/Noop 实现为无状态 no-op dispose）。
+    final detector = foregroundDetector;
+    if (detector is AndroidForegroundDetector) {
+      clock.removeListener(detector.maybeRefresh);
+      detector.dispose();
+    }
     update.dispose();
     sync.dispose();
     stats.dispose();
     timeline.dispose();
     today.dispose();
     settings.dispose();
+    reminder.dispose();
     category.dispose();
+    activity.dispose();
     timer.dispose();
     clock.dispose();
     dataRevision.dispose();

@@ -115,6 +115,14 @@ class UndoStore extends ChangeNotifier {
   bool get canUndo => _undoStack.isNotEmpty;
   bool get canRedo => _redoStack.isNotEmpty;
 
+  /// 清空全部撤销/重做历史（清空数据后调用——历史记录指向已物理删除的
+  /// 数据，恢复校验会拒绝但 UI 仍展示"可撤销"，语义失真）。
+  void clear() {
+    _undoStack.clear();
+    _redoStack.clear();
+    notifyListeners();
+  }
+
   /// 栈深度（供 UI/测试观察）。
   int get undoDepth => _undoStack.length;
   int get redoDepth => _redoStack.length;

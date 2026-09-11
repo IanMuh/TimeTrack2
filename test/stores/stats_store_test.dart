@@ -73,6 +73,8 @@ class _GatedStatsRepository extends StatsRepository {
     required DateTime start,
     required DateTime end,
     DateTime? effectiveNow,
+    Set<String>? categoryFilterIds,
+    bool includeAuto = false,
   }) {
     if (gates.isEmpty) {
       return _run(start: start, end: end, effectiveNow: effectiveNow);
@@ -527,6 +529,131 @@ void main() {
       store.dispose(); // 手动 dispose（避免 addTearDown 二次 dispose）
       revision.bump(); // dispose 后不应清掉已算快照（无监听者）
       expect(store.snapshot, snapshot);
+    });
+  });
+
+  group('批次 5b 过滤语义（includeAuto / categoryFilterIds 下沉 compute）', () {
+    late TestHarness h;
+
+    setUp(() => h = TestHarness());
+    tearDown(() => h.close());
+
+    test('includeAuto=false 排除自动条目；true 计入（默认态开关语义）', () async {
+      final manual = (await h.activities.createActivity(name: '手动', color: 0))
+          .requireValue();
+      final auto = (await h.activities.createActivity(name: '自动', color: 1))
+          .requireValue();
+      await h.entries.createManualEntry(
+        activityId: manual.id,
+        startAt: DateTime(2026, 8, 14, 10),
+        endAt: DateTime(2026, 8, 14, 11),
+        note: '',
+      );
+      await h.entries.createManualEntry(
+        activityId: auto.id,
+        startAt: DateTime(2026, 8, 14, 11),
+        endAt: DateTime(2026, 8, 14, 11, 30),
+        note: '',
+        isAuto: true,
+      );
+      final range = (
+        DateTime(2026, 8, 14, 0),
+        DateTime(2026, 8, 15, 0)
+      );
+
+      final excluded = await h.stats.compute(
+        start: range.$1,
+        end: range.$2,
+        dimension: StatsDimension.activity,
+        includeAuto: false,
+      );
+      expect(excluded!.rows, hasLength(1));
+      expect(excluded.rows.single.id, 'activity:${manual.id}');
+      expect(excluded.totalDuration, const Duration(hours: 1));
+
+      final included = await h.stats.compute(
+        start: range.$1,
+        end: range.$2,
+        dimension: StatsDimension.activity,
+        includeAuto: true,
+      );
+      expect(included!.rows, hasLength(2));
+      expect(included.totalDuration, const Duration(hours: 1, minutes: 30));
+      // 不同 includeAuto 不得命中同一缓存（参数参与缓存键）。
+      expect(identical(excluded, included), isFalse);
+    });
+
+    test('categoryFilterIds 条目级过滤：活动任一关联分类命中即保留', () async {
+      final catX = (await h.categories.createCategory(name: '工作', color: 0))
+          .requireValue();
+      final catY = (await h.categories.createCategory(name: '生活', color: 1))
+          .requireValue();
+      final aLinked =
+          (await h.activities.createActivity(name: '有关联', color: 2))
+              .requireValue();
+      final aDual = (await h.activities.createActivity(name: '双关联', color: 3))
+          .requireValue();
+      final aNone = (await h.activities.createActivity(name: '无关联', color: 4))
+          .requireValue();
+      // 有关联 → X；双关联 → X+Y；无关联 → 无。
+      await h.categories.setActivityCategories(
+          activityId: aLinked.id, primaryCategoryId: catX.id);
+      await h.categories.setActivityCategories(
+          activityId: aDual.id,
+          primaryCategoryId: catX.id,
+          secondaryCategoryIds: [catY.id]);
+      // 时段互不重叠（createManualEntry 会裁剪重叠邻居）。
+      await h.entries.createManualEntry(
+        activityId: aLinked.id,
+        startAt: DateTime(2026, 8, 14, 10),
+        endAt: DateTime(2026, 8, 14, 11),
+        note: '',
+      );
+      await h.entries.createManualEntry(
+        activityId: aDual.id,
+        startAt: DateTime(2026, 8, 14, 11),
+        endAt: DateTime(2026, 8, 14, 12),
+        note: '',
+      );
+      await h.entries.createManualEntry(
+        activityId: aNone.id,
+        startAt: DateTime(2026, 8, 14, 12),
+        endAt: DateTime(2026, 8, 14, 13),
+        note: '',
+      );
+      final range = (
+        DateTime(2026, 8, 14, 0),
+        DateTime(2026, 8, 15, 0)
+      );
+
+      // 只选 Y：双关联命中（任一关联分类命中即保留），其余剔除。
+      final onlyY = await h.stats.compute(
+        start: range.$1,
+        end: range.$2,
+        dimension: StatsDimension.activity,
+        categoryFilterIds: {catY.id},
+      );
+      expect(onlyY!.rows, hasLength(1));
+      expect(onlyY.rows.single.id, 'activity:${aDual.id}');
+
+      // X+Y：有关联 + 双关联保留，无关联剔除（条目级语义：无关联活动
+      // 的条目在任何非空筛选下都不计入）。
+      final both = await h.stats.compute(
+        start: range.$1,
+        end: range.$2,
+        dimension: StatsDimension.activity,
+        categoryFilterIds: {catX.id, catY.id},
+      );
+      expect(both!.rows.map((r) => r.id).toSet(),
+          {'activity:${aLinked.id}', 'activity:${aDual.id}'});
+
+      // null = 不过滤（全量三行）。
+      final unfiltered = await h.stats.compute(
+        start: range.$1,
+        end: range.$2,
+        dimension: StatsDimension.activity,
+      );
+      expect(unfiltered!.rows, hasLength(3));
     });
   });
 }

@@ -301,6 +301,61 @@ void main() {
         isFalse,
         reason: 'profile_settings 不应有 deleted_at（配置不软删）',
       );
+      // 批次 4（schema v3）：profile_settings 6 个通用偏好列 + tracking_rules
+      // enabled 启停列必须进镜像——toMap 全量并入同步载荷，存量远端库缺列时
+      // 推送被 PostgREST 拒绝（PGRST204 未知列），整轮 syncNow 失败。
+      expect(
+        RegExp(r'THEME_MODE TEXT NOT NULL DEFAULT .LIGHT.', caseSensitive: false)
+            .hasMatch(settingsBlock),
+        isTrue,
+        reason: 'profile_settings 须带 theme_mode（镜像本地 drift v3）',
+      );
+      for (final col in [
+        'WEEK_START_DAY',
+        'USE_24_HOUR_FORMAT',
+        'DEFAULT_RECORD_MINUTES',
+        'QUICK_REMINDER_ENABLED',
+        'BACKGROUND_TRACKING_ENABLED',
+      ]) {
+        expect(
+          RegExp('\\b$col\\b', caseSensitive: false).hasMatch(settingsBlock),
+          isTrue,
+          reason: 'profile_settings 须带 $col（镜像本地 drift v3）',
+        );
+      }
+      final trackingRuleBlock = RegExp(
+        r'CREATE TABLE IF NOT EXISTS TRACKING_RULES \(([^;]*)\)',
+        caseSensitive: false,
+      ).firstMatch(schema)!.group(1)!;
+      expect(
+        RegExp(r'\bENABLED\b', caseSensitive: false).hasMatch(trackingRuleBlock),
+        isTrue,
+        reason: 'tracking_rules 须带 enabled 启停列（镜像本地 drift v3）',
+      );
+      // **存量库补列语句锁定（批次 4）**：同 is_auto 模式——存量远端库需
+      // ALTER ... ADD COLUMN IF NOT EXISTS 补齐 v3 列，防新库/存量库漂移。
+      for (final stmt in [
+        r'ALTER TABLE PROFILE_SETTINGS ADD COLUMN IF NOT EXISTS THEME_MODE '
+            r'TEXT NOT NULL DEFAULT .LIGHT.',
+        r'ALTER TABLE PROFILE_SETTINGS ADD COLUMN IF NOT EXISTS WEEK_START_DAY '
+            r'INTEGER NOT NULL DEFAULT 1',
+        r'ALTER TABLE PROFILE_SETTINGS ADD COLUMN IF NOT EXISTS '
+            r'USE_24_HOUR_FORMAT BOOLEAN NOT NULL DEFAULT TRUE',
+        r'ALTER TABLE PROFILE_SETTINGS ADD COLUMN IF NOT EXISTS '
+            r'DEFAULT_RECORD_MINUTES INTEGER NOT NULL DEFAULT 25',
+        r'ALTER TABLE PROFILE_SETTINGS ADD COLUMN IF NOT EXISTS '
+            r'QUICK_REMINDER_ENABLED BOOLEAN NOT NULL DEFAULT TRUE',
+        r'ALTER TABLE PROFILE_SETTINGS ADD COLUMN IF NOT EXISTS '
+            r'BACKGROUND_TRACKING_ENABLED BOOLEAN NOT NULL DEFAULT FALSE',
+        r'ALTER TABLE TRACKING_RULES ADD COLUMN IF NOT EXISTS ENABLED '
+            r'BOOLEAN NOT NULL DEFAULT TRUE',
+      ]) {
+        expect(
+          has(stmt),
+          isTrue,
+          reason: '存量库须有 ALTER 补 v3 列语句：$stmt',
+        );
+      }
     });
   });
 

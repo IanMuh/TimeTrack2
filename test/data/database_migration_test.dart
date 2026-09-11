@@ -81,6 +81,19 @@ void main() {
         );
       ''');
       db.execute('''
+        CREATE TABLE profile_settings (
+          id INTEGER PRIMARY KEY NOT NULL DEFAULT 1,
+          user_id TEXT,
+          reminder_minutes INTEGER NOT NULL DEFAULT 45,
+          reminder_interval_minutes INTEGER NOT NULL DEFAULT 10,
+          reminder_method TEXT NOT NULL DEFAULT 'dialog',
+          reminder_time_of_day_minutes INTEGER NOT NULL DEFAULT 540,
+          merge_neighbor_threshold_minutes INTEGER NOT NULL DEFAULT 1,
+          timezone TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+      ''');
+      db.execute('''
         CREATE TABLE time_entries (
           id TEXT PRIMARY KEY NOT NULL,
           user_id TEXT,
@@ -117,7 +130,7 @@ void main() {
         final version = (await appDb.customSelect('PRAGMA user_version')
                 .getSingle())
             .data['user_version'];
-        expect(version, 2, reason: '迁移后 user_version 必须为 2');
+        expect(version, 3, reason: '迁移后 user_version 必须为 3');
         final teCols = await appDb.customSelect(
                 'PRAGMA table_info(time_entries)')
             .get();
@@ -159,6 +172,24 @@ void main() {
         expect(syncIndexCols.map((r) => r.data['name']).toList(),
             ['user_id', 'updated_at'],
             reason: 'idx_tracking_rules_sync 必须覆盖 (user_id, updated_at)');
+        // **v3 迁移不变量（批次 4）**：profile_settings 通用偏好 6 列 +
+        // tracking_rules.enabled 列——列存在性与默认值校验。
+        final psCols = await appDb.customSelect(
+                'PRAGMA table_info(profile_settings)')
+            .get();
+        final psColNames = psCols.map((c) => c.data['name']).toSet();
+        expect(psColNames, containsAll(<String>{
+          'theme_mode',
+          'week_start_day',
+          'use_24_hour_format',
+          'default_record_minutes',
+          'quick_reminder_enabled',
+          'background_tracking_enabled',
+        }), reason: 'v3 迁移必须补齐 profile_settings 通用偏好 6 列');
+        final enabledCol =
+            trCols.firstWhere((c) => c.data['name'] == 'enabled');
+        expect(enabledCol.data['dflt_value'], '1',
+            reason: 'tracking_rules.enabled 默认 true（存量规则保持启用）');
 
         // 旧数据保留
         final rows = await (appDb.select(appDb.timeEntries)).get();
@@ -231,7 +262,7 @@ void main() {
         // 重开会走 onCreate（表已存在抛错）而非 _ensureIndexes 补齐，用例
         // 报错而非真实覆盖 r3 修复场景。
         final v2 = raw.select('PRAGMA user_version').first['user_version'];
-        expect(v2, 2, reason: '种子库必须为 v2（SELECT 1 触发建库生效）');
+        expect(v2, 3, reason: '种子库必须为 v3（SELECT 1 触发建库生效）');
         // **前置断言（r6）**：DROP 前先确认索引确实存在——若 SELECT 1 未触发
         // 建库（user_version 仍 0），DROP 是空操作、afterDrop 恒空，自校验
         // 假通过且重开走 onCreate 而非 _ensureIndexes 补齐（正是要防的场景）。

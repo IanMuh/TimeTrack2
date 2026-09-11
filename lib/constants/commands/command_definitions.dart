@@ -33,6 +33,16 @@ final List<CommandDefinition> commandDefinitions = [
     aliases: ['停止'],
     description: '停止当前活动',
   ),
+  CommandDefinition(
+    name: 'tracking_pause',
+    aliases: ['暂停记录'],
+    description: '切换会话级暂停（后台自动检测挂起/恢复；内存态不影响计时条目）',
+  ),
+  CommandDefinition(
+    name: 'manual_hold_clear',
+    aliases: ['恢复自动切换'],
+    description: '清除手动会话保持——恢复后台自动记录切换',
+  ),
 
   // ---- 时间条目编辑 ----
   CommandDefinition(
@@ -72,6 +82,29 @@ final List<CommandDefinition> commandDefinitions = [
     // 注意：--direction 取值白名单（previous|next）由阶段 3 分发器校验——
     // 解析器只做选项键/时间值校验，不做取值枚举校验。
     description: '与相邻条目合并：merge <id> --direction=previous|next',
+  ),
+  CommandDefinition(
+    name: 'entry_update',
+    aliases: ['编辑条目'],
+    minPositionalArgs: 1,
+    maxPositionalArgs: 1,
+    allowedOptions: {'activity', 'start', 'end', 'note'},
+    timeOptions: {'start', 'end'},
+    description:
+        '编辑时间条目（至少一项修改）：entry_update <id> [--activity=<活动名>] '
+        '[--start=HH:MM|now] [--end=HH:MM|now] [--note=...]'
+        '（HH:MM 相对条目所在日；now=当前时刻）',
+  ),
+
+  // ---- 活动 ----
+  CommandDefinition(
+    name: 'activity_create',
+    aliases: ['新建活动'],
+    minPositionalArgs: 1,
+    maxPositionalArgs: 1,
+    allowedOptions: {'color', 'one_off'},
+    description:
+        '新建活动：activity_create <名称> [--color=<整数>] [--one_off=true|false]',
   ),
 
   // ---- 撤销/重做 ----
@@ -154,7 +187,7 @@ final List<CommandDefinition> commandDefinitions = [
     aliases: ['新建映射规则'],
     minPositionalArgs: 1,
     maxPositionalArgs: 1,
-    allowedOptions: {'kind', 'activity'},
+    allowedOptions: {'kind', 'activity', 'sync'},
     requiredOptions: {'kind', 'activity'},
     description:
         '新建映射规则：tracking_rule_create <pattern> --kind=process|title --activity=<活动名>',
@@ -164,7 +197,7 @@ final List<CommandDefinition> commandDefinitions = [
     aliases: ['修改映射规则'],
     minPositionalArgs: 1,
     maxPositionalArgs: 1,
-    allowedOptions: {'kind', 'pattern', 'activity', 'sync'},
+    allowedOptions: {'kind', 'pattern', 'activity', 'sync', 'enabled'},
     description:
         '修改映射规则：tracking_rule_update <id> [--kind=...] [--pattern=...] [--activity=...] [--sync=true|false]',
   ),

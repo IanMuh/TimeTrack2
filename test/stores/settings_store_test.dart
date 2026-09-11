@@ -1,5 +1,6 @@
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:timetrack2/constants/storage_keys.dart';
 import 'package:timetrack2/data/database/app_database.dart' hide ProfileSettings;
 import 'package:timetrack2/data/repositories/settings_repository.dart';
 import 'package:timetrack2/stores/data_revision.dart';
@@ -128,6 +129,46 @@ void main() {
       expect(result.isSuccess, isTrue); // 写库本身成功
       expect(store.current, currentBeforeSave); // 不写缓存：_current 保持 dispose 前快照
       await store.reload(); // dispose 后静默返回（不崩）
+    });
+  });
+
+  group('Windows 关窗到托盘模式（批次 6 托盘）', () {
+    late TestHarness h;
+
+    setUp(() async {
+      h = TestHarness();
+      await h.store.reload();
+    });
+    tearDown(() => h.close());
+
+    test('默认回退 ask；写入合法值可往返', () async {
+      expect(await h.store.trayCloseMode(), TrayCloseMode.ask,
+          reason: '库内无值回退 ask');
+      expect(h.store.current, isNotNull); // 与 ProfileSettings 无耦合
+
+      await h.settings.setTrayCloseMode(TrayCloseMode.minimize);
+      expect(await h.store.trayCloseMode(), TrayCloseMode.minimize);
+
+      await h.settings.setTrayCloseMode(TrayCloseMode.exit);
+      expect(await h.store.trayCloseMode(), TrayCloseMode.exit);
+
+      // 覆盖写回 ask：upsert 语义。
+      await h.settings.setTrayCloseMode(TrayCloseMode.ask);
+      expect(await h.store.trayCloseMode(), TrayCloseMode.ask);
+    });
+
+    test('库内非法值回退 ask；set 非法值抛 ArgumentError', () async {
+      await h.db.into(h.db.appMetadata).insertOnConflictUpdate(
+            AppMetadataCompanion.insert(
+                key: AppMetadataKeys.closeToTrayMode, value: 'bogus'),
+          );
+      expect(await h.store.trayCloseMode(), TrayCloseMode.ask,
+          reason: '白名单外取值回退默认');
+
+      expect(
+        () => h.settings.setTrayCloseMode('bogus'),
+        throwsArgumentError,
+      );
     });
   });
 }

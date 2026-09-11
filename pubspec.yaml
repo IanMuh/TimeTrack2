@@ -10,14 +10,21 @@ dependencies:
   crypto: ^3.0.7
   drift: ^2.34.3
   drift_flutter: ^0.3.1
+  # **直接固定传递依赖 ffi**（批次 6 Windows FFI 前台检测器直接使用
+  # calloc/Utf16；drift/sqlite3 已传递引入 2.x）——直接声明使意图显式可见。
+  ffi: ^2.2.0
   file_selector: ^1.1.0
   fl_chart: ^1.2.0
   flutter:
     sdk: flutter
+  # 本地化（ARB 中英双语，铁律 6）：l10n.yaml 指向 lib/assets/l10n，
+  # 生成物 lib/l10n/ 纳入版本管理（与 build_runner 同理）。
+  flutter_localizations:
+    sdk: flutter
   get_it: ^9.2.1
   go_router: ^17.4.0
   http: ^1.6.0
-  intl: ^0.20.3
+  intl: ^0.20.2
   path: ^1.9.1
   path_provider: ^2.1.6
   # **直接固定传递依赖 postgrest**（supabase_flutter → supabase 2.16.0 精确
@@ -53,3 +60,5 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  # ARB → l10n 生成（lib/l10n，提交入库）
+  generate: true

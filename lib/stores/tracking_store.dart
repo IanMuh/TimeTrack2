@@ -22,19 +22,15 @@ import 'package:flutter/foundation.dart';
 
 import '../data/repositories/tracking_rule_repository.dart';
 import '../utils/result.dart';
+import '../viewmodels/foreground_detector.dart';
 import '../viewmodels/tracking_rule.dart';
 import 'clock_store.dart';
 import 'data_revision.dart';
 import 'timer_store.dart';
 
-/// 前台检测器（平台实现归阶段 4；测试注入 fake）。
-abstract interface class ForegroundDetector {
-  /// 当前前台进程名（如 `chrome.exe`；不可用返回 null）。
-  String? get processName;
-
-  /// 当前前台窗口标题（可空）。
-  String? get windowTitle;
-}
+// 前台检测器契约已下沉 viewmodels（api 平台实现与本 store 共同依赖——
+// 防 api→stores 反向依赖）；re-export 保持既有导入方兼容。
+export '../viewmodels/foreground_detector.dart' show ForegroundDetector;
 
 /// 后台自动记录 store。
 class TrackingStore extends ChangeNotifier {
@@ -46,7 +42,8 @@ class TrackingStore extends ChangeNotifier {
     ForegroundDetector? detector,
     this.pollInterval = const Duration(seconds: 5),
     DateTime Function()? now,
-  })  : detector = detector ?? _NoopDetector(),
+    this.trackingEnabled,
+  })  : detector = detector ?? NoopForegroundDetector(),
         _now = now ?? DateTime.now {
     clock.addListener(_onTick);
   }
@@ -59,12 +56,45 @@ class TrackingStore extends ChangeNotifier {
 
   /// 轮询间隔（节流：tick 每秒但仅间隔达标才检测）。
   final Duration pollInterval;
+
+  /// 后台记录总开关读取（ProfileSettings.backgroundTrackingEnabled；
+  /// null = 不拦截——测试/无配置场景）。轮询前置闸门：总开关关闭时不检测。
+  final bool Function()? trackingEnabled;
   final DateTime Function() _now;
+
+  /// 会话级暂停（批次 6 托盘「暂停/恢复记录」落点）：true 时 poll 前置闸门
+  /// 拦截——后台自动检测挂起，不影响当前计时条目，也不改动持久化的
+  /// [trackingEnabled] 总开关（重启后恢复原设置状态）。内存态。
+  bool _sessionPaused = false;
+  bool get sessionPaused => _sessionPaused;
+
+  /// 设置会话级暂停（托盘菜单切换；幂等——同值不重复通知）。
+  void setSessionPaused(bool paused) {
+    if (_sessionPaused == paused) return;
+    _sessionPaused = paused;
+    notifyListeners();
+  }
 
   bool _disposed = false;
   DateTime _lastPoll = DateTime.fromMillisecondsSinceEpoch(0);
   String? _lastMatchedActivityId;
   String? _lastMatchNote;
+  List<TrackingRule> _ruleList = const [];
+
+  /// 当前未删规则列表（设置页渲染；[reloadRules] 后更新，CRUD 自动刷新）。
+  /// 命名避开同文件的仓储字段 [rules]（TrackingRuleRepository）。
+  List<TrackingRule> get ruleList => _ruleList;
+
+  /// 重载规则列表（设置页进入/外部变更后调用）。
+  Future<void> reloadRules() async {
+    if (_disposed) return;
+    final result = await rules.activeRules();
+    if (_disposed) return;
+    if (result.isSuccess) {
+      _ruleList = result.requireValue();
+      notifyListeners();
+    }
+  }
 
   /// 最近一次自动命中切换的活动 id（UI 展示）。
   String? get lastMatchedActivityId => _lastMatchedActivityId;
@@ -92,6 +122,14 @@ class TrackingStore extends ChangeNotifier {
   /// 检测前台并自动切换（供 tick 驱动与手动调用；fake 测试直接调）。
   Future<void> poll() async {
     if (_disposed) return;
+    // 总开关闸门（批次 4）：设置页关闭后台记录时不产生自动切换。
+    final enabledGate = trackingEnabled;
+    if (enabledGate != null && !enabledGate()) return;
+    // 会话级暂停闸门（批次 6 托盘「暂停记录」）：挂起时不产生自动切换。
+    if (_sessionPaused) return;
+    // 手动会话保持（批次 5c 切换防冲突）：用户手动切换/停止后，自动记录
+    // 不抢占——auto 不覆盖手动选择。
+    if (timer.manualSessionHold) return;
     if (_polling) return; // 重入保护（手动调用与 tick 并发时只执行一轮）
     _polling = true;
     try {
@@ -132,6 +170,7 @@ class TrackingStore extends ChangeNotifier {
     List<TrackingRule> candidates,
   ) {
     for (final rule in candidates) {
+      if (!rule.enabled) continue; // 停用规则不参与匹配（区别于软删）
       if (rule.matchKind == TrackingRuleMatchKind.unknown) continue;
       if (rule.matchKind == TrackingRuleMatchKind.process) {
         // 进程缺失时 process 类规则跳过（防 `*` 全通配误命中空进程）。
@@ -181,6 +220,8 @@ class TrackingStore extends ChangeNotifier {
     if (result.isSuccess) {
       dataRevision.bump(); // 数据已变更：即使 dispose 后仍须递增（同步依赖）
       if (_disposed) return result; // await 期间可能已 dispose：跳过通知
+      await reloadRules();
+      if (_disposed) return result;
       notifyListeners();
     }
     return result;
@@ -192,6 +233,8 @@ class TrackingStore extends ChangeNotifier {
     if (result.isSuccess) {
       dataRevision.bump();
       if (_disposed) return result; // await 期间可能已 dispose：跳过通知
+      await reloadRules();
+      if (_disposed) return result;
       notifyListeners();
     }
     return result;
@@ -205,8 +248,9 @@ class TrackingStore extends ChangeNotifier {
   }
 }
 
-/// 无平台实现时的空检测器（阶段 4 前自动记录不动作）。
-class _NoopDetector implements ForegroundDetector {
+/// 无平台实现时的空检测器（阶段 4 前自动记录不动作；公开类供 UI 判定
+/// "检测器是否已接平台层"——批次 6 FFI 接入后装配真实实现）。
+class NoopForegroundDetector implements ForegroundDetector {
   @override
   String? get processName => null;
   @override

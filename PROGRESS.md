@@ -1,9 +1,58 @@
 # 开发进度记录
 
 > 供中断后快速恢复。权威细节以 `TimeTrack2 从零重建执行计划（完整最终版）.md` 为准；
-> 开发纪律见 `AGENTS.md`（逐模块确认、ocr 审查循环至清零、无用户指示不 push）。
+> 开发纪律见 `AGENTS.md`（逐模块确认、审查循环至清零、无用户指示不 push）。
 
-## 当前状态（2026-08-15）
+## 当前状态（2026-09-12 · 阶段 4 完成，阶段 5 收尾中）
+
+**阶段 4（UI/平台层）批次 0-6 全部实现**（分支 `feat/module-4-ui-v2`，待 PR 合并）：
+- 批次 0-3：主题/本地化地基 → 应用壳（StatefulShellRoute 5 页保活 + 全局计时条 + undo/redo 入口）→ 计时/今日页 + 活动-分类合并选择器 → 时间线/统计页
+- 批次 4：设置页十分区 + schema v3 通用偏好（6 列）+ tracking_rules.enabled 启停 + 后台记录 UI + 更新状态机集成 + 主题持久化
+- 批次 5：entry_update/activity_create 指令收口（单条撤销）；统计过滤下沉 compute（分类筛选/排除自动）；提醒弹窗体系（运行阈值/快速提醒/可疑条目三场景 + 手动会话保持防冲突）；l10n 收口
+- 批次 6：Windows 托盘（关窗三模式 + 菜单/tooltip 本地化）+ FFI 前台检测器；Android 使用情况授权引导 + UsageStats 检测 + 前台服务常驻通知（specialUse + 文案下发）
+
+**审查制度变更**：ocr 停用（智谱 GLM Coding Plan 体验套餐额度仅限官方指定工具，
+自研 CLI 不可用，详见 AGENTS.md），代码审查改由**子智能体**按原纪律执行（范围
+分层 / 属实才修 / 停循环判据不变）。
+
+**审查处置（三轮，全部属实项已修）**：
+- 批次 5 审查（`12f36be`）：统计"排除自动"极性接反、可疑条目漏滤未分配活动
+  （每启动误弹）、编辑运行条目竞态、跨天"结束到现在"算错（entry_update 增
+  `--start/--end=now` 绝对语义）等
+- 批次 4 审查（`c7bf198`/`0c5b0be`/`1848b5b`）：schema.sql 补 v3 列镜像（防云
+  推送 PGRST204 全败）、设置分区 GlobalKey 逐帧重建、编辑运行条目被 --end
+  静默结束（keepRunning 透传）、sync/update 直调收口指令通道
+- 批次 6 审查（`951f452` 等）：主 manifest 补 INTERNET（release 断网）、FGS
+  dataSync→specialUse（Android 15 6h 上限）、关窗对话框先隐藏后弹（不可见，
+  偏好无法建立）、托盘/通知文案原生硬编码中文（改 ARB 下发）、捕获自身、
+  每秒服务同步去重、ForegroundDetector 契约下沉 viewmodels（依赖方向）
+- 门禁：`flutter analyze` 0 issues / 全量 820 测试绿
+
+## 阶段 5 收尾清单（待办）
+
+**人工/实机（需有 VS 的机器 + Android 真机）**：
+- [ ] Windows Release 构建验证（本机无 Visual Studio——C++ 侧关窗流/托盘文案
+      改动未经编译验证）+ 托盘/关窗/前台检测冒烟
+- [ ] Android 真机：使用情况授权引导、前台服务常驻、锁屏 null、通知暂停动作
+- [ ] 更新流程人工冒烟（检查→下载→校验→Windows staging 重启生效 / Android 兜底浏览器）
+
+**代码挂账（延续阶段 2e/3/4）**：
+- [ ] Windows 安装器真实目录注入（main 装配，现为 Directory.current 占位）+
+      待安装标记消费（applyStaging 重启闭环）——更新系统最后一段
+- [ ] Android 自动安装接线（tryInstallApk 平台守卫 + REQUEST_INSTALL_PACKAGES +
+      FileProvider + file_paths.xml——installer 骨架已入库）
+- [ ] update_download / signOut / ignoreVersion 指令化（铁律 7 收口）
+- [ ] 壳层提醒/更新对话框接线 widget 测试（可疑条目与统计开关已补）
+- [ ] pairClient IPv6 lastIndexOf 拆分错位（LAN 以 IPv4 为主）
+- [ ] ActionLog 事务提交后写入的统一收口（沿袭模式：失败误报但数据已落库）
+- [ ] Play 合规：受限权限用途声明 + 隐私政策 + Data safety（docs/ 草稿待落）
+- [ ] 留档：gradle wrapper 腾讯镜像未设 distributionSha256Sum；Win32 隐藏窗口
+      SetForegroundWindow quirk（菜单点击外不消失的既有边界）
+
+**二期（阶段 6）**：AI 总结（设计文档 `docs/AI总结数据需求与模板.md`，信号层复用
+slicesForRange/computeDayMetrics）+ 自然语言→指令解析。
+
+## 历史状态（2026-08-15 · 阶段 0-3）
 
 **阶段 0-1 完成并推送**（ocr 全模块清零，200 测试）：
 - viewmodels（领域模型 deletedAt/parentId/容错）→ utils（CLI 解析器/SemVer/时间/SHA-256）→ constants（配置/指令定义）→ data（drift 8 表 + 5 仓储）
@@ -69,9 +118,13 @@
 - **后台自动记录平台检测层**（Windows FFI 轮询 / Android usage_stats + specialUse 前台服务）：阶段 3/4
 - **同步超时活锁**（syncTimeout 墙钟总时长，Future.timeout 不取消底层）：编排层动态放大超时挂起
 
-## 下一阶段（阶段 4 UI）预告
+## 下一阶段（阶段 5 收尾 → 阶段 6 二期 AI）
 
-- components（公共组件，无业务状态）/ pages（壳/计时/今日/时间线/统计/设置/登录）/ routes（go_router StatefulShellRoute 保活 5 主页面 + 深链预留）/ 本地化（ARB 中英，铁律 6）/ Android Manifest + FileProvider / main 装配真实目录
+- 阶段 5：见顶部「阶段 5 收尾清单」——双平台构建冒烟（含更新流程人工验证）+
+  后台自动记录验收 + Play 合规文档
+- 阶段 6（二期）：AI 解析自然语言→CommandInvocation→命令分发执行（可编辑草稿、
+  走现有写路径）+ AI 总结（只读信号 + 独立缓存表；密钥 flutter_secure_storage；
+  启用披露数据出境 + Ollama 本地选项）——设计输入见 `docs/AI总结数据需求与模板.md`
 - 实现前先报要点，确认后开工
 
 ## 关键约定（实现勿破坏）

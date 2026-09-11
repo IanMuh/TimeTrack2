@@ -20,6 +20,7 @@ import '../viewmodels/activity.dart';
 import '../utils/result.dart';
 import '../viewmodels/commands/command_invocation.dart';
 import '../viewmodels/tracking_rule.dart';
+import 'activity_store.dart';
 import 'category_store.dart';
 import 'command_contracts.dart';
 import 'data_revision.dart';
@@ -35,18 +36,24 @@ class CommandDispatcher {
     required this.sync,
     required this.update,
     required this.category,
+    required this.activity,
     required this.tracking,
     required this.activities,
     required this.fileInterop,
     required this.database,
     DataRevision? dataRevision,
-  }) : _dataRevision = dataRevision ?? DataRevision();
+    DateTime Function()? now,
+  })  : _dataRevision = dataRevision ?? DataRevision(),
+        _now = now ?? DateTime.now;
 
   final UndoStore undo;
   final TimerStore timer;
   final SyncNowProvider sync;
   final UpdateActions update;
   final CategoryStore category;
+
+  /// 活动 store（批次 5a：activity_create 指令落点，undo 收口）。
+  final ActivityStore activity;
   final TrackingStore tracking;
   final ActivityRepository activities;
   final FileInteropService fileInterop;
@@ -54,6 +61,10 @@ class CommandDispatcher {
 
   /// dataRevision（模块 3d③：import 成功后 bump——数据变更使派生缓存失效）。
   final DataRevision _dataRevision;
+
+  /// 当前时刻（注入时钟；`entry_update --start/--end=now` 的绝对语义来源，
+  /// 与壳层/测试的确定性时钟同源）。
+  final DateTime Function() _now;
 
   /// 分发一条指令到对应 store 写路径；统一返回 [CommandResult]。
   ///
@@ -92,6 +103,16 @@ class CommandDispatcher {
       case 'stop':
         final result = await timer.stopRunning();
         return _fromAppResult(result, successMessage: '已停止当前活动');
+      case 'tracking_pause':
+        // 会话级暂停切换（批次 6 托盘/通知动作的指令化落点）：幂等 toggle，
+        // 内存态不影响计时条目与持久化总开关。
+        tracking.setSessionPaused(!tracking.sessionPaused);
+        return CommandSuccess(
+            data: tracking.sessionPaused,
+            message: tracking.sessionPaused ? '自动记录已暂停' : '自动记录已恢复');
+      case 'manual_hold_clear':
+        timer.clearManualSessionHold();
+        return const CommandSuccess(message: '已恢复自动切换');
       case 'add':
         final resolvedAdd = await _resolveActivityId(invocation.args.first);
         if (resolvedAdd.id == null) {
@@ -130,6 +151,27 @@ class CommandDispatcher {
       case 'delete':
         final result = await timer.deleteEntry(invocation.args.first);
         return _fromAppResult(result, successMessage: '已删除时间段');
+      case 'entry_update':
+        return _entryUpdate(invocation);
+      case 'activity_create':
+        final createColorRaw = invocation.options['color'];
+        if (createColorRaw != null && int.tryParse(createColorRaw) == null) {
+          return CommandFailure('非法颜色值：--color=<整数>');
+        }
+        final oneOffRaw = invocation.options['one_off'];
+        if (oneOffRaw != null &&
+            oneOffRaw != 'true' &&
+            oneOffRaw != 'false') {
+          return const CommandFailure('非法开关值：--one_off=true|false');
+        }
+        // 默认色与 category_create 同源（teal 0xff0f766e）；UI 路径始终
+        // 显式传色板色，默认值仅兜底 CLI 文本调用。
+        final created = await activity.createActivity(
+          name: invocation.args.first,
+          color: int.tryParse(createColorRaw ?? '') ?? 0xff0f766e,
+          isOneOff: oneOffRaw == 'true',
+        );
+        return _fromAppResultData(created, successMessage: '已新建活动');
 
       // ---- 撤销/重做 ----
       case 'undo':
@@ -231,11 +273,18 @@ class CommandDispatcher {
         if (kind == TrackingRuleMatchKind.unknown) {
           return const CommandFailure('非法匹配类型：--kind=process|title');
         }
+        // --sync 可选（批次 4）：未提供默认 true（规则默认进云同步，契约
+        // §9.6）；提供时校验取值（与 update 分支同款严格性）。
+        final syncRaw = invocation.options['sync'];
+        if (syncRaw != null && syncRaw != 'true' && syncRaw != 'false') {
+          return const CommandFailure('非法同步开关值：--sync=true|false');
+        }
         final rule = TrackingRule(
           id: const Uuid().v4(),
           pattern: invocation.args.first,
           matchKind: kind,
           activityId: resolvedRule.id!,
+          syncEnabled: syncRaw == null ? true : syncRaw == 'true',
           updatedAt: DateTime.now(),
         );
         final result = await tracking.saveRule(rule);
@@ -254,11 +303,16 @@ class CommandDispatcher {
           }
           kindRaw = parsedKind.storageValue;
         }
-        // --sync 布尔取值校验（与 --direction 取值校验一致）：非法值明确
-        // 报错，不静默回退（静默回退会让用户"看似成功实则未生效"）。
+        // --sync / --enabled 布尔取值校验（与 --direction 取值校验一致）：
+        // 非法值明确报错，不静默回退（静默回退会让用户"看似成功实则未生效"）。
         final syncRaw = invocation.options['sync'];
         if (syncRaw != null && syncRaw != 'true' && syncRaw != 'false') {
           return const CommandFailure('非法同步开关值：--sync=true|false');
+        }
+        // --enabled（批次 4 schema v3）：规则启停，false = 保留不匹配。
+        final enabledRaw = invocation.options['enabled'];
+        if (enabledRaw != null && enabledRaw != 'true' && enabledRaw != 'false') {
+          return const CommandFailure('非法启停开关值：--enabled=true|false');
         }
         String? activityId;
         final activityName = invocation.options['activity'];
@@ -278,6 +332,7 @@ class CommandDispatcher {
           syncEnabled: syncRaw == null
               ? existing.syncEnabled
               : syncRaw == 'true',
+          enabled: enabledRaw == null ? existing.enabled : enabledRaw == 'true',
           updatedAt: DateTime.now(),
         );
         final result = await tracking.saveRule(updated);
@@ -296,6 +351,87 @@ class CommandDispatcher {
   // ---------------------------------------------------------------------------
   // 内部
   // ---------------------------------------------------------------------------
+
+  /// entry_update：条目字段部分更新（至少一项修改）。
+  ///
+  /// 时间语义：--start/--end 为 HH:MM，相对**条目所在本地日**还原（编辑
+  /// 历史条目不漂移日期；跨日移动能力挂账）；特值 `now` = 注入时钟的当前
+  /// 时刻（绝对语义，「结束到现在」对跨天遗留条目不受 HH:MM 分钟截断/
+  /// 日期锚定影响）。显式 --end 落在起点之前视为次日凌晨（跨零点延伸，
+  /// 如 23:00 的条目补 end=00:30）；**等于起点显式失败**（与补记 add 的
+  /// start<end 校验一致，防启发把相等静默进位成 24 小时条目）。
+  Future<CommandResult> _entryUpdate(CommandInvocation invocation) async {
+    final options = invocation.options;
+    if (options.isEmpty) {
+      return const CommandFailure(
+          '编辑需要至少一项修改：--activity/--start/--end/--note');
+    }
+    final existing = await timer.entries.entryById(invocation.args.first);
+    if (existing == null) {
+      return const CommandFailure('条目不存在或已删除');
+    }
+    DateTime? startAt;
+    final startRaw = options['start'];
+    if (startRaw != null) {
+      if (startRaw == 'now') {
+        startAt = _now();
+      } else {
+        final parsedStart = _todayAt(startRaw);
+        if (parsedStart == null) {
+          return const CommandFailure('非法时间值：--start=HH:MM');
+        }
+        startAt = _onDay(existing.startAt, parsedStart);
+      }
+    }
+    DateTime? endAt;
+    final endRaw = options['end'];
+    if (endRaw != null) {
+      if (endRaw == 'now') {
+        endAt = _now();
+      } else {
+        final parsedEnd = _todayAt(endRaw);
+        if (parsedEnd == null) {
+          return const CommandFailure('非法时间值：--end=HH:MM');
+        }
+        final baseStart = startAt ?? existing.startAt;
+        var resolvedEnd = _onDay(existing.startAt, parsedEnd);
+        if (!resolvedEnd.isAfter(baseStart)) {
+          // 相等不进位（+1 天启发只服务"早于起点"的跨零点方向）。
+          if (resolvedEnd.isAtSameMomentAs(baseStart)) {
+            return const CommandFailure('结束时刻必须晚于开始时刻');
+          }
+          resolvedEnd = resolvedEnd.add(const Duration(days: 1));
+          if (!resolvedEnd.isAfter(baseStart)) {
+            // +1 天仍不晚于起点：调用方给的时段跨度超过 24 小时且方向颠倒，
+            // 显式失败而非静默再进位。
+            return const CommandFailure('结束时刻必须晚于开始时刻');
+          }
+        }
+        endAt = resolvedEnd;
+      }
+    }
+    String? activityId;
+    final activityName = options['activity'];
+    if (activityName != null) {
+      final resolvedActivity = await _resolveActivityId(activityName);
+      if (resolvedActivity.id == null) {
+        return CommandFailure(resolvedActivity.error ?? '活动名解析失败');
+      }
+      activityId = resolvedActivity.id;
+    }
+    final result = await timer.updateEntry(
+      entryId: invocation.args.first,
+      activityId: activityId,
+      startAt: startAt,
+      endAt: endAt,
+      note: options['note'],
+    );
+    return _fromAppResultData(result, successMessage: '已编辑时间段');
+  }
+
+  /// `HH:MM` 解析出的当日时刻挪到 [base] 所在本地日（entry_update 时间还原）。
+  DateTime _onDay(DateTime base, DateTime timeOfDay) =>
+      DateTime(base.year, base.month, base.day, timeOfDay.hour, timeOfDay.minute);
 
   /// 解析活动名→id（全量未删活动按名精确匹配；重名歧义/不存在明确失败）。
   ///
@@ -366,6 +502,19 @@ class CommandDispatcher {
   }) {
     return result.fold(
       onSuccess: (_) => CommandSuccess(message: successMessage),
+      onFailure: (f) => CommandFailure(f.message),
+    );
+  }
+
+  /// `AppResult<T>` → CommandResult 并**透传载荷**（批次 5a）：UI 经指令通道
+  /// 执行后需要产物实体（如 activity_create 返回新活动以继续分类关联）。
+  CommandResult _fromAppResultData<T>(
+    AppResult<T> result, {
+    required String successMessage,
+  }) {
+    return result.fold(
+      onSuccess: (success) =>
+          CommandSuccess<T>(data: success.value, message: successMessage),
       onFailure: (f) => CommandFailure(f.message),
     );
   }

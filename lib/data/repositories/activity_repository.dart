@@ -187,6 +187,45 @@ class ActivityRepository with RepositoryMappings {
     }
   }
 
+  /// undo/redo 批量恢复写库（**单事务**，3a 事务化 applier 契约）：
+  /// 整条 undo 记录涉及的全部活动在同一个 drift transaction 内恢复
+  /// （softDelete=false：写回快照并推进 updatedAt——显式清空 deletedAt）
+  /// 或软删（softDelete=true：deletedAt = 推进后的 updatedAt）。
+  ///
+  /// 批次 5a activity_create 撤销落点（undo=软删新活动 / redo=复活）。
+  Future<AppResult<void>> restoreActivityStatesForUndo(
+    List<({Activity entry, bool softDelete})> ops, {
+    DateTime? at,
+  }) async {
+    try {
+      final now = at ?? DateTime.now();
+      await database.transaction(() async {
+        for (final op in ops) {
+          // **事务内行存在校验**（与 restoreCategoryStatesForUndo 同款）：
+          // validate 与事务之间的窗口内行被物理删除时，无校验的
+          // insertOnConflictUpdate 会退化为 INSERT 复活孤儿行；软删态断言
+          // 归 validate（不同 op 的 expected 态各异，统一断言会误拒）。
+          final current = await _activityById(op.entry.id);
+          if (current == null) {
+            if (op.softDelete) continue; // 行已物理删除：终态，无需软删
+            throw StateError('活动已被物理删除，无法恢复');
+          }
+          final target = op.softDelete
+              ? op.entry.copyWith(deletedAt: now, updatedAt: now)
+              : op.entry.copyWith(
+                  deletedAt: null,
+                  clearDeletedAt: true,
+                  updatedAt: now,
+                );
+          await _upsert(target);
+        }
+      });
+      return const AppSuccess(null);
+    } catch (e) {
+      return AppFailure('恢复活动状态失败：$e');
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // 同步（LWW 整行替换）
   // ---------------------------------------------------------------------------

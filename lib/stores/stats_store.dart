@@ -39,6 +39,8 @@ class StatsSnapshot {
     required this.rows,
     required this.totalDuration,
     required this.containsRunningEntry,
+    this.categoryFilterIds,
+    this.includeAuto = false,
   });
 
   final DateTime start;
@@ -54,6 +56,13 @@ class StatsSnapshot {
   /// 计算时范围内是否存在运行中条目（endAt == null）——存在时该快照
   /// 时间敏感（随时钟增长），缓存命中逻辑据此拒绝复用。
   final bool containsRunningEntry;
+
+  /// 计算时生效的分类过滤（批次 5b compute 下沉；null/空 = 未过滤）——
+  /// 缓存键组成部分，不同过滤参数不得互相命中。
+  final Set<String>? categoryFilterIds;
+
+  /// 计算时是否计入自动条目（缓存键组成部分）。
+  final bool includeAuto;
 }
 
 /// 统计 store：缓存最近一次聚合结果，数据变更（dataRevision）后失效。
@@ -95,14 +104,18 @@ class StatsStore extends ChangeNotifier {
   ///
   /// [effectiveNow] 可选：运行中条目的裁剪终点（默认当前时刻；测试注入
   /// 固定时刻做确定性断言）。
+  /// [categoryFilterIds]/[includeAuto]（批次 5b）：分类过滤与自动条目开关，
+  /// 下沉到仓储切片层——纳入缓存键，不同取值不互相命中。
   /// 失败返回 null 并记 [lastError]（调用方展示）。
   Future<StatsSnapshot?> compute({
     required DateTime start,
     required DateTime end,
     required StatsDimension dimension,
     DateTime? effectiveNow,
+    Set<String>? categoryFilterIds,
+    bool includeAuto = false,
   }) async {
-    // 缓存命中：数据未变 + 同范围同维度 + 上次计算无运行中条目
+    // 缓存命中：数据未变 + 同范围同维度同过滤参数 + 上次计算无运行中条目
     //（运行中条目的快照时间敏感，永不复用缓存）。
     final cached = _snapshot;
     if (_snapshotRevision == _dataRevision.value &&
@@ -110,7 +123,9 @@ class StatsStore extends ChangeNotifier {
         !cached.containsRunningEntry &&
         cached.start == start &&
         cached.end == end &&
-        cached.dimension == dimension) {
+        cached.dimension == dimension &&
+        cached.includeAuto == includeAuto &&
+        _sameFilter(cached.categoryFilterIds, categoryFilterIds)) {
       return cached;
     }
 
@@ -122,6 +137,8 @@ class StatsStore extends ChangeNotifier {
       start: start,
       end: end,
       effectiveNow: effectiveNow,
+      categoryFilterIds: categoryFilterIds,
+      includeAuto: includeAuto,
     );
     if (sliceResult
         case AppFailure<({List<StatsEntrySlice> slices, bool hasRunningEntry})>
@@ -133,6 +150,8 @@ class StatsStore extends ChangeNotifier {
         start: start,
         end: end,
         dimension: dimension,
+        categoryFilterIds: categoryFilterIds,
+        includeAuto: includeAuto,
       );
     }
     final range = sliceResult.requireValue();
@@ -149,6 +168,8 @@ class StatsStore extends ChangeNotifier {
           start: start,
           end: end,
           dimension: dimension,
+          categoryFilterIds: categoryFilterIds,
+          includeAuto: includeAuto,
         );
       }
       categoryById = categoryMap.requireValue();
@@ -172,6 +193,8 @@ class StatsStore extends ChangeNotifier {
         start: start,
         end: end,
         dimension: dimension,
+        categoryFilterIds: categoryFilterIds,
+        includeAuto: includeAuto,
       );
     }
     var total = Duration.zero;
@@ -183,7 +206,8 @@ class StatsStore extends ChangeNotifier {
     //（seq 未被更新的请求超过）且未 dispose 时写入——否则丢弃（返回当前
     // 有效快照，若参数匹配）或 null（无有效快照），由下次 compute 重算。
     if (_disposed || _dataRevision.value != revisionAtStart || seq != _computeSeq) {
-      return _cachedMatching(start, end, dimension);
+      return _cachedMatching(start, end, dimension,
+          categoryFilterIds: categoryFilterIds, includeAuto: includeAuto);
     }
     _lastError = null;
     _snapshot = StatsSnapshot(
@@ -194,6 +218,10 @@ class StatsStore extends ChangeNotifier {
       rows: List<StatsGroupRow>.unmodifiable(rows),
       totalDuration: total,
       containsRunningEntry: range.hasRunningEntry,
+      categoryFilterIds: categoryFilterIds == null
+          ? null
+          : Set<String>.unmodifiable(categoryFilterIds),
+      includeAuto: includeAuto,
     );
     _snapshotRevision = _dataRevision.value;
     notifyListeners();
@@ -212,9 +240,12 @@ class StatsStore extends ChangeNotifier {
     required DateTime start,
     required DateTime end,
     required StatsDimension dimension,
+    Set<String>? categoryFilterIds,
+    bool includeAuto = false,
   }) {
     if (_disposed || _dataRevision.value != revisionAtStart || seq != _computeSeq) {
-      return _cachedMatching(start, end, dimension);
+      return _cachedMatching(start, end, dimension,
+          categoryFilterIds: categoryFilterIds, includeAuto: includeAuto);
     }
     _lastError = message;
     _snapshot = null;
@@ -223,8 +254,8 @@ class StatsStore extends ChangeNotifier {
     return null;
   }
 
-  /// 当前有效快照中与 [start]/[end]/[dimension] 匹配者（过期/并发丢弃时
-  /// 供调用方复用）；无匹配返回 null。
+  /// 当前有效快照中与 [start]/[end]/[dimension]/过滤参数 匹配者（过期/并发
+  /// 丢弃时供调用方复用）；无匹配返回 null。
   ///
   /// 与顶部缓存命中守卫保持一致：仅当 revision 未变（快照对应当前数据）
   /// 且非运行中快照（时间敏感）时才可复用——过期请求不得因此拿到旧
@@ -232,18 +263,31 @@ class StatsStore extends ChangeNotifier {
   StatsSnapshot? _cachedMatching(
     DateTime start,
     DateTime end,
-    StatsDimension dimension,
-  ) {
+    StatsDimension dimension, {
+    Set<String>? categoryFilterIds,
+    bool includeAuto = false,
+  }) {
     final current = _snapshot;
     if (current != null &&
         _snapshotRevision == _dataRevision.value &&
         !current.containsRunningEntry &&
         current.start == start &&
         current.end == end &&
-        current.dimension == dimension) {
+        current.dimension == dimension &&
+        current.includeAuto == includeAuto &&
+        _sameFilter(current.categoryFilterIds, categoryFilterIds)) {
       return current;
     }
     return null;
+  }
+
+  /// 分类过滤参数等价（null 与空集视为同义"不过滤"；集合按值比较）。
+  static bool _sameFilter(Set<String>? a, Set<String>? b) {
+    final left = (a == null || a.isEmpty) ? null : a;
+    final right = (b == null || b.isEmpty) ? null : b;
+    if (left == null && right == null) return true;
+    if (left == null || right == null) return false;
+    return setEquals(left, right);
   }
 
   /// 清空缓存并通知（外部显式失效；dataRevision 变更走 [_invalidate]）。

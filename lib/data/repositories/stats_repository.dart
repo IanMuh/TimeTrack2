@@ -48,14 +48,22 @@ class StatsRepository {
   ///
   /// [effectiveNow]：运行中条目（endAt == null）的裁剪终点，默认取当前时刻
   /// （可注入固定时刻做确定性测试）。范围非法（end <= start）返回空列表。
-  /// 返回记录含 [hasRunningEntry]：范围内是否存在运行中条目——供调用方决定
-  /// 是否可安全复用缓存（运行中条目随 effectiveNow/时钟增长，缓存须按
-  /// 时间敏感处理）。
+  /// 返回记录含 [hasRunningEntry]：**纳入结果**的条目中是否存在运行中条目
+  /// ——供调用方决定是否可安全复用缓存（运行中条目随 effectiveNow/时钟
+  /// 增长，缓存须按时间敏感处理；被过滤排除的运行中条目不影响缓存安全性）。
+  ///
+  /// 批次 5b compute 下沉参数：
+  /// - [includeAuto] = true 时自动记录条目计入统计（默认排除——
+  ///   TimeEntry.isAuto 文档约定）；
+  /// - [categoryFilterIds] 非空时仅保留活动关联分类与所选集合有交集的
+  ///   条目（条目级语义，与明细列表过滤同口径）；null 或空集 = 不过滤。
   Future<AppResult<({List<StatsEntrySlice> slices, bool hasRunningEntry})>>
       slicesForRange({
     required DateTime start,
     required DateTime end,
     DateTime? effectiveNow,
+    Set<String>? categoryFilterIds,
+    bool includeAuto = false,
   }) async {
     if (!start.isBefore(end)) {
       return const AppSuccess((slices: [], hasRunningEntry: false));
@@ -115,9 +123,17 @@ class StatsRepository {
 
     final slices = <StatsEntrySlice>[];
     var hasRunningEntry = false;
+    final filterIds = categoryFilterIds;
+    final hasCategoryFilter = filterIds != null && filterIds.isNotEmpty;
     for (final entry in rangeEntries) {
-      if (entry.isAuto) {
+      if (!includeAuto && entry.isAuto) {
         continue; // 自动记录不计入统计（TimeEntry.isAuto 文档约定）
+      }
+      final links = linksByActivity[entry.activityId] ?? const [];
+      // 分类过滤（条目级）：活动任一关联分类命中所选即保留。
+      if (hasCategoryFilter &&
+          !links.any((link) => filterIds.contains(link.categoryId))) {
+        continue;
       }
       if (entry.endAt == null) {
         hasRunningEntry = true;
@@ -129,7 +145,6 @@ class StatsRepository {
         continue;
       }
       final activity = activityById[entry.activityId];
-      final links = linksByActivity[entry.activityId] ?? const [];
       // 主分类：排序后首个链接（isPrimary 优先）；无链接时无主分类。
       final primaryCategory =
           links.isEmpty ? null : categoryById[links.first.categoryId];
