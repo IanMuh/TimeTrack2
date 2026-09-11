@@ -118,6 +118,18 @@ CREATE TABLE IF NOT EXISTS time_entries (
 -- drift 迁移（onUpgrade 手工 ALTER）等价，ADD COLUMN IF NOT EXISTS 幂等。
 ALTER TABLE time_entries ADD COLUMN IF NOT EXISTS is_auto boolean NOT NULL DEFAULT false;
 
+-- 存量库补齐列（批次 4 schema v3）：同 is_auto 模式——本地 drift v3 给
+-- profile_settings 加 6 个通用偏好列、给 tracking_rules 加 enabled 启停列，
+-- toMap 全部并入同步载荷；存量远端库缺列时推送被 PostgREST 拒绝
+--（PGRST204 未知列），整轮 syncNow 失败。与本地 onUpgrade 手工 ALTER 等价。
+ALTER TABLE profile_settings ADD COLUMN IF NOT EXISTS theme_mode text NOT NULL DEFAULT 'light';
+ALTER TABLE profile_settings ADD COLUMN IF NOT EXISTS week_start_day integer NOT NULL DEFAULT 1;
+ALTER TABLE profile_settings ADD COLUMN IF NOT EXISTS use_24_hour_format boolean NOT NULL DEFAULT true;
+ALTER TABLE profile_settings ADD COLUMN IF NOT EXISTS default_record_minutes integer NOT NULL DEFAULT 25;
+ALTER TABLE profile_settings ADD COLUMN IF NOT EXISTS quick_reminder_enabled boolean NOT NULL DEFAULT true;
+ALTER TABLE profile_settings ADD COLUMN IF NOT EXISTS background_tracking_enabled boolean NOT NULL DEFAULT false;
+ALTER TABLE tracking_rules ADD COLUMN IF NOT EXISTS enabled boolean NOT NULL DEFAULT true;
+
 -- 操作日志
 -- 注意：activity_id / entry_id 为可空的归档性引用，**有意不做存在性校验**
 --（日志容忍脏引用：活动/条目被删后历史日志仍保留其 id 供展示，校验会
@@ -144,6 +156,12 @@ CREATE TABLE IF NOT EXISTS profile_settings (
   reminder_method text NOT NULL DEFAULT 'dialog',
   reminder_time_of_day_minutes integer NOT NULL DEFAULT 540,
   merge_neighbor_threshold_minutes integer NOT NULL DEFAULT 1,
+  theme_mode text NOT NULL DEFAULT 'light',
+  week_start_day integer NOT NULL DEFAULT 1,
+  use_24_hour_format boolean NOT NULL DEFAULT true,
+  default_record_minutes integer NOT NULL DEFAULT 25,
+  quick_reminder_enabled boolean NOT NULL DEFAULT true,
+  background_tracking_enabled boolean NOT NULL DEFAULT false,
   timezone text NOT NULL DEFAULT 'UTC',
   updated_at text NOT NULL
 );
@@ -162,6 +180,7 @@ CREATE TABLE IF NOT EXISTS tracking_rules (
                                        -- 归属校验，不设裸 REFERENCES——物理
                                        -- FK 与未来归档物理清理冲突）
   sync_enabled boolean NOT NULL DEFAULT true,
+  enabled      boolean NOT NULL DEFAULT true, -- 规则启停（批次 4；停用规则不参与匹配，仍随行 LWW 同步）
   updated_at  text NOT NULL,
   deleted_at  text
 );
