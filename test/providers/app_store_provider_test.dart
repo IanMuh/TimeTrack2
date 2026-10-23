@@ -1,7 +1,9 @@
 import 'package:flutter/foundation.dart' show FlutterError;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timetrack2/providers/app.dart';
+import 'package:timetrack2/providers/data.dart';
 import 'package:timetrack2/providers/infrastructure.dart';
+import 'package:timetrack2/utils/date_time_ext.dart';
 
 import '../support/provider_harness.dart';
 
@@ -23,8 +25,9 @@ void main() {
       // seed 后默认活动可用；今日条目为空、加载无失败。
       final activities = (await store.activities.activities()).requireValue();
       expect(activities, isNotEmpty);
-      expect(store.today.today, isEmpty);
-      expect(store.today.loadFailed, isFalse);
+      final today = DateTime.now().startOfDay;
+      final entries = await container.read(dayEntriesProvider(today).future);
+      expect(entries, isEmpty);
     });
 
     test('keepAlive：重复读取返回同一 AppStore 实例', () async {

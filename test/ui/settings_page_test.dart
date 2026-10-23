@@ -137,7 +137,6 @@ void main() {
       args: const ['学习'],
       options: const {'start': '09:00', 'end': '10:00'},
     ));
-    await store.today.loadToday();
     await _openSettings(tester, store);
 
     // 打开清除对话框（危险区按钮唯一；设置页长，先滚动可见）。
@@ -164,7 +163,6 @@ void main() {
     expect(find.text('已清除全部数据'), findsOneWidget);
 
     // 今日空（seed 活动重建——无时间条目）。
-    await store.today.loadToday();
     store.dispose();
   });
 

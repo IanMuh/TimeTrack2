@@ -74,3 +74,6 @@ secrets.*
 .zcode/
 _tmp_*.json
 .ocr_*.json
+
+# 本地 flutter 命令输出（勿提交）
+/*_out.txt

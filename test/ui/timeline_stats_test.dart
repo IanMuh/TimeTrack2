@@ -1,12 +1,17 @@
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timetrack2/api/supabase/sync_backend.dart';
 import 'package:timetrack2/app.dart';
 import 'package:timetrack2/data/database/app_database.dart' hide ProfileSettings;
+import 'package:timetrack2/providers/data.dart';
+import 'package:timetrack2/providers/infrastructure.dart';
 import 'package:timetrack2/stores/app_store.dart';
 import 'package:timetrack2/utils/result.dart';
 import 'package:timetrack2/viewmodels/commands/command_invocation.dart';
+import 'package:timetrack2/viewmodels/stats/stats_models.dart';
+import 'package:timetrack2/viewmodels/stats/stats_snapshot.dart';
 
 /// 时间线页 / 统计页集成测试（内存库 + 指令通道造数据）。
 class _FakeBackend implements SyncBackend {
@@ -76,6 +81,34 @@ Future<void> _pump(WidgetTester tester, AppStore store,
     TimeTrack2App(appStore: store, locale: const Locale('zh')),
   );
   await tester.pumpAndSettle();
+}
+
+/// 以 store 的同一数据库建独立容器读统计快照（页面与断言同源聚合逻辑）。
+/// 显式 includeAuto 用于锁定「排除自动」开关极性。
+Future<StatsSnapshot> _snapshotOf(
+  AppStore store, {
+  required bool includeAuto,
+}) async {
+  final container = ProviderContainer(overrides: [
+    appDatabaseProvider.overrideWithValue(store.database),
+  ]);
+  final dayStart = DateTime(
+    _harnessNow.year,
+    _harnessNow.month,
+    _harnessNow.day,
+  );
+  try {
+    return await container.read(
+      statsProvider(StatsQuery(
+        start: dayStart,
+        end: dayStart.add(const Duration(days: 1)),
+        dimension: StatsDimension.activity,
+        includeAuto: includeAuto,
+      )).future,
+    );
+  } finally {
+    container.dispose();
+  }
 }
 
 void main() {
@@ -184,7 +217,7 @@ void main() {
     await tester.pumpAndSettle();
 
     // 默认（开关关 = 计入）：学习 10 分钟在列，自动条目也在列。
-    final included = store.stats.snapshot!;
+    final included = await _snapshotOf(store, includeAuto: true);
     expect(
       included.rows
           .where((r) => r.id == 'activity:${xuexi.id}')
@@ -201,7 +234,7 @@ void main() {
     // 勾选「排除自动条目」→ 自动剔除，明细/图表/聚合行同口径。
     await tester.tap(find.text('排除自动条目'));
     await tester.pumpAndSettle();
-    final excluded = store.stats.snapshot!;
+    final excluded = await _snapshotOf(store, includeAuto: false);
     expect(excluded.rows.where((r) => r.id == 'activity:${auto.id}'), isEmpty);
     expect(
       excluded.rows

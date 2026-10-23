@@ -1,7 +1,6 @@
-import 'dart:async' show unawaited;
-
-import 'package:go_router/go_router.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../components/activity_color_dot.dart';
@@ -9,6 +8,8 @@ import '../components/controls.dart' show AppChip;
 import '../components/state_views.dart';
 import '../components/tnum_text.dart';
 import '../l10n/app_localizations.dart';
+import '../providers/data.dart';
+import '../providers/foundation.dart';
 import '../stores/app_store.dart';
 import '../utils/time_format.dart';
 import '../utils/day_metrics.dart';
@@ -23,123 +24,39 @@ import '../viewmodels/time_entry.dart';
 /// - 会话数 = 当日条目数（运行中计 1 条）；
 /// - 分组按**当前归属**（活动的主分类，不变式 3：展示用快照、统计按当前归属）；
 ///   条目名/色展示用发生时刻快照。
-class TodayPage extends StatefulWidget {
+class TodayPage extends ConsumerStatefulWidget {
   const TodayPage({super.key, required this.app});
 
   final AppStore app;
 
   @override
-  State<TodayPage> createState() => _TodayPageState();
+  ConsumerState<TodayPage> createState() => _TodayPageState();
 }
 
-class _TodayPageState extends State<TodayPage> {
+class _TodayPageState extends ConsumerState<TodayPage> {
   AppStore get app => widget.app;
   AppLocalizations get l10n => AppLocalizations.of(context)!;
 
-  DateTime _day = _dateOnly(DateTime.now());
-  List<TimeEntry> _entries = const [];
-  bool _loading = true;
-  bool _failed = false;
-  int _requestSeq = 0;
-  bool _disposed = false;
+  /// null = 跟随“今天”：跨午夜后 [currentDayProvider] 翻日，页面与查询键
+  /// 一起前移（旧实现把日期固定在 initState，午夜后页面停留昨日而 store
+  /// 已滚到新日，两个事实源指向不同天）。
+  DateTime? _selectedDay;
 
   /// 当前筛选（主分类根 id 集合 + "__unassigned__" 伪选项；空 = 全部）。
   Set<String> _filters = {};
   final Set<String> _collapsed = {};
 
-  String? _unassignedActivityId;
-  List<TimeEntry>? _previousEntries;
+  DateTime get _today => ref.watch(currentDayProvider);
+  DateTime get _day => _selectedDay ?? _today;
 
   static DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
 
-  bool get _isToday => _day == _dateOnly(DateTime.now());
-
-  @override
-  void initState() {
-    super.initState();
-    _init();
-    app.today.addListener(_onStoreChanged);
-    app.clock.addListener(_onStoreChanged);
-    app.category.addListener(_onStoreChanged);
-    app.dataRevision.addListener(_onStoreChanged);
-  }
-
-  @override
-  void dispose() {
-    _disposed = true;
-    app.today.removeListener(_onStoreChanged);
-    app.clock.removeListener(_onStoreChanged);
-    app.category.removeListener(_onStoreChanged);
-    app.dataRevision.removeListener(_onStoreChanged);
-    super.dispose();
-  }
-
-  void _onStoreChanged() {
-    if (mounted) setState(() {});
-  }
-
-  Future<void> _init() async {
-    final unassigned = await app.activities.unassignedActivity();
-    if (_disposed) return;
-    _unassignedActivityId =
-        unassigned.isSuccess ? unassigned.requireValue().id : null;
-    await _loadEntries();
-  }
-
-  Future<void> _loadEntries() async {
-    if (_isToday) {
-      // 今天由 TodayStore 驱动（自动随 dataRevision/跨日刷新），框内直接读。
-      setState(() {
-        _entries = app.today.today;
-        _loading = false;
-        _failed = false;
-      });
-      unawaited(_loadPrevious());
-      return;
-    }
-    final seq = ++_requestSeq;
-    setState(() {
-      _loading = true;
-      _failed = false;
-    });
-    try {
-      final loaded = await app.today.entries
-          .entriesForRange(_day, _day.add(const Duration(days: 1)));
-      if (_disposed || seq != _requestSeq) return;
-      setState(() {
-        _entries = loaded;
-        _loading = false;
-      });
-      unawaited(_loadPrevious());
-    } on Exception {
-      if (_disposed || seq != _requestSeq) return;
-      setState(() {
-        _failed = true;
-        _loading = false;
-      });
-    }
-  }
-
-  Future<void> _loadPrevious() async {
-    final seq = _requestSeq;
-    try {
-      final loaded = await app.today.entries
-          .entriesForRange(_day.subtract(const Duration(days: 1)), _day);
-      if (_disposed || seq != _requestSeq) return;
-      setState(() => _previousEntries = loaded);
-    } on Exception {
-      // 前日对比取不到不阻塞主流程（离线优先，显示为空差异即可）。
-    }
-  }
-
   void _changeDay(DateTime date) {
-    setState(() {
-      _day = _dateOnly(date);
-      _entries = const [];
-      _previousEntries = null;
-      _loading = true;
-    });
-    unawaited(_loadEntries());
+    setState(() => _selectedDay = _dateOnly(date));
+  }
+
+  void _backToToday() {
+    setState(() => _selectedDay = null);
   }
 
   Future<void> _pickDate() async {
@@ -156,18 +73,24 @@ class _TodayPageState extends State<TodayPage> {
   // 口径计算（暂定口径，挂账批次 3 数据层统一）
   // ---------------------------------------------------------------------------
 
-  Duration _entryClamp(TimeEntry e, DateTime dayStart) {
+  Duration _entryClamp(TimeEntry e, DateTime dayStart, DateTime now) {
     final start = e.startAt.isBefore(dayStart) ? dayStart : e.startAt;
-    final end = e.endAt ?? DateTime.now();
+    final end = e.endAt ?? now;
     return end.isAfter(start) ? end.difference(start) : Duration.zero;
   }
 
   /// 统一口径（lib/utils/day_metrics.dart，与计时页/统计一致）。
-  DayMetrics _metrics(List<TimeEntry> entries) => computeDayMetrics(
+  DayMetrics _metrics(
+    List<TimeEntry> entries,
+    DateTime now,
+    String? unassignedActivityId, {
+    DateTime? dayStart,
+  }) =>
+      computeDayMetrics(
         entries,
-        dayStart: _day,
-        now: DateTime.now(),
-        unassignedActivityId: _unassignedActivityId,
+        dayStart: dayStart ?? _day,
+        now: now,
+        unassignedActivityId: unassignedActivityId,
       );
 
   String? _primaryOf(String activityId) {
@@ -193,10 +116,10 @@ class _TodayPageState extends State<TodayPage> {
   int? _groupColor(String? rootId) =>
       rootId == null ? 0xffa1a1aa : app.category.categoryById[rootId]?.color;
 
-  Duration _totalOfEntries(List<TimeEntry> entries) {
+  Duration _totalOfEntries(List<TimeEntry> entries, DateTime now) {
     var t = Duration.zero;
     for (final e in entries) {
-      t += _entryClamp(e, _day);
+      t += _entryClamp(e, _day, now);
     }
     return t;
   }
@@ -209,7 +132,7 @@ class _TodayPageState extends State<TodayPage> {
   }
 
   /// 组内聚合行：按活动聚合（展示快照名/色；路径取当前归属）。
-  List<GroupRowData> _rowsFor(List<TimeEntry> entries) {
+  List<GroupRowData> _rowsFor(List<TimeEntry> entries, DateTime now) {
     final map = <String, GroupRowData>{};
     for (final e in entries) {
       final cur = map[e.activityId];
@@ -217,7 +140,7 @@ class _TodayPageState extends State<TodayPage> {
         key: e.activityId,
         name: cur?.name ?? e.activityNameSnapshot,
         color: cur?.color ?? e.activityColorSnapshot,
-        duration: (cur?.duration ?? Duration.zero) + _entryClamp(e, _day),
+        duration: (cur?.duration ?? Duration.zero) + _entryClamp(e, _day, now),
         count: (cur?.count ?? 0) + 1,
         path: cur?.path ?? _pathOf(e.activityId),
       );
@@ -233,9 +156,11 @@ class _TodayPageState extends State<TodayPage> {
     return chain.length > 1 ? chain.join(' / ') : '';
   }
 
-  List<({String? rootId, List<TimeEntry> entries})> _groups() {
+  List<({String? rootId, List<TimeEntry> entries})> _groups(
+    List<TimeEntry> entries,
+  ) {
     final map = <String?, List<TimeEntry>>{};
-    for (final e in _entries) {
+    for (final e in entries) {
       if (!_filterPass(e)) continue;
       map.putIfAbsent(_rootById(_primaryOf(e.activityId)), () => []).add(e);
     }
@@ -256,51 +181,76 @@ class _TodayPageState extends State<TodayPage> {
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) return const LoadingStateView();
-    if (_failed) {
-      return ErrorStateView(message: l10n.timerLoadFailed, onRetry: _loadEntries);
+    final day = _day;
+    final isToday = day == _today;
+    final entriesAsync = ref.watch(dayEntriesProvider(day));
+    final previousDay = DateTime(day.year, day.month, day.day - 1);
+    final previousAsync = ref.watch(dayEntriesProvider(previousDay));
+    final entries = entriesAsync.value;
+    if (entries == null) {
+      if (entriesAsync.hasError) {
+        return ErrorStateView(
+          message: l10n.timerLoadFailed,
+          onRetry: () => ref.invalidate(dayEntriesProvider(day)),
+        );
+      }
+      return const LoadingStateView();
     }
-    if (_entries.isEmpty) {
+    // 未分配活动 id（专注/休息口径）；尚未加载时不阻塞主流程。
+    final unassignedId = ref.watch(unassignedActivityIdProvider).value;
+    // 运行中条目的时长随时间增长：仅当存在运行中条目时才订阅 1Hz tick
+    //（空闲时不重建整页；旧 TodayStore 是全页 1Hz notify 的来源之一）。
+    final hasRunning = entries.any((e) => e.endAt == null);
+    final now = hasRunning ? ref.watch(clockTickProvider) : DateTime.now();
+    final previousEntries = previousAsync.value;
+
+    if (entries.isEmpty) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _TodayHeader(
             l10n: l10n,
-            day: _day,
-            isToday: _isToday,
-            onPrev: () => _changeDay(_day.subtract(const Duration(days: 1))),
-            onNext: () => _changeDay(_day.add(const Duration(days: 1))),
+            day: day,
+            isToday: isToday,
+            onPrev: () => _changeDay(day.subtract(const Duration(days: 1))),
+            onNext: () => _changeDay(day.add(const Duration(days: 1))),
             onPick: _pickDate,
-            onToday: () => _changeDay(DateTime.now()),
+            onToday: _backToToday,
           ),
           Expanded(
             child: EmptyStateView(
               icon: Icons.event_available_outlined,
-              title: _isToday ? l10n.emptyDayEntries : l10n.todayEmptyDay,
+              title: isToday ? l10n.emptyDayEntries : l10n.todayEmptyDay,
               message: l10n.startRecordingHint,
-              actionLabel: _isToday ? l10n.todayStartRecording : null,
-              onAction: _isToday ? () => context.go('/timer') : null,
+              actionLabel: isToday ? l10n.todayStartRecording : null,
+              onAction: isToday ? () => context.go('/timer') : null,
             ),
           ),
         ],
       );
     }
     final wide = MediaQuery.sizeOf(context).width >= 840;
-    final metrics = _metrics(_entries);
-    final prev = _previousEntries;
-    final prevMetrics = prev == null ? null : _metrics(prev);
+    final metrics = _metrics(entries, now, unassignedId);
+    final prevMetrics = previousEntries == null
+        ? null
+        : _metrics(
+            previousEntries,
+            now,
+            unassignedId,
+            dayStart: previousDay,
+          );
 
     final content = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _TodayHeader(
           l10n: l10n,
-          day: _day,
-          isToday: _isToday,
-          onPrev: () => _changeDay(_day.subtract(const Duration(days: 1))),
-          onNext: () => _changeDay(_day.add(const Duration(days: 1))),
+          day: day,
+          isToday: isToday,
+          onPrev: () => _changeDay(day.subtract(const Duration(days: 1))),
+          onNext: () => _changeDay(day.add(const Duration(days: 1))),
           onPick: _pickDate,
-          onToday: () => _changeDay(DateTime.now()),
+          onToday: _backToToday,
         ),
         const SizedBox(height: 16),
         _MetricsRow(l10n: l10n, metrics: metrics, previous: prevMetrics),
@@ -319,13 +269,13 @@ class _TodayPageState extends State<TodayPage> {
           onClear: () => setState(() => _filters = {}),
         ),
         const SizedBox(height: 16),
-        _buildGroups(),
+        _buildGroups(entries, now, unassignedId),
       ],
     );
 
     if (!wide) return content;
 
-    final previewEntries = _entries.where(_filterPass).toList()
+    final previewEntries = entries.where(_filterPass).toList()
       ..sort((a, b) => a.startAt.compareTo(b.startAt));
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -345,9 +295,13 @@ class _TodayPageState extends State<TodayPage> {
     );
   }
 
-  Widget _buildGroups() {
-    final groups = _groups();
-    final dayTotal = _metrics(_entries).total;
+  Widget _buildGroups(
+    List<TimeEntry> entries,
+    DateTime now,
+    String? unassignedActivityId,
+  ) {
+    final groups = _groups(entries);
+    final dayTotal = _metrics(entries, now, unassignedActivityId).total;
     return Column(
       children: [
         for (final group in groups)
@@ -355,9 +309,9 @@ class _TodayPageState extends State<TodayPage> {
             l10n: l10n,
             label: _groupLabel(group.rootId),
             color: _groupColor(group.rootId),
-            rows: _rowsFor(group.entries),
+            rows: _rowsFor(group.entries, now),
             collapsed: _collapsed.contains(group.rootId),
-            total: _totalOfEntries(group.entries),
+            total: _totalOfEntries(group.entries, now),
             dayTotal: dayTotal,
             onToggle: () => setState(() {
               final id = group.rootId;

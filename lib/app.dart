@@ -6,24 +6,24 @@ import 'package:go_router/go_router.dart';
 import 'components/app_theme.dart';
 import 'l10n/app_localizations.dart';
 import 'providers/foundation.dart';
-import 'viewmodels/profile_settings.dart' show ThemeModeSetting;
+import 'providers/infrastructure.dart';
 import 'routes/app_router.dart';
 import 'stores/app_store.dart';
-import 'stores/theme_mode_store.dart';
+import 'viewmodels/profile_settings.dart' show ThemeModeSetting;
 
 /// 应用根（阶段 4 批次 1：主题模式接线 + 路由接入）。
 ///
 /// - [appStore] **可空**：null = 纯占位模式（无路由/无壳的最小 home，便于
 ///   基座测试）；非 null = 接入 [AppRouter]（StatefulShellRoute 5 页保活壳）；
-/// - **主题接线**：[ListenableBuilder] 包 [ThemeModeStore] 提供 themeMode
-///   （默认浅色，契约 §9.7）；ThemeModeStore 为 UI 状态类——持久化
-///   （ProfileSettings 加 theme 列）随设置页批次 4 一起做，本批次仅内存态；
+/// - **主题接线**：唯一事实源为 `ProfileSettings.themeMode`（库），随
+///   SettingsStore 通知重建；无 store / 库未加载时回退浅色（契约 §9.7）。
+///   原 ThemeModeStore 内存双源已删除（R6 漂移风险）——设置页落库即生效；
 /// - [locale] 可注入（widget 测试固定中/英文验证 ARB 注入）；
 /// - **Riverpod 作用域（迁移期）**：[container] 非 null 时用
 ///   [UncontrolledProviderScope] 接管（main 先装配容器再 runApp）；为 null
 ///   时（widget 测试 / 占位模式）内部自建 [ProviderScope]，并把 [appStore]
-///   的 undo 实例桥接进容器——保证页面（ConsumerWidget）在测试里也能拿到
-///   与 AppStore 同一份撤销状态。B4 删除 AppStore 后此桥接一并移除。
+///   的数据库与 undo 实例桥接进容器——保证页面（ConsumerWidget）在测试里
+///   也能拿到同一份撤销状态。B4 删除 AppStore 后此桥接一并移除。
 /// - **系统字号钳制**：textScaler 最大 1.3 倍——无障碍放大 1.0-1.3 生效，
 ///   超出部分钳制（大计时数字/统计树行/活动卡等临界布局按 1.3 上限设计，
 ///   无钳制时极端放大会全屏溢出）。
@@ -55,9 +55,6 @@ class TimeTrack2App extends StatefulWidget {
 }
 
 class _TimeTrack2AppState extends State<TimeTrack2App> {
-  /// 主题模式 UI 状态（浅/深/跟随系统；默认浅色）。
-  late final ThemeModeStore _themeMode = ThemeModeStore();
-
   /// 路由：仅 appStore 注入时构造（空壳占位模式不建路由）。
   GoRouter? _router;
 
@@ -73,73 +70,78 @@ class _TimeTrack2AppState extends State<TimeTrack2App> {
   @override
   void dispose() {
     _router?.dispose();
-    _themeMode.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final router = _router;
-    final store = widget.appStore;
-    // 主题持久化接线（批次 4）：store 模式下以 ProfileSettings.themeMode 为
-    // 单一事实源（设置页经 SettingsStore.save 落库 → 此处重建）；ThemeModeStore
-    // 仅占位模式（appStore == null）与库未加载时的回退。
-    final settingsListenable = store?.settings;
-    final listenable = settingsListenable == null
-        ? _themeMode
-        : Listenable.merge([_themeMode, settingsListenable]);
+    final settings = widget.appStore?.settings;
+    // 无 store（占位模式）：恒浅色，无需订阅。
+    if (settings == null) {
+      return _withProviderScope(_buildApp(router, ThemeMode.light));
+    }
+    // 有 store：只订阅设置这一件事（主题/时制等），库变化即重建。
     return _withProviderScope(
       ListenableBuilder(
-        listenable: listenable,
-        builder: (context, _) {
-          final theme = TimeTrack2App._light;
-          final darkTheme = TimeTrack2App._dark;
-          final persisted = settingsListenable?.current?.themeMode;
-          final themeMode = persisted == null
-              ? _themeMode.mode
-              : themeModeFromSetting(persisted);
-          final locale = widget.locale;
-          const delegates = [
-            AppLocalizations.delegate,
-            GlobalMaterialLocalizations.delegate,
-            GlobalWidgetsLocalizations.delegate,
-            GlobalCupertinoLocalizations.delegate,
-          ];
-          const supportedLocales = AppLocalizations.supportedLocales;
-          // 占位模式（appStore == null）：最小 home，供基座/主题冒烟测试。
-          if (router == null) {
-            return MaterialApp(
-              title: 'TimeTrack2',
-              theme: theme,
-              darkTheme: darkTheme,
-              themeMode: themeMode,
-              localizationsDelegates: delegates,
-              supportedLocales: supportedLocales,
-              locale: locale,
-              builder: _clampTextScaler,
-              home: const _ShellPage(),
-            );
-          }
-          // 路由模式（appStore 注入）：GoRouter 须经 MaterialApp.router 装配
-          //（Flutter 3.44：MaterialApp 本体不再接受 routerConfig）。
-          return MaterialApp.router(
-            title: 'TimeTrack2',
-            theme: theme,
-            darkTheme: darkTheme,
-            themeMode: themeMode,
-            localizationsDelegates: delegates,
-            supportedLocales: supportedLocales,
-            locale: locale,
-            builder: _clampTextScaler,
-            routerConfig: router,
-          );
-        },
+        listenable: settings,
+        builder: (context, _) => _buildApp(
+          router,
+          themeModeFromSetting(
+            settings.current?.themeMode ?? ThemeModeSetting.light,
+          ),
+        ),
       ),
     );
   }
 
+  /// 主题/本地化壳（占位模式与实际路由模式共用）。
+  Widget _buildApp(GoRouter? router, ThemeMode themeMode) {
+    final theme = TimeTrack2App._light;
+    final darkTheme = TimeTrack2App._dark;
+    final locale = widget.locale;
+    const delegates = [
+      AppLocalizations.delegate,
+      GlobalMaterialLocalizations.delegate,
+      GlobalWidgetsLocalizations.delegate,
+      GlobalCupertinoLocalizations.delegate,
+    ];
+    const supportedLocales = AppLocalizations.supportedLocales;
+    // 占位模式（appStore == null）：最小 home，供基座/主题冒烟测试。
+    if (router == null) {
+      return MaterialApp(
+        title: 'TimeTrack2',
+        theme: theme,
+        darkTheme: darkTheme,
+        themeMode: themeMode,
+        localizationsDelegates: delegates,
+        supportedLocales: supportedLocales,
+        locale: locale,
+        builder: _clampTextScaler,
+        home: const _ShellPage(),
+      );
+    }
+    // 路由模式（appStore 注入）：GoRouter 须经 MaterialApp.router 装配
+    //（Flutter 3.44：MaterialApp 本体不再接受 routerConfig）。
+    return MaterialApp.router(
+      title: 'TimeTrack2',
+      theme: theme,
+      darkTheme: darkTheme,
+      themeMode: themeMode,
+      localizationsDelegates: delegates,
+      supportedLocales: supportedLocales,
+      locale: locale,
+      builder: _clampTextScaler,
+      routerConfig: router,
+    );
+  }
+
   /// 迁移期作用域装配：外部容器优先；否则内部建 [ProviderScope] 并桥接
-  /// [TimeTrack2App.appStore] 的撤销实例（测试/占位模式）。
+  /// [TimeTrack2App.appStore]（测试/占位模式）。
+  ///
+  /// 桥接内容：数据库（页面查询 provider 必须命中同一个测试库，否则会
+  /// 打开真实 drift 文件）、时钟/修订号/undo 实例（页面 watch 的 provider
+  /// 必须与 AppStore 同一份，否则收不到写操作通知）。
   Widget _withProviderScope(Widget child) {
     final container = widget.container;
     if (container != null) {
@@ -148,7 +150,15 @@ class _TimeTrack2AppState extends State<TimeTrack2App> {
     final store = widget.appStore;
     return ProviderScope(
       overrides: [
-        if (store != null) undoStoreProvider.overrideWithValue(store.undo),
+        if (store != null) ...[
+          appDatabaseProvider.overrideWithValue(store.database),
+          // 时钟/修订号/撤销都与 AppStore 同一实例：否则页面 watch 的
+          // provider 状态永远收不到 store 写操作的 bump（测试里表现为
+          // 页面不刷新），生产走 main 的容器不受此分支影响。
+          clockStoreProvider.overrideWithValue(store.clock),
+          dataRevisionStoreProvider.overrideWithValue(store.dataRevision),
+          undoStoreProvider.overrideWithValue(store.undo),
+        ],
       ],
       child: child,
     );

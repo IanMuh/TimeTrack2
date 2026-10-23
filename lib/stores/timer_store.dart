@@ -127,8 +127,9 @@ class TimerStore extends ChangeNotifier {
       _afterWrite();
       refresh();
     };
-    // 时钟 tick：刷新运行时长展示（runningEntry 时长随时间增长）。
-    clock.addListener(notifyListeners);
+    // 时钟 tick：仅运行中才需刷新时长展示（无运行条目时每怠秒通知会让
+    // 壳层计时条/计时页空转重建——B3 性能收敛）。
+    clock.addListener(_onClockTick);
   }
 
   final TimeEntryRepository entries;
@@ -137,6 +138,12 @@ class TimerStore extends ChangeNotifier {
   final DataRevision dataRevision;
 
   final TimerChangeApplier _applier;
+
+  /// 时钟 tick：仅运行中通知——空闲时无需秒级重建计时条（B3 性能收敛）。
+  void _onClockTick() {
+    if (_disposed || _runningEntry == null) return;
+    notifyListeners();
+  }
 
   /// 已 dispose：恢复写库回调（async refresh）可能在 dispose 后才恢复执行，
   /// 需防护"used after disposed"（回调由 undo 异步链驱动，时序不受控）。
@@ -589,7 +596,7 @@ class TimerStore extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
-    clock.removeListener(notifyListeners);
+    clock.removeListener(_onClockTick);
     super.dispose();
   }
 }

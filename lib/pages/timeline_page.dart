@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../components/activity_picker/activity_picker.dart';
 import '../components/entry_editor_dialog.dart';
 import '../components/feedback.dart';
 import '../components/state_views.dart';
 import '../components/tnum_text.dart';
-import '../data/repositories/action_log_repository.dart';
 import '../l10n/app_localizations.dart';
+import '../providers/data.dart';
+import '../providers/foundation.dart';
 import '../stores/app_store.dart';
 import '../utils/day_metrics.dart';
 import '../viewmodels/action_log.dart';
@@ -24,19 +26,19 @@ import 'timeline_widgets.dart';
 /// **仍挂账**：
 /// - add 指令的 start/end 仅支持当日时刻（跨日移动条目能力未收口）；
 /// - "最长连续" 口径暂取单条最大时长（未接合并阈值设置）。
-class TimelinePage extends StatefulWidget {
+class TimelinePage extends ConsumerStatefulWidget {
   const TimelinePage({super.key, required this.app});
 
   final AppStore app;
 
   @override
-  State<TimelinePage> createState() => _TimelinePageState();
+  ConsumerState<TimelinePage> createState() => _TimelinePageState();
 }
 
-class _TimelinePageState extends State<TimelinePage> {
+class _TimelinePageState extends ConsumerState<TimelinePage> {
   AppStore get app => widget.app;
 
-  /// 时制偏好（设置即时生效——settings 监听驱动重建）。
+  /// 时制偏好（设置即时生效——设置保存会 bump 修订号，查询 provider 失效重建）。
   bool get _use24 => app.settings.current?.use24HourFormat ?? true;
   AppLocalizations get l10n => AppLocalizations.of(context)!;
 
@@ -45,14 +47,19 @@ class _TimelinePageState extends State<TimelinePage> {
   int _spanIndex = 0;
   bool _viewEntries = true; // 条目 / 日志
   int _axisTab = 0; // 0=时间轴 1=比例条
+
+  /// 锚点日；[_followToday] 为真时 build 中跟随 [currentDayProvider] 前移
+  /// （跨午夜不再停留昨日）。
   DateTime _anchor = _today();
+  bool _followToday = true;
   double _zoom = 1.0;
   int _segments = 4;
-  bool _disposed = false;
 
+  /// 迁移期：每次 build 从 provider 同步的只读快照（指令送达/对话框里要用
+  /// 同一份数据；不再是“缓存事实源”，失效由 provider 负责）。
   List<Activity> _activities = const [];
   List<ActionLog> _logs = const [];
-  bool _logsLoaded = false;
+  List<TimeEntry> _entries = const [];
   String? _unassignedId;
 
   /// 编辑对话框打开时的初始活动 id（编辑态）：--activity 仅在用户显式
@@ -69,79 +76,25 @@ class _TimelinePageState extends State<TimelinePage> {
         _anchor.add(Duration(days: _spans[_spanIndex])),
       );
 
-  List<TimeEntry> get _entries => app.timeline.entriesForRange;
   bool get _isFuture => _anchor.isAfter(_today());
-
-  @override
-  void initState() {
-    super.initState();
-    _reload();
-    _initData();
-    app.timeline.addListener(_onChange);
-    app.clock.addListener(_onChange);
-    app.dataRevision.addListener(_onChange);
-    // 时制等偏好变更即时一致（不变式 7）：设置保存后 SettingsStore notify。
-    app.settings.addListener(_onChange);
-  }
-
-  @override
-  void dispose() {
-    _disposed = true;
-    app.settings.removeListener(_onChange);
-    app.timeline.removeListener(_onChange);
-    app.clock.removeListener(_onChange);
-    app.dataRevision.removeListener(_onChange);
-    super.dispose();
-  }
-
-  void _onChange() {
-    if (mounted) setState(() {});
-  }
-
-  Future<void> _reload() async {
-    final (s, e) = _range;
-    await app.timeline.loadRange(s, e);
-  }
-
-  Future<void> _initData() async {
-    final u = await app.activities.unassignedActivity();
-    if (_disposed) return;
-    _unassignedId = u.isSuccess ? u.requireValue().id : null;
-    final acts = await app.activities.activities();
-    if (_disposed) return;
-    setState(() {
-      if (acts.isSuccess) _activities = acts.requireValue();
-    });
-  }
-
-  Future<void> _loadLogs() async {
-    if (_logsLoaded) return;
-    final repo = ActionLogRepository(database: app.database);
-    final result = await repo.logs(limit: 50);
-    if (_disposed) return;
-    setState(() {
-      if (result.isSuccess) _logs = result.requireValue();
-      _logsLoaded = true;
-    });
-  }
 
   // ---------------------------------------------------------------------------
   // 汇总（口径：范围条目裁剪；最长连续暂取单条最大——挂账批次 6）
   // ---------------------------------------------------------------------------
 
-  Duration get _longest {
+  Duration _longest(DateTime now) {
     var v = Duration.zero;
     for (final e in _entries) {
-      final d = e.durationUntil(DateTime.now());
+      final d = e.durationUntil(now);
       if (d > v) v = d;
     }
     return v;
   }
 
-  DayMetrics get _metrics => computeDayMetrics(
+  DayMetrics _metricsAt(DateTime now) => computeDayMetrics(
         _entries,
         dayStart: _range.$1,
-        now: DateTime.now(),
+        now: now,
         unassignedActivityId: _unassignedId,
       );
 
@@ -311,18 +264,39 @@ class _TimelinePageState extends State<TimelinePage> {
 
   @override
   Widget build(BuildContext context) {
-    if (!_viewEntries) _loadLogs();
-    final scheme = Theme.of(context).colorScheme;
-    final m = _metrics;
-    final loading =
-        app.timeline.loadedRange == null && !app.timeline.loadFailed;
-    if (loading) return const LoadingStateView();
-    if (app.timeline.loadFailed) {
-      return ErrorStateView(
-        message: l10n.timerLoadFailed,
-        onRetry: _reload,
-      );
+    // 跟随今天：跨午夜由 currentDayProvider 驱动翻日（旧实现锚点固定在
+    // initState，午夜后与数据窗口错位）。
+    final today = ref.watch(currentDayProvider);
+    if (_followToday) _anchor = today;
+
+    // 查询即 provider：切日/切跨度只改键，不手工 reload；写操作会 bump
+    // 修订号 → provider 失效 → 本页重建。
+    final range = _range;
+    final entriesAsync = ref.watch(rangeEntriesProvider(range));
+    _entries = entriesAsync.value ?? const [];
+    _activities = ref.watch(activitiesProvider).value ?? _activities;
+    _unassignedId = ref.watch(unassignedActivityIdProvider).value;
+    if (!_viewEntries) {
+      // 日志改为 provider：此前 _logsLoaded 永久守卫导致打开一次后永不刷新。
+      _logs = ref.watch(actionLogsProvider(50)).value ?? const [];
     }
+
+    if (!entriesAsync.hasValue) {
+      if (entriesAsync.hasError) {
+        return ErrorStateView(
+          message: l10n.timerLoadFailed,
+          onRetry: () => ref.invalidate(rangeEntriesProvider(range)),
+        );
+      }
+      return const LoadingStateView();
+    }
+
+    // 运行中条目时长随时间增长：仅存在运行条目时订阅 1Hz tick。
+    final hasRunning = _entries.any((e) => e.endAt == null);
+    final now = hasRunning ? ref.watch(clockTickProvider) : DateTime.now();
+
+    final scheme = Theme.of(context).colorScheme;
+    final m = _metricsAt(now);
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(24, 20, 24, 40),
@@ -333,7 +307,7 @@ class _TimelinePageState extends State<TimelinePage> {
           l10n: l10n,
           total: m.total,
           sessions: m.sessions,
-          longest: _longest,
+          longest: _longest(now),
         ),
         const SizedBox(height: 14),
         if (_isFuture)
@@ -393,10 +367,7 @@ class _TimelinePageState extends State<TimelinePage> {
         _segmented(
           options: [l10n.tlSpanToday, l10n.tlSpanThree, l10n.tlSpanWeek],
           selected: _spanIndex,
-          onSelect: (i) => setState(() {
-            _spanIndex = i;
-            _reload();
-          }),
+          onSelect: (i) => setState(() => _spanIndex = i),
         ),
         _segmented(
           options: [l10n.tlViewEntries, l10n.tlViewLogs],
@@ -449,8 +420,10 @@ class _TimelinePageState extends State<TimelinePage> {
   }
 
   void _shift(int days) {
-    setState(() => _anchor = _anchor.add(Duration(days: days)));
-    _reload();
+    setState(() {
+      _followToday = false;
+      _anchor = _anchor.add(Duration(days: days));
+    });
   }
 
   Future<void> _pickDate() async {
@@ -461,8 +434,10 @@ class _TimelinePageState extends State<TimelinePage> {
       lastDate: DateTime.now().add(const Duration(days: 365)),
     );
     if (picked != null) {
-      setState(() => _anchor = picked);
-      _reload();
+      setState(() {
+        _followToday = false;
+        _anchor = DateTime(picked.year, picked.month, picked.day);
+      });
     }
   }
 

@@ -165,7 +165,6 @@ class BackupSection extends StatelessWidget {
     await app.activities.seedActivities();
     await app.category.reload();
     await app.settings.reload();
-    await app.today.loadToday();
     await app.timer.refresh();
     await app.tracking.reloadRules();
     await app.lan.reloadPeer(); // sync_peers 已清空，内存配对态同步失效
