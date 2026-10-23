@@ -9,6 +9,7 @@ import '../components/state_views.dart';
 import '../constants/theme_tokens.dart' show ActivityPalette;
 import '../l10n/app_localizations.dart';
 import '../providers/data.dart';
+import '../providers/engines.dart';
 import '../providers/foundation.dart';
 import '../stores/app_store.dart';
 import '../utils/day_metrics.dart';
@@ -139,7 +140,7 @@ class _TimerPageState extends ConsumerState<TimerPage> {
     }
   }
 
-  String? _runningActivityId() => app.timer.runningEntry?.activityId;
+  String? _runningActivityId() => ref.read(timerSnapshotProvider).activityId;
 
   ActivityPickerModel _buildPickerModel() {
     final category = app.category;
@@ -272,10 +273,10 @@ class _TimerPageState extends ConsumerState<TimerPage> {
         onRetry: () => ref.invalidate(activitiesProvider),
       );
     }
-    final running = app.timer.runningEntry;
+    final running = ref.watch(timerSnapshotProvider);
     // 1Hz 只在有运行条目时订阅：空闲页面不随秒重建。
-    final now = running == null ? DateTime.now() : ref.watch(clockTickProvider);
-    final recording = running != null && running.activityId != unassignedId;
+    final now = !running.isRunning ? DateTime.now() : ref.watch(clockTickProvider);
+    final recording = running.isRunning && running.activityId != unassignedId;
     if (activities.isEmpty) {
       return EmptyStateView(
         icon: Icons.business_center_outlined,
@@ -313,10 +314,10 @@ class _TimerPageState extends ConsumerState<TimerPage> {
         TimerFocusSection(
           l10n: l10n,
           recording: recording,
-          runningName: running?.activityNameSnapshot,
-          runningColor: running?.activityColorSnapshot,
-          runningPath: _pathOfActivity(running?.activityId),
-          elapsed: running == null ? Duration.zero : running.durationUntil(now),
+          runningName: running.activityName,
+          runningColor: running.activityColor,
+          runningPath: _pathOfActivity(running.activityId),
+          elapsed: running.isRunning ? now.difference(running.startAt!) : Duration.zero,
           todayTotal: _todayTotal(today, now, unassignedId),
           todaySessions: _todaySessions,
           onStop: recording

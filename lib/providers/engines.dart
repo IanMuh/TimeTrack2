@@ -26,7 +26,13 @@ final appStoreInstanceProvider = Provider<AppStore>((ref) {
 /// 用值相等（而非条目对象身份）作为通知门槛：`TimerStore` 内部任何无关字段的
 /// 变更都不会引起壳层重建；条目结束（entryId 变 null）或切换活动才通知。
 class TimerSnapshot {
-  const TimerSnapshot({this.entryId, this.activityId, this.startAt});
+  const TimerSnapshot({
+    this.entryId,
+    this.activityId,
+    this.startAt,
+    this.activityName,
+    this.activityColor,
+  });
 
   factory TimerSnapshot.from(TimerStore store) {
     final running = store.runningEntry;
@@ -34,6 +40,8 @@ class TimerSnapshot {
       entryId: running?.id,
       activityId: running?.activityId,
       startAt: running?.startAt,
+      activityName: running?.activityNameSnapshot,
+      activityColor: running?.activityColorSnapshot,
     );
   }
 
@@ -42,6 +50,10 @@ class TimerSnapshot {
   final String? activityId;
   final DateTime? startAt;
 
+  /// 活动名/色快照（条目携带的历史快照，改名不改既往展示）。
+  final String? activityName;
+  final int? activityColor;
+
   bool get isRunning => entryId != null;
 
   @override
@@ -49,10 +61,18 @@ class TimerSnapshot {
       other is TimerSnapshot &&
       other.entryId == entryId &&
       other.activityId == activityId &&
-      other.startAt == startAt;
+      other.startAt == startAt &&
+      other.activityName == activityName &&
+      other.activityColor == activityColor;
 
   @override
-  int get hashCode => Object.hash(entryId, activityId, startAt);
+  int get hashCode => Object.hash(
+        entryId,
+        activityId,
+        startAt,
+        activityName,
+        activityColor,
+      );
 
   @override
   String toString() =>

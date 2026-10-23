@@ -67,6 +67,12 @@ utils 不动；分 2 个 PR（PR1 = B0 地基 + B1 基础状态，PR2 = 其余�
   `ref.listen`（通知语义不变，只剩 settings 一个过渡白名单监听）；
   `test/support` 基座绑定 store 实例；新增 `test/providers/engines_test.dart`
   （快照只在运行条目真实变化时通知、stop=切未分配的语义）。801→803 测试。
+- B4b-1（同分支）：计时引擎订阅面收敛——`TimerSnapshot` 增活动名/色快照；
+  `timer_page` 运行态改 `ref.watch(timerSnapshotProvider)`（不再读 `app.timer`）；
+  AppShell 删除 `_timerTick = Listenable.merge([timer, clock])`，计时条改
+  `Consumer` + 条件 `clockTickProvider`（空闲不随秒重建），托盘推送/可疑条目
+  检测/提醒横幅改读快照。五个主页面已无 `app.timer` 引用（仅设置分区
+  后台/设备页残留，随 B4c 清）。
 
 **剩余（PR3）**：TimerStore/ReminderStore/CategoryStore/SettingsStore/ActivityStore
 → Notifier；Sync/Update/Tracking/Lan/AI 引擎 Notifier 包装；CommandDispatcher 改

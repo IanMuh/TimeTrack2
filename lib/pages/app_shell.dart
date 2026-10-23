@@ -63,11 +63,6 @@ class AppShell extends ConsumerStatefulWidget {
 
 class _AppShellState extends ConsumerState<AppShell>
     with WidgetsBindingObserver {
-  /// 合并 timer（运行条目变化）+ clock（秒级推进）为单一 listenable，
-  /// 避免每次 build 重建合并对象反复换订阅（计时条每秒重建）。
-  late final Listenable _timerTick =
-      Listenable.merge([widget.app.timer, widget.app.clock]);
-
   /// 未分配活动判定缓存：按运行条目所属 activityId 记录异步查询结果
   /// （防每帧查库）。
   String? _checkedActivityId;
@@ -335,10 +330,9 @@ class _AppShellState extends ConsumerState<AppShell>
   /// 推送托盘状态（模式 + 记录态 + 暂停态 + 本地化文案；服务内按全量签名
   /// 去重）。在计时条构建器中每秒调用——重复推送被 TrayService 拦截。
   void _pushTrayStatus() {
-    final running = widget.app.timer.runningEntry;
-    final recording =
-        running != null && !_entryIsUnassigned;
-    final activity = recording ? running.activityNameSnapshot : '';
+    final snap = ref.read(timerSnapshotProvider);
+    final recording = snap.isRunning && !_entryIsUnassigned;
+    final activity = recording ? (snap.activityName ?? '') : '';
     final l10n = AppLocalizations.of(context);
     unawaited(widget.app.tray.configure(
       mode: _trayCloseMode,
@@ -395,12 +389,12 @@ class _AppShellState extends ConsumerState<AppShell>
   /// 未分配判定放在标志位之后：await 间隙 timer 变化触发的重入被去重。
   Future<void> _checkSuspiciousEntry() async {
     if (_suspiciousChecked || !mounted) return;
-    final running = widget.app.timer.runningEntry;
-    if (running == null) return; // 无运行条目：无需检测
-    if (!running.startAt.isBefore(_sessionStart)) return; // 本会话内开始
+    final running = ref.read(timerSnapshotProvider);
+    if (!running.isRunning) return; // 无运行条目：无需检测
+    if (!running.startAt!.isBefore(_sessionStart)) return; // 本会话内开始
     _suspiciousChecked = true;
     if (await widget.app.activities
-        .activityIdIsUnassigned(running.activityId)) {
+        .activityIdIsUnassigned(running.activityId!)) {
       return;
     }
     if (!mounted) return;
@@ -436,7 +430,7 @@ class _AppShellState extends ConsumerState<AppShell>
               ),
             ),
           ]),
-          content: Text(l10n.suspiciousEntryContent(_hm(running.startAt))),
+          content: Text(l10n.suspiciousEntryContent(_hm(running.startAt!))),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(),
@@ -449,7 +443,7 @@ class _AppShellState extends ConsumerState<AppShell>
                 //（HH:MM 会按条目所在日还原，≥2 天前的条目会算错）。
                 unawaited(_dispatch(CommandInvocation(
                   name: 'entry_update',
-                  args: [running.id],
+                  args: [running.entryId!],
                   options: const {'end': 'now'},
                 )));
               },
@@ -782,9 +776,9 @@ class _AppShellState extends ConsumerState<AppShell>
     if (active is OngoingReminder) {
       // 横幅常驻期间时长实时计算（触发时刻快照仅在该条目已不运行时兜底）；
       // 对话框载体无重绘时机，保持触发时刻快照。
-      final running = widget.app.timer.runningEntry;
-      final elapsed = running != null && running.id == active.entryId
-          ? widget.app.clock.now().difference(running.startAt)
+      final running = ref.read(timerSnapshotProvider);
+      final elapsed = running.entryId == active.entryId
+          ? widget.app.clock.now().difference(running.startAt!)
           : active.elapsed;
       title = l10n.bannerOngoingTitle(_formatElapsed(elapsed));
       subtitle = l10n.bannerOngoingSub(active.activityName);
@@ -858,21 +852,22 @@ class _AppShellState extends ConsumerState<AppShell>
   // ---------------------------------------------------------------------------
 
   Widget _buildTimerBar({required bool compact}) {
-    return ListenableBuilder(
-      listenable: _timerTick,
-      builder: (context, _) {
-        final running = widget.app.timer.runningEntry;
+    return Consumer(
+      builder: (context, ref, _) {
+        final snap = ref.watch(timerSnapshotProvider);
+        // 1Hz 仅在计时中订阅：空闲时秒级 tick 不重建壳层。
+        final now = snap.isRunning ? ref.watch(clockTickProvider) : null;
         var recording = false;
         String? name;
         Color? color;
         var elapsed = Duration.zero;
-        if (running != null) {
-          _ensureUnassignedCheckQueued(running.activityId);
+        if (snap.isRunning) {
+          _ensureUnassignedCheckQueued(snap.activityId!);
           if (!_entryIsUnassigned) {
             recording = true;
-            name = running.activityNameSnapshot;
-            color = Color(running.activityColorSnapshot ?? Activity.defaultColor);
-            elapsed = running.durationUntil(widget.app.clock.now());
+            name = snap.activityName;
+            color = Color(snap.activityColor ?? Activity.defaultColor);
+            elapsed = now!.difference(snap.startAt!);
           }
         }
         final canStop = recording;
