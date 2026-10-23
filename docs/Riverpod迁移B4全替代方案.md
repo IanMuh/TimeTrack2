@@ -166,3 +166,42 @@ lib/providers/
 - `appStartupProvider` 失败时的错误页复用方式（`_StartupErrorApp` 是否保留）；
 - PR4 中 CommandDispatcher 迁移采用"构造注入 Ref"还是"每个处理器一个 provider"。
 
+## 8. 执行顺序修订（2026-10-23，实施勘察后）
+
+**发现**：A 方案的"Notifier 原地改造"无法按 store 逐个独立落地。领域 store 当前全部在
+`AppStore.create` 内构造（`lib/stores/app_store.dart:199` 起的 `final activity = ...`
+一段），再通过构造参数注入 `CommandDispatcher`（`lib/stores/app_store.dart:272`）；
+而 Notifier 实例只能由 `NotifierProvider` 创建。因此"把 `ActivityStore` 改成
+`ActivityNotifier`"必然同时改动三处：① 该 store 的装配归属（从 AppStore 移到
+`lib/providers/`）；② Dispatcher 的构造（当前持 `ActivityStore` 字段，
+`lib/stores/command_dispatcher.dart:56`）；③ 页面 20 处 `app.dispatcher` 与测试 14 处
+`store.dispatcher`。
+
+**修订顺序**（每一步都保持可运行 + 全量测试绿）：
+
+1. **PR4-a 装配归属**：新建 `lib/providers/stores.dart`，领域 store 改由 provider 构造
+   （repo/undo/revision/clock 均已是 provider），`AppStore.create` 改为接收这些实例、
+   不再内部 `new`；Dispatcher 仍由 AppStore 组装。此步是纯装配搬家，页面零改动，
+   测试只改夹具（`createTestContainer()` 取 store）。
+2. **PR4-b Activity**：`ActivityStore → ActivityNotifier extends Notifier<ActivityState>`；
+   `activityProvider = NotifierProvider`；Dispatcher 改 `ref.read(activityProvider.notifier)`
+   （或接收窄接口 `ActivityCreator`）；删 `AppStore.activity` 字段；`command_dispatcher_test`
+   改容器夹具。该类无专属测试（`test/stores/activity_store_test.dart` 不存在），
+   由 dispatcher 测试兜底。
+3. **PR4-c Settings → PR4-d Category → PR4-e Timer → PR4-f Reminder**：同上模式；
+   `settingsChangeProvider`/`categoryChangeProvider`/`timerChangeProvider` 等镜像
+   provider 作为过渡，对应 Notifier 落地后立即删除并改页面 watch notifier。
+4. **PR4-g Dispatcher**：构造改注入 `Ref`，`commandDispatcherProvider` 提供实例；
+   页面 20 处 `app.dispatcher` → `ref.read(commandDispatcherProvider)`；删
+   `AppStore.dispatcher`。
+5. **PR5**：引擎（Sync/Update/Tracking/LAN/AI）+ `appStartupProvider` + 删 `AppStore`。
+
+**代价与风险**：PR4-a 是原方案未写的一步（原方案默认 store 已可由 provider 构造）。
+跳过它，任何单 store 转换都会产生"双实例并存"或"容器反向依赖 AppStore"的坏形状，
+后续还要再拆一次。PR4-a 的 diff 集中在 `lib/stores/app_store.dart` 与新建的
+`lib/providers/stores.dart`，业务逻辑零改动，是风险最低的起点。
+
+**测试影响**：`AppStore.create` 的 9 处测试调用改为 `createTestContainer()` + 从容器取
+store；`test/support/provider_harness.dart` 增加 store override 参数（后续每步复用）。
+
+

@@ -104,9 +104,13 @@ utils 不动；分 2 个 PR（PR1 = B0 地基 + B1 基础状态，PR2 = 其余�
 
 **剩余（PR4/PR5）**：见下。
 
-**剩余（PR4）**：Settings → Activity → Category → Timer → Reminder → Undo →
-CommandDispatcher 依次改 Notifier（按 A 方案），页面/测试切 provider，删对应
-store 与 store 测试（迁移为容器测试）。
+**剩余（PR4）**：**PR4-a 装配归属先行**（新建 `lib/providers/stores.dart`，领域 store
+由 provider 构造、`AppStore.create` 改接收实例；纯装配搬家、页面零改动）→ Activity →
+Settings → Category → Timer → Reminder → Undo → CommandDispatcher 依次改 Notifier
+（按 A 方案），页面/测试切 provider，删对应 store 与 store 测试（迁移为容器测试）。
+顺序修订原因见 `docs/Riverpod迁移B4全替代方案.md` §8：Notifier 实例只能由
+`NotifierProvider` 创建，而领域 store 目前在 `AppStore.create` 内 new 出来并交给
+Dispatcher，跳过 PR4-a 会产生双实例或容器反向依赖 AppStore 的坏形状。
 
 **剩余（PR5）**：Sync/Update/Tracking/LAN 改 Notifier；托盘/安装器/Android 桥
 变纯服务 provider；`appStartupProvider` 接管 seed/rollover/清理；删除
