@@ -140,7 +140,8 @@ class _TimeTrack2AppState extends State<TimeTrack2App> {
   /// [TimeTrack2App.appStore]（测试/占位模式）。
   ///
   /// 桥接内容：数据库（页面查询 provider 必须命中同一个测试库，否则会
-  /// 打开真实 drift 文件）、undo 实例（撤销按钮与 AppStore 同一份状态）。
+  /// 打开真实 drift 文件）、时钟/修订号/undo 实例（页面 watch 的 provider
+  /// 必须与 AppStore 同一份，否则收不到写操作通知）。
   Widget _withProviderScope(Widget child) {
     final container = widget.container;
     if (container != null) {
@@ -151,6 +152,11 @@ class _TimeTrack2AppState extends State<TimeTrack2App> {
       overrides: [
         if (store != null) ...[
           appDatabaseProvider.overrideWithValue(store.database),
+          // 时钟/修订号/撤销都与 AppStore 同一实例：否则页面 watch 的
+          // provider 状态永远收不到 store 写操作的 bump（测试里表现为
+          // 页面不刷新），生产走 main 的容器不受此分支影响。
+          clockStoreProvider.overrideWithValue(store.clock),
+          dataRevisionStoreProvider.overrideWithValue(store.dataRevision),
           undoStoreProvider.overrideWithValue(store.undo),
         ],
       ],

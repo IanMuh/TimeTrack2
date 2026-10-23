@@ -47,15 +47,9 @@ class _TimerPageState extends ConsumerState<TimerPage> {
   // 数据状态
   // ---------------------------------------------------------------------------
 
-  List<Activity> _activities = const [];
-  bool _loading = true;
-  bool _failed = false;
   String? _categoryFilterId; // null = 全部
   String? _pendingActivityId; // 单击选中待确认（再击 = 确认切换）
   Timer? _pendingTimer;
-  String? _checkedRunningActivityId;
-  bool _recording = false; // 运行条目是否处于"记录中"（未分配 = 未记录）
-  bool _disposed = false;
 
   /// 今日条目只读快照：每次 build 从 provider 同步（动作回调需要同一份数据）。
   List<TimeEntry> _todayEntries = const [];
@@ -63,63 +57,14 @@ class _TimerPageState extends ConsumerState<TimerPage> {
   static const _pendingTimeout = Duration(milliseconds: 2500);
 
   @override
-  void initState() {
-    super.initState();
-    _load();
-    app.timer.addListener(_onLiveChanged);
-    app.clock.addListener(_onLiveChanged);
-    app.category.addListener(_load);
-    app.dataRevision.addListener(_load);
-  }
-
-  @override
   void dispose() {
-    _disposed = true;
     _pendingTimer?.cancel();
-    app.timer.removeListener(_onLiveChanged);
-    app.clock.removeListener(_onLiveChanged);
-    app.category.removeListener(_load);
-    app.dataRevision.removeListener(_load);
     super.dispose();
   }
 
-  void _onLiveChanged() {
-    _refreshRecordingState();
-    if (mounted) setState(() {});
-  }
-
-  void _refreshRecordingState() {
-    final running = app.timer.runningEntry;
-    if (running == null) {
-      _checkedRunningActivityId = null;
-      _recording = false;
-      return;
-    }
-    if (_checkedRunningActivityId == running.activityId) return;
-    _checkedRunningActivityId = running.activityId;
-    _recording = false; // 查询期间先按记录中渲染，防闪烁
-    final id = running.activityId;
-    Future.microtask(() async {
-      final isUnassigned = await app.activities.activityIdIsUnassigned(id);
-      if (_disposed || _checkedRunningActivityId != id) return;
-      setState(() => _recording = !isUnassigned);
-    });
-  }
-
-  Future<void> _load() async {
-    if (_disposed) return;
-    final result = await app.activities.activities();
-    if (_disposed) return;
-    setState(() {
-      _loading = false;
-      if (result.isSuccess) {
-        _activities = result.requireValue();
-        _failed = false;
-      } else {
-        _failed = true;
-      }
-    });
-  }
+  /// 动作回调用的活动列表（build 之外读取，不持有页面副本）。
+  List<Activity> get _loadedActivities =>
+      ref.read(activitiesProvider).value ?? const [];
 
   /// 今日累计（口径：含全部条目含未分配，运行中按当前时刻计）。
   Duration _todayTotal(DateTime dayStart, DateTime now, String? unassignedId) =>
@@ -131,9 +76,6 @@ class _TimerPageState extends ConsumerState<TimerPage> {
       ).total;
 
   int get _todaySessions => _todayEntries.length;
-
-  /// 活动 id → 今日时长（运行中条目仅当活动本身就是运行条目且非未分配）。
-  bool get _isRecording => _recording;
 
   // ---------------------------------------------------------------------------
   // 动作（全部经指令通道 / 选择器）
@@ -208,12 +150,12 @@ class _TimerPageState extends ConsumerState<TimerPage> {
       if (link.isPrimary) primary[link.activityId] = link.categoryId;
     }
     // 无主分类键显式 null（"未分类"可辨识）。
-    for (final a in _activities) {
+    for (final a in _loadedActivities) {
       primary.putIfAbsent(a.id, () => null);
       all.putIfAbsent(a.id, () => {});
     }
     return ActivityPickerModel(
-      activities: _activities,
+      activities: _loadedActivities,
       categories: category.all,
       descendantsOf: category.descendantsOf,
       childrenByParent: category.childrenByParent,
@@ -271,7 +213,7 @@ class _TimerPageState extends ConsumerState<TimerPage> {
   Future<void> _startTemporary() async {
     final name = l10n.timerTemporaryActivity;
     Activity? existing;
-    for (final a in _activities) {
+    for (final a in _loadedActivities) {
       if (a.isOneOff && a.name == name) {
         existing = a;
         break;
@@ -311,27 +253,30 @@ class _TimerPageState extends ConsumerState<TimerPage> {
 
   @override
   Widget build(BuildContext context) {
-    // 今日条目由 provider 提供（TodayStore 已删）：写操作/跨日自动失效。
+    // 迁移期桥：分类树仍由 CategoryStore 持有（B4 换 provider），分类/关联
+    // 变更都会 bump 修订号——页面级 watch 让筛选树与运行路径随库刷新。
+    ref.watch(dataRevisionProvider);
+    // 今日条目/活动列表均由 provider 提供（TodayStore 已删）：写操作/跨日失效。
     final today = ref.watch(currentDayProvider);
     _todayEntries = ref.watch(dayEntriesProvider(today)).value ?? const [];
-    final now = ref.watch(clockTickProvider);
     final unassignedId = ref.watch(unassignedActivityIdProvider).value;
+    final activitiesAsync = ref.watch(activitiesProvider);
 
-    if (_loading) return const LoadingStateView();
-    final running = app.timer.runningEntry;
-    if (_failed) {
+    if (activitiesAsync.isLoading && !activitiesAsync.hasValue) {
+      return const LoadingStateView();
+    }
+    final activities = activitiesAsync.value;
+    if (activities == null) {
       return ErrorStateView(
         message: l10n.timerLoadFailed,
-        onRetry: () {
-          setState(() {
-            _loading = true;
-            _failed = false;
-          });
-          _load();
-        },
+        onRetry: () => ref.invalidate(activitiesProvider),
       );
     }
-    if (_activities.isEmpty) {
+    final running = app.timer.runningEntry;
+    // 1Hz 只在有运行条目时订阅：空闲页面不随秒重建。
+    final now = running == null ? DateTime.now() : ref.watch(clockTickProvider);
+    final recording = running != null && running.activityId != unassignedId;
+    if (activities.isEmpty) {
       return EmptyStateView(
         icon: Icons.business_center_outlined,
         title: l10n.timerNoActivities,
@@ -340,7 +285,7 @@ class _TimerPageState extends ConsumerState<TimerPage> {
         onAction: _openPicker,
       );
     }
-    final visible = _activities
+    final visible = activities
         .where((a) => a.isUnassigned || _matchesFilter(a))
         .toList();
     final quick = TimerQuickSection(
@@ -367,18 +312,18 @@ class _TimerPageState extends ConsumerState<TimerPage> {
       children: [
         TimerFocusSection(
           l10n: l10n,
-          recording: _isRecording,
+          recording: recording,
           runningName: running?.activityNameSnapshot,
           runningColor: running?.activityColorSnapshot,
           runningPath: _pathOfActivity(running?.activityId),
           elapsed: running == null ? Duration.zero : running.durationUntil(now),
           todayTotal: _todayTotal(today, now, unassignedId),
           todaySessions: _todaySessions,
-          onStop: _isRecording
+          onStop: recording
               ? () => _dispatch(CommandInvocation(name: 'stop'))
               : null,
           onSwitch: _openPicker,
-          onStart: _isRecording ? null : _openPicker,
+          onStart: recording ? null : _openPicker,
         ),
         const SizedBox(height: 48),
         quick,

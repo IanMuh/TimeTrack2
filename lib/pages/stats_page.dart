@@ -122,6 +122,9 @@ class _StatsPageState extends ConsumerState<StatsPage> {
 
   @override
   Widget build(BuildContext context) {
+    // 迁移期桥接：分类/设置仍由 ChangeNotifier store 持有（B4 换 provider），
+    // 其变更都 bump 修订号——页面级 watch 保证筛选树/周起始日随库刷新。
+    ref.watch(dataRevisionProvider);
     // 范围条目 + 统计聚合均由 provider 提供（StatsStore 缓存已删）：
     // 范围/维度/过滤参数变化 = family 换键；写操作 bump 修订号失效。
     final (start, end) = _range;
