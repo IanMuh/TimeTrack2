@@ -415,7 +415,6 @@ class AppStore {
     if (ownsDomain) {
       settings.dispose();
       category.dispose();
-      activity.dispose();
       timer.dispose();
     }
     if (ownsFoundation) {

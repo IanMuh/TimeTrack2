@@ -108,7 +108,6 @@ class _TestHarness {
 
   Future<void> close() async {
     tracking.dispose();
-    activity.dispose();
     category.dispose();
     timer.dispose();
     clock.dispose();

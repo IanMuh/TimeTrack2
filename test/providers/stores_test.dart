@@ -36,6 +36,7 @@ void main() {
     expect(() => domain.settings.addListener(() {}), throwsFlutterError);
     expect(() => domain.timer.addListener(() {}), throwsFlutterError);
     expect(() => domain.category.addListener(() {}), throwsFlutterError);
-    expect(() => domain.activity.addListener(() {}), throwsFlutterError);
+    // 活动已去 ChangeNotifier（PR4-b），无 dispose 可断言；其通知走
+    // activityProvider，见 activity_test.dart。
   });
 }

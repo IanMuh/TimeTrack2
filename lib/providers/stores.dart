@@ -16,6 +16,8 @@ import '../stores/activity_store.dart';
 import '../stores/category_store.dart';
 import '../stores/settings_store.dart';
 import '../stores/timer_store.dart';
+import '../utils/result.dart';
+import '../viewmodels/activity.dart';
 import 'data.dart';
 import 'foundation.dart';
 
@@ -59,7 +61,6 @@ final domainStoresProvider = Provider<DomainStores>((ref) {
     dataRevision: ref.watch(dataRevisionStoreProvider),
   );
   ref
-    ..onDispose(activity.dispose)
     ..onDispose(category.dispose)
     ..onDispose(settings.dispose)
     ..onDispose(timer.dispose);
@@ -70,3 +71,44 @@ final domainStoresProvider = Provider<DomainStores>((ref) {
     settings: settings,
   );
 });
+
+/// 活动写路径服务（容器唯一实例；`activity_create` 指令与 Notifier 共用）。
+final activityStoreProvider = Provider<ActivityStore>(
+  (ref) => ref.watch(domainStoresProvider).activity,
+);
+
+/// 活动变更状态（PR4-b 第一步）：`ActivityStore` 已去 `ChangeNotifier`，
+/// 写成功/撤销恢复后经 [ActivityStore.onChanged] 推进本状态。
+///
+/// 页面目前仍依赖 `dataRevision` 刷新（活动列表是查询结果），本 provider 供
+/// PR4-g 把 Dispatcher/活动选择器的读取面切过来后直接 watch。
+final activityProvider =
+    NotifierProvider<ActivityNotifier, int>(ActivityNotifier.new);
+
+class ActivityNotifier extends Notifier<int> {
+  @override
+  int build() {
+    final store = ref.watch(activityStoreProvider);
+    void onChanged() {
+      if (!ref.mounted) return;
+      state = state + 1;
+    }
+
+    store.onChanged = onChanged;
+    ref.onDispose(() {
+      if (identical(store.onChanged, onChanged)) store.onChanged = null;
+    });
+    return 0;
+  }
+
+  /// 新建活动（与 `activity_create` 指令同一写路径）。
+  Future<AppResult<Activity>> createActivity({
+    required String name,
+    required int color,
+    bool isOneOff = false,
+  }) {
+    return ref
+        .read(activityStoreProvider)
+        .createActivity(name: name, color: color, isOneOff: isOneOff);
+  }
+}

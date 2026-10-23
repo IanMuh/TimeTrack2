@@ -115,12 +115,19 @@ utils 不动；分 2 个 PR（PR1 = B0 地基 + B1 基础状态，PR2 = 其余�
 （同一实例 + 容器释放后领域 store 已 dispose）。验收：analyze 0；全量
 **803 passed**。
 
+**PR4-b 第一步（活动）**：`ActivityStore` 去掉 `ChangeNotifier`（保留
+`createActivity` 写路径、undo applier 与 `dataRevision.bump()`），新增
+`activityProvider`（`Notifier<int>`）承接通知：`ActivityStore.onChanged` 由
+notifier build 时挂载，写成功与撤销恢复都推进；`ActivityStore` 不再有
+`dispose`。Dispatcher 暂时仍持 `ActivityStore`（PR4-g 统一读面）。新增
+`test/providers/activity_test.dart` 2 例（指令写路径递增、undo 恢复递增）。
+验收：analyze 0；全量 **807 passed**。
+
 **剩余（PR4/PR5）**：见下。
 
-**剩余（PR4）**：**PR4-a 装配归属先行**（新建 `lib/providers/stores.dart`，领域 store
-由 provider 构造、`AppStore.create` 改接收实例；纯装配搬家、页面零改动）→ Activity →
-Settings → Category → Timer → Reminder → Undo → CommandDispatcher 依次改 Notifier
-（按 A 方案），页面/测试切 provider，删对应 store 与 store 测试（迁移为容器测试）。
+**剩余（PR4）**：Activity 已完成 → Settings → Category → Timer → Reminder →
+Undo → CommandDispatcher 依次改 Notifier（按 A 方案），页面/测试切 provider，
+删对应 store 与 store 测试（迁移为容器测试）。
 顺序修订原因见 `docs/Riverpod迁移B4全替代方案.md` §8：Notifier 实例只能由
 `NotifierProvider` 创建，而领域 store 目前在 `AppStore.create` 内 new 出来并交给
 Dispatcher，跳过 PR4-a 会产生双实例或容器反向依赖 AppStore 的坏形状。
