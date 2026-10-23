@@ -14,12 +14,9 @@ Future<void> main() async {
   final container = ProviderContainer();
   try {
     final appStore = await container.read(appStoreProvider.future);
-    runApp(
-      UncontrolledProviderScope(
-        container: container,
-        child: TimeTrack2App(appStore: appStore),
-      ),
-    );
+    // 路由/壳层经 TimeTrack2App 的 container 参数接入同一容器
+    // （UncontrolledProviderScope 由根组件内部安装）。
+    runApp(TimeTrack2App(appStore: appStore, container: container));
   } catch (e, st) {
     // 启动失败兜底（模块门禁 medium）：数据库损坏/迁移异常不得静默空白窗口
     // ——输出可诊断日志（含堆栈）后渲染错误页。

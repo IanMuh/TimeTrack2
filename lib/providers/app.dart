@@ -7,6 +7,7 @@ library;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../stores/app_store.dart';
+import 'foundation.dart';
 import 'infrastructure.dart';
 
 /// 应用聚合 store（异步装配：打开库 → seed → 各 store 首次加载 → 启动编排）。
@@ -25,6 +26,11 @@ final appStoreProvider = FutureProvider<AppStore>((ref) async {
     updateManifestUrl: ref.watch(updateManifestUrlProvider),
     currentVersion: ref.watch(appVersionProvider),
     runStartupChecks: ref.watch(runStartupChecksProvider),
+    // 基础服务唯一实例由容器持有：AppStore 不再创建/释放它们（避免与
+    // provider 的 onDispose 双重 dispose）。
+    clockOverride: ref.watch(clockStoreProvider),
+    dataRevisionOverride: ref.watch(dataRevisionStoreProvider),
+    undoOverride: ref.watch(undoStoreProvider),
   );
   ref.onDispose(store.dispose);
   return store;

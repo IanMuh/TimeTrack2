@@ -13,6 +13,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:timetrack2/api/supabase/sync_backend.dart';
 import 'package:timetrack2/data/database/app_database.dart';
 import 'package:timetrack2/providers/app.dart';
+import 'package:timetrack2/providers/foundation.dart';
 import 'package:timetrack2/providers/infrastructure.dart';
 import 'package:timetrack2/stores/app_store.dart';
 
@@ -41,6 +42,8 @@ ProviderContainer createTestContainer({
       appDatabaseProvider.overrideWithValue(db),
       syncBackendProvider.overrideWithValue(backend ?? NoopSyncBackend()),
       runStartupChecksProvider.overrideWithValue(false),
+      // 测试默认不让 1Hz 时钟空转（需要 tick 的用例自行覆盖更短间隔）。
+      clockIntervalProvider.overrideWithValue(const Duration(hours: 1)),
       if (now != null) nowProvider.overrideWithValue(now),
       ...overrides,
     ],

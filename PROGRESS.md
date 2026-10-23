@@ -28,6 +28,31 @@
   每秒服务同步去重、ForegroundDetector 契约下沉 viewmodels（依赖方向）
 - 门禁：`flutter analyze` 0 issues / 全量 820 测试绿
 
+## Riverpod 状态管理迁移（进行中，2026-10-23 起）
+
+**决策**：经用户确认切换为 Riverpod（flutter_riverpod 3.4.3，手写 provider，
+不用 codegen）；范围仅 UI 状态订阅层（stores + 页面订阅），data/api/viewmodels/
+utils 不动；分 2 个 PR（PR1 = B0 地基 + B1 基础状态，PR2 = 其余）。存量引擎类
+（sync/update/tracking/lan/ai）也按 Notifier 包装（用户选 B），但排在最后。
+
+**已完成（分支 `feat/riverpod-migration`）**：
+- B0（`ba04571`）：容器启动装配（`ProviderContainer` + `UncontrolledProviderScope`）、
+  `lib/providers/infrastructure.dart` + `app.dart`（appDatabase/appStore provider、
+  装配参数 provider 化）、删除 get_it、`test/support/provider_harness.dart`、
+  `test/providers/app_store_provider_test.dart`、AGENTS.md 迁移期规则。
+- B1：`lib/providers/foundation.dart`——`clockTickProvider`（1Hz ClockStore 包装）、
+  `currentDayProvider`（跨午夜自动翻日）、`dataRevisionProvider`（Notifier 镜像）、
+  `undoStateProvider`（撤销可用性快照，undo/redo 走 Notifier）；基础服务所有权从
+  AppStore 移到容器（`AppStore.create(clock/revision/undo + ownsFoundation)`）；
+  壳层 undo/redo 按钮改为 `ConsumerWidget` 示例；`TimeTrack2App(container:)` 安装
+  作用域（测试内自建 ProviderScope 并桥接 AppStore.undo）。
+
+**后续批次**：今日/时间线/统计 → 计时（TimerNotifier + reminder/tracking/dispatcher
+端口）→ 分类/活动/设置 → 引擎与 AppShell → 删 AppStore/get_it 残留、文档与全量
+审查。顺序相对批准确认版有调整：原 B1 的计时切片因 TimerStore 被 reminder/
+tracking/dispatcher/通知深度引用（517/397/346 行测试绑定 store 类型），拆到基础
+状态之后单独一批，避免一次改写四层。
+
 ## 阶段 5 收尾清单（待办）
 
 **人工/实机（需有 VS 的机器 + Android 真机）**：

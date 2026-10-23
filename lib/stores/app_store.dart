@@ -80,7 +80,15 @@ class AppStore {
     required this.androidTracking,
     required this.dispatcher,
     required this.fileInterop,
+    required this.ownsFoundation,
   });
+
+  /// 基础服务（clock/dataRevision/undo）是否由本对象创建并负责释放。
+  ///
+  /// Riverpod 迁移期：providers 注入时不释放（容器 onDispose 负责），避免
+  /// 双重 dispose（ChangeNotifier 二次 dispose 会触发断言）。仅供迁移期
+  /// 装配层使用，不属于业务 API。
+  final bool ownsFoundation;
 
   final AppDatabase database;
 
@@ -132,6 +140,10 @@ class AppStore {
   /// 可注入依赖（测试用内存库 + fake 后端绕过真实副作用）：
   /// [backend]（SyncBackend，默认 Noop 离线）、[now]、[windowsInstaller]、
   /// [updateManifestUrl]。默认值指向真实配置。
+  ///
+  /// [clockOverride] / [dataRevisionOverride] / [undoOverride]：Riverpod 迁移
+  /// 期由 `providers/` 注入唯一实例（容器负责 dispose）；三者必须同时注入或
+  /// 同时省略（省略时由本方法自建并负责释放，兼容存量测试）。
   static Future<AppStore> create({
     required AppDatabase database,
     SyncBackend? backend,
@@ -140,6 +152,9 @@ class AppStore {
     Uri? updateManifestUrl,
     String currentVersion = '0.1.0',
     bool runStartupChecks = true,
+    ClockStore? clockOverride,
+    DataRevision? dataRevisionOverride,
+    UndoStore? undoOverride,
   }) async {
     // ---- 仓储层 ----
     final activities = ActivityRepository(database: database);
@@ -163,10 +178,21 @@ class AppStore {
     );
     final fileInterop = FileInteropService(syncBundleRepository: syncBundleRepo);
 
-    // ---- 基础 store ----
-    final undo = UndoStore();
-    final revision = DataRevision();
-    final clock = ClockStore();
+    // ---- 基础服务（迁移期由 providers 注入；省略时自建并负责释放）----
+    final ownsFoundation = clockOverride == null &&
+        dataRevisionOverride == null &&
+        undoOverride == null;
+    if (!ownsFoundation &&
+        (clockOverride == null ||
+            dataRevisionOverride == null ||
+            undoOverride == null)) {
+      throw ArgumentError(
+        'clockOverride/dataRevisionOverride/undoOverride 必须同时注入或同时省略',
+      );
+    }
+    final undo = undoOverride ?? UndoStore();
+    final revision = dataRevisionOverride ?? DataRevision();
+    final clock = clockOverride ?? ClockStore();
 
     // ---- 领域 store ----
     final timer = TimerStore(
@@ -312,6 +338,7 @@ class AppStore {
       androidTracking: androidTracking,
       dispatcher: dispatcher,
       fileInterop: fileInterop,
+      ownsFoundation: ownsFoundation,
     );
     await store.init(runStartupChecks: runStartupChecks);
     return store;
@@ -390,8 +417,10 @@ class AppStore {
     category.dispose();
     activity.dispose();
     timer.dispose();
-    clock.dispose();
-    dataRevision.dispose();
-    undo.dispose();
+    if (ownsFoundation) {
+      clock.dispose();
+      dataRevision.dispose();
+      undo.dispose();
+    }
   }
 }
