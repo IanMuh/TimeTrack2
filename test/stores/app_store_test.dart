@@ -59,7 +59,6 @@ void main() {
       expect(store.timer, isNotNull);
       expect(store.category, isNotNull);
       expect(store.settings, isNotNull);
-      expect(store.stats, isNotNull);
       expect(store.sync, isNotNull);
       expect(store.update, isNotNull);
       expect(store.tracking, isNotNull);

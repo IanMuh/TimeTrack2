@@ -9,6 +9,7 @@
 ///   `clockTickProvider` 计算，查询结果本身不随时间变化。
 library;
 
+import 'package:flutter/foundation.dart' show setEquals;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/repositories/action_log_repository.dart';
@@ -21,6 +22,9 @@ import '../utils/date_time_ext.dart';
 import '../utils/result.dart';
 import '../viewmodels/action_log.dart';
 import '../viewmodels/activity.dart';
+import '../viewmodels/activity_category.dart';
+import '../viewmodels/stats/stats_models.dart';
+import '../viewmodels/stats/stats_snapshot.dart';
 import '../viewmodels/time_entry.dart';
 import 'foundation.dart';
 import 'infrastructure.dart';
@@ -145,3 +149,96 @@ final actionLogsProvider =
 
 /// 当天零点（页面传入 [dayEntriesProvider] 前统一归一）。
 DateTime dayStartOf(DateTime anyMoment) => anyMoment.startOfDay;
+
+// ---------------------------------------------------------------------------
+// 统计（B3：StatsStore 缓存语义由 provider + family 键取代）
+// ---------------------------------------------------------------------------
+
+/// 统计查询键：范围 × 维度 × 过滤参数 × 有效时刻。
+///
+/// [effectiveNow] 非 null 表示范围内存在运行中条目（快照时间敏感）：调用方
+/// 传当前 tick，键随之每秒变化 → 自动重算；无运行条目时为 null 以稳定缓存。
+class StatsQuery {
+  StatsQuery({
+    required this.start,
+    required this.end,
+    required this.dimension,
+    required this.includeAuto,
+    Set<String>? categoryFilterIds,
+    this.effectiveNow,
+  }) : categoryFilterIds = (categoryFilterIds == null || categoryFilterIds.isEmpty)
+            ? const <String>{}
+            : Set<String>.unmodifiable(categoryFilterIds);
+
+  final DateTime start;
+  final DateTime end;
+  final StatsDimension dimension;
+  final bool includeAuto;
+  final Set<String> categoryFilterIds;
+  final DateTime? effectiveNow;
+
+  @override
+  bool operator ==(Object other) =>
+      other is StatsQuery &&
+      other.start == start &&
+      other.end == end &&
+      other.dimension == dimension &&
+      other.includeAuto == includeAuto &&
+      other.effectiveNow == effectiveNow &&
+      setEquals(other.categoryFilterIds, categoryFilterIds);
+
+  @override
+  int get hashCode => Object.hash(
+        start,
+        end,
+        dimension,
+        includeAuto,
+        effectiveNow,
+        Object.hashAllUnordered(categoryFilterIds),
+      );
+}
+
+/// 统计聚合：范围/维度/过滤参数变化即新 family 键；写路径 bump 修订号失效。
+final statsProvider = FutureProvider.family<StatsSnapshot, StatsQuery>(
+  (ref, query) async {
+    ref.watch(dataRevisionProvider);
+    final repo = ref.watch(statsRepositoryProvider);
+    final sliceResult = await repo.slicesForRange(
+      start: query.start,
+      end: query.end,
+      effectiveNow: query.effectiveNow,
+      categoryFilterIds:
+          query.categoryFilterIds.isEmpty ? null : query.categoryFilterIds,
+      includeAuto: query.includeAuto,
+    );
+    final range = requireValue(sliceResult);
+    // categoryTree 维度才需要分类映射（其余维度 aggregate 忽略）——惰性加载
+    // 避免每次计算全量查分类表。
+    final Map<String, ActivityCategory> categoryById =
+        query.dimension == StatsDimension.categoryTree
+            ? requireValue(await repo.categoryMap())
+            : const {};
+    final rows = repo.aggregate(
+      range.slices,
+      query.dimension,
+      categoryById: categoryById,
+    );
+    var total = Duration.zero;
+    for (final slice in range.slices) {
+      total += slice.duration;
+    }
+    return StatsSnapshot(
+      start: query.start,
+      end: query.end,
+      dimension: query.dimension,
+      rows: List<StatsGroupRow>.unmodifiable(rows),
+      totalDuration: total,
+      containsRunningEntry: range.hasRunningEntry,
+      categoryFilterIds: query.categoryFilterIds.isEmpty
+          ? null
+          : Set<String>.unmodifiable(query.categoryFilterIds),
+      includeAuto: query.includeAuto,
+    );
+  },
+  isAutoDispose: true,
+);

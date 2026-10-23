@@ -8,6 +8,7 @@ import '../components/state_views.dart';
 import '../components/tnum_text.dart';
 import '../l10n/app_localizations.dart';
 import '../providers/data.dart';
+import '../providers/foundation.dart';
 import '../stores/app_store.dart';
 import '../utils/day_metrics.dart' show formatHm;
 import '../viewmodels/stats/stats_models.dart';
@@ -82,42 +83,9 @@ class _StatsPageState extends ConsumerState<StatsPage> {
     }
   }
 
-  @override
-  void initState() {
-    super.initState();
-    _compute();
-    app.stats.addListener(_onChange);
-    app.dataRevision.addListener(_onChange);
-    app.category.addListener(_onChange);
-  }
-
-  @override
-  void dispose() {
-    app.stats.removeListener(_onChange);
-    app.dataRevision.removeListener(_onChange);
-    app.category.removeListener(_onChange);
-    super.dispose();
-  }
-
-  void _onChange() {
-    if (mounted) setState(() {});
-  }
-
-  Future<void> _compute() async {
-    final (s, e) = _range;
-    // 批次 5b：分类过滤/排除自动下沉到 compute（仓储切片层），聚合行、
-    // 环形图与明细同口径；页内不再做行级补偿过滤。
-    await app.stats.compute(
-      start: s,
-      end: e,
-      dimension: _dimension,
-      categoryFilterIds:
-          _selectedCategories.isEmpty ? null : Set.of(_selectedCategories),
-      // 开关语义：勾选「排除自动条目」= 自动不计入（includeAuto=false）；
-      // 未勾选 = 计入。极性不能接反——否则聚合行/环形图与明细口径相反。
-      includeAuto: !_excludeAuto,
-    );
-  }
+  // 迁移期：范围条目/统计聚合由 provider 提供（StatsStore 缓存已删）；
+  // 范围/维度/过滤参数变化 = family 换键；写操作 bump 修订号失效。
+  // 分类关联过滤仍读 CategoryStore（B3 设置批次随分区迁移）。
 
   /// 页内过滤后的明细条目（排除自动 / 分类筛选生效——图表与明细用）。
   List<TimeEntry> get _filteredEntries {
@@ -154,11 +122,31 @@ class _StatsPageState extends ConsumerState<StatsPage> {
 
   @override
   Widget build(BuildContext context) {
-    // 范围条目由 provider 提供（时间线 store 已删）；写操作/回滚后自动刷新。
-    _entries = ref.watch(rangeEntriesProvider(_range)).value ?? const [];
-    final snapshot = app.stats.snapshot;
+    // 范围条目 + 统计聚合均由 provider 提供（StatsStore 缓存已删）：
+    // 范围/维度/过滤参数变化 = family 换键；写操作 bump 修订号失效。
+    final (start, end) = _range;
+    _entries = ref.watch(rangeEntriesProvider((start, end))).value ?? const [];
+    final hasRunning = _entries.any((e) => e.endAt == null);
+    final now = hasRunning ? ref.watch(clockTickProvider) : null;
+    final query = StatsQuery(
+      start: start,
+      end: end,
+      dimension: _dimension,
+      includeAuto: !_excludeAuto,
+      categoryFilterIds: _selectedCategories,
+      effectiveNow: now,
+    );
+    final async = ref.watch(statsProvider(query));
+    final snapshot = async.value;
     final scheme = Theme.of(context).colorScheme;
     final wide = MediaQuery.sizeOf(context).width >= 840;
+
+    if (async.hasError && !async.hasValue) {
+      return ErrorStateView(
+        message: l10n.stEmpty,
+        onRetry: () => ref.invalidate(statsProvider(query)),
+      );
+    }
 
     final body = ListView(
       padding: const EdgeInsets.fromLTRB(24, 20, 24, 40),
@@ -271,7 +259,6 @@ class _StatsPageState extends ConsumerState<StatsPage> {
   void _selectRange(int i) {
     setState(() => _rangeIndex = i);
     if (i == 4) _pickCustom();
-    _compute();
   }
 
   Future<void> _pickCustom() async {
@@ -295,7 +282,6 @@ class _StatsPageState extends ConsumerState<StatsPage> {
       _customStart = s;
       _customEnd = e;
     });
-    _compute();
   }
 
   void _shift(int days) {
@@ -309,7 +295,6 @@ class _StatsPageState extends ConsumerState<StatsPage> {
         _rangeIndex = 4;
       }
     });
-    _compute();
   }
 
   Widget _segmented({
@@ -373,8 +358,7 @@ class _StatsPageState extends ConsumerState<StatsPage> {
           _selectedCategories.contains(id)
               ? _selectedCategories.remove(id)
               : _selectedCategories.add(id);
-          _compute(); // 过滤参数下沉 compute（批次 5b）：选择变化须重算
-        }),
+              }),
         onToggleExpand: (id) => setState(() {
           _treeExpanded.contains(id)
               ? _treeExpanded.remove(id)
@@ -382,12 +366,10 @@ class _StatsPageState extends ConsumerState<StatsPage> {
         }),
         onAll: () => setState(() {
           _selectedCategories.addAll(app.category.all.map((c) => c.id));
-          _compute();
-        }),
+              }),
         onNone: () => setState(() {
           _selectedCategories.clear();
-          _compute();
-        }),
+              }),
       ),
     );
   }
@@ -444,8 +426,7 @@ class _StatsPageState extends ConsumerState<StatsPage> {
                 _ => StatsDimension.primaryCategoryAndDurationBucket,
               };
             });
-            _compute();
-          },
+                  },
         ),
         const SizedBox(height: 8),
         // 排除自动条目开关（compute 下沉后聚合行/图表/明细同口径，批次 5b）。
@@ -455,8 +436,7 @@ class _StatsPageState extends ConsumerState<StatsPage> {
               value: _excludeAuto,
               onChanged: (v) {
                 setState(() => _excludeAuto = v);
-                _compute();
-              },
+                          },
               label: l10n.stExcludeAuto,
             ),
           ],

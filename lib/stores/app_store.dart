@@ -30,7 +30,6 @@ import '../data/repositories/activity_repository.dart';
 import '../data/repositories/category_repository.dart';
 import '../data/repositories/settings_repository.dart';
 import '../data/repositories/sync_peer_store.dart';
-import '../data/repositories/stats_repository.dart';
 import '../data/repositories/time_entry_repository.dart';
 import '../data/repositories/tracking_rule_repository.dart';
 import '../data/sync/sync_bundle_repository.dart';
@@ -43,7 +42,6 @@ import 'command_dispatcher.dart';
 import 'data_revision.dart';
 import 'reminder_store.dart';
 import 'settings_store.dart';
-import 'stats_store.dart';
 import 'sync_store.dart';
 import 'lan_store.dart';
 import 'timer_store.dart';
@@ -65,7 +63,6 @@ class AppStore {
     required this.activity,
     required this.settings,
     required this.reminder,
-    required this.stats,
     required this.sync,
     required this.update,
     required this.tracking,
@@ -107,7 +104,6 @@ class AppStore {
 
   /// 提醒 store（批次 5c 弹窗体系：运行阈值「仍在进行？」+ 触发时刻提醒）。
   final ReminderStore reminder;
-  final StatsStore stats;
   final SyncStore sync;
   final UpdateStore update;
   final TrackingStore tracking;
@@ -210,14 +206,6 @@ class AppStore {
       undo: undo,
       dataRevision: revision,
     );
-    final stats = StatsStore(
-      repository: StatsRepository(
-        activities: activities,
-        categories: categories,
-        entries: entries,
-      ),
-      dataRevision: revision,
-    );
 
     // ---- 编排 store ----
     final sync = SyncStore(
@@ -312,7 +300,6 @@ class AppStore {
       activity: activity,
       settings: settings,
       reminder: reminder,
-      stats: stats,
       sync: sync,
       update: update,
       tracking: tracking,
@@ -393,7 +380,6 @@ class AppStore {
     }
     update.dispose();
     sync.dispose();
-    stats.dispose();
     settings.dispose();
     reminder.dispose();
     category.dispose();
