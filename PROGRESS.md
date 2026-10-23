@@ -102,6 +102,19 @@ utils 不动；分 2 个 PR（PR1 = B0 地基 + B1 基础状态，PR2 = 其余�
 验收：`lib/pages` 中 `ListenableBuilder` 与 `addListener` 均为 0；analyze 0；
 803 测试全绿。PR3 可合并。
 
+**PR4-a（feat/riverpod-migration-4）**：领域 store 装配归属先行——新建
+`lib/providers/stores.dart`（`DomainStores` + `domainStoresProvider`，容器构造并
+按注册逆序释放 timer/settings/category/activity）；`AppStore.create` 新增
+`timerOverride/categoryOverride/activityOverride/settingsOverride`（四者必须同时
+注入或同时省略）与 `ownsDomain` 字段，注入时不再创建/释放这四个 store；
+`appStoreProvider` 传入领域实例；`settingsStoreProvider`/`categoryStoreProvider`
+改为读 `domainStoresProvider`（解除对 `appStoreInstanceProvider` 的依赖）；
+`TimeTrack2App` 的测试作用域补 `domainStoresProvider.overrideWithValue(...)`
+——否则设置/分类页读到的容器自建实例与 `AppStore` 分叉，主题/时制写库后页面
+不刷新（3 个 UI 用例曾失败）。新增 `test/providers/stores_test.dart` 2 例
+（同一实例 + 容器释放后领域 store 已 dispose）。验收：analyze 0；全量
+**803 passed**。
+
 **剩余（PR4/PR5）**：见下。
 
 **剩余（PR4）**：**PR4-a 装配归属先行**（新建 `lib/providers/stores.dart`，领域 store

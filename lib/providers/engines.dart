@@ -7,6 +7,7 @@ import '../stores/reminder_store.dart';
 import '../stores/settings_store.dart';
 import '../stores/timer_store.dart';
 import '../stores/update_store.dart';
+import 'stores.dart';
 
 /// 迁移期（B4a）AppStore 实例接入点。
 ///
@@ -246,11 +247,11 @@ class UpdateSnapshotNotifier extends Notifier<UpdateSnapshot> {
 /// 变更信号，再用 `ref.read(...StoreProvider)` 读最新值——等价于旧
 /// `ListenableBuilder(listenable: store)` 的语义，但订阅面收在 provider 层。
 final settingsStoreProvider = Provider<SettingsStore>(
-  (ref) => ref.watch(appStoreInstanceProvider).settings,
+  (ref) => ref.watch(domainStoresProvider).settings,
 );
 
 final categoryStoreProvider = Provider<CategoryStore>(
-  (ref) => ref.watch(appStoreInstanceProvider).category,
+  (ref) => ref.watch(domainStoresProvider).category,
 );
 
 /// 设置变更计数：每次 `SettingsStore` 通知 +1，作为 build 的失效信号。

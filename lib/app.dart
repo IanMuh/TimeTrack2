@@ -8,6 +8,7 @@ import 'l10n/app_localizations.dart';
 import 'providers/engines.dart';
 import 'providers/foundation.dart';
 import 'providers/infrastructure.dart';
+import 'providers/stores.dart';
 import 'routes/app_router.dart';
 import 'stores/app_store.dart';
 import 'viewmodels/profile_settings.dart' show ThemeModeSetting;
@@ -162,6 +163,17 @@ class _TimeTrack2AppState extends State<TimeTrack2App> {
           clockStoreProvider.overrideWithValue(store.clock),
           dataRevisionStoreProvider.overrideWithValue(store.dataRevision),
           undoStoreProvider.overrideWithValue(store.undo),
+          // 领域 store 也要与 AppStore 同一实例（PR4-a）：设置/分类页面
+          // 经 domainStoresProvider 读取；各自新建会与写入方分叉，表现为
+          // 主题/时制写库后页面不刷新。
+          domainStoresProvider.overrideWithValue(
+            DomainStores(
+              timer: store.timer,
+              category: store.category,
+              activity: store.activity,
+              settings: store.settings,
+            ),
+          ),
         ],
       ],
       child: child,
