@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart';
+﻿import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../stores/app_store.dart';
@@ -192,8 +192,8 @@ class TimerSnapshotNotifier extends Notifier<TimerSnapshot> {
       state = TimerSnapshot.from(store);
     }
 
-    store.addListener(onChange);
-    ref.onDispose(() => store.removeListener(onChange));
+    store.addChangeListener(onChange);
+    ref.onDispose(() => store.removeChangeListener(onChange));
     return TimerSnapshot.from(store);
   }
 }
@@ -323,9 +323,24 @@ class _EngineChangeNotifier extends Notifier<int> {
   }
 }
 
-final timerChangeProvider = NotifierProvider<_EngineChangeNotifier, int>(
-  () => _EngineChangeNotifier((store) => store.timer),
-);
+final timerChangeProvider =
+    NotifierProvider<TimerChangeNotifier, int>(TimerChangeNotifier.new);
+
+/// 计时变更计数（手动会话保持/运行条目/写路径成功 → +1）。
+class TimerChangeNotifier extends Notifier<int> {
+  @override
+  int build() {
+    final store = ref.watch(appStoreInstanceProvider).timer;
+    void onChange() {
+      if (!ref.mounted) return;
+      state = state + 1;
+    }
+
+    store.addChangeListener(onChange);
+    ref.onDispose(() => store.removeChangeListener(onChange));
+    return 0;
+  }
+}
 
 final trackingChangeProvider = NotifierProvider<_EngineChangeNotifier, int>(
   () => _EngineChangeNotifier((store) => store.tracking),
@@ -342,5 +357,6 @@ final syncChangeProvider = NotifierProvider<_EngineChangeNotifier, int>(
 final updateChangeProvider = NotifierProvider<_EngineChangeNotifier, int>(
   () => _EngineChangeNotifier((store) => store.update),
 );
+
 
 
