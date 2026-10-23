@@ -1,4 +1,4 @@
-﻿import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../stores/app_store.dart';
@@ -213,8 +213,10 @@ class ReminderSnapshotNotifier extends Notifier<ReminderSnapshot> {
       state = ReminderSnapshot.from(store);
     }
 
-    store.addListener(onChange);
-    ref.onDispose(() => store.removeListener(onChange));
+    store.onChanged = onChange;
+    ref.onDispose(() {
+      if (identical(store.onChanged, onChange)) store.onChanged = null;
+    });
     return ReminderSnapshot.from(store);
   }
 }
