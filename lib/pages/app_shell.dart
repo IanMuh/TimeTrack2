@@ -1,12 +1,14 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../api/platform/android_tracking.dart' show AndroidTrackingBridge;
 import '../components/global_timer_bar.dart';
 import '../constants/storage_keys.dart';
 import '../l10n/app_localizations.dart';
+import '../providers/foundation.dart';
 import '../stores/app_store.dart';
 import '../stores/reminder_store.dart';
 import '../stores/update_store.dart' show UpdateState;
@@ -1067,7 +1069,7 @@ class _SideNav extends StatelessWidget {
           const Spacer(),
           // 撤销/重做组 + 同步状态（分隔线上方）。
           const Divider(),
-          _UndoRedoGroup(app: app, onUndo: onUndo, onRedo: onRedo),
+          _UndoRedoGroup(onUndo: onUndo, onRedo: onRedo),
           _SyncStatusText(app: app),
           const SizedBox(height: 12),
         ],
@@ -1129,60 +1131,53 @@ class _SideNavItem extends StatelessWidget {
   }
 }
 
-/// 撤销/重做按钮组（桌面常驻，契约 §3.4）：接 UndoStore；点击经指令通道
-/// 分发，反馈 Snackbar 由壳层统一弹。
-class _UndoRedoGroup extends StatelessWidget {
+/// 撤销/重做按钮组（桌面常驻，契约 §3.4）：状态来自 [undoStateProvider]；
+/// 点击经指令通道分发，反馈 Snackbar 由壳层统一弹。
+class _UndoRedoGroup extends ConsumerWidget {
   const _UndoRedoGroup({
-    required this.app,
     required this.onUndo,
     required this.onRedo,
   });
 
-  final AppStore app;
   final VoidCallback onUndo;
   final VoidCallback onRedo;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    return ListenableBuilder(
-      listenable: app.undo,
-      builder: (context, _) {
-        final l10n = AppLocalizations.of(context)!;
-        final undo = app.undo;
-        final undoLabel = undo.lastUndoLabel == null
-            ? null
-            : l10n.undoWithLabel(undo.lastUndoLabel!);
-        final redoLabel = undo.lastRedoLabel == null
-            ? null
-            : l10n.redoWithLabel(undo.lastRedoLabel!);
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-          child: Row(
-            children: [
-              _UndoRedoButton(
-                icon: Icons.undo_rounded,
-                tooltip: undoLabel ?? l10n.undoHint,
-                onPressed: undo.canUndo ? onUndo : null,
-              ),
-              const SizedBox(width: 4),
-              _UndoRedoButton(
-                icon: Icons.redo_rounded,
-                tooltip: redoLabel ?? l10n.redoHint,
-                onPressed: undo.canRedo ? onRedo : null,
-              ),
-              const Spacer(),
-              // 分组标题（design：侧导航内"撤销 / 重做"小节）。
-              Text(
-                '${l10n.undo} / ${l10n.redo}',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ],
+    final l10n = AppLocalizations.of(context)!;
+    final undo = ref.watch(undoStateProvider);
+    final undoLabel = undo.lastUndoLabel == null
+        ? null
+        : l10n.undoWithLabel(undo.lastUndoLabel!);
+    final redoLabel = undo.lastRedoLabel == null
+        ? null
+        : l10n.redoWithLabel(undo.lastRedoLabel!);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      child: Row(
+        children: [
+          _UndoRedoButton(
+            icon: Icons.undo_rounded,
+            tooltip: undoLabel ?? l10n.undoHint,
+            onPressed: undo.canUndo ? onUndo : null,
           ),
-        );
-      },
+          const SizedBox(width: 4),
+          _UndoRedoButton(
+            icon: Icons.redo_rounded,
+            tooltip: redoLabel ?? l10n.redoHint,
+            onPressed: undo.canRedo ? onRedo : null,
+          ),
+          const Spacer(),
+          // 分组标题（design：侧导航内"撤销 / 重做"小节）。
+          Text(
+            '${l10n.undo} / ${l10n.redo}',
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

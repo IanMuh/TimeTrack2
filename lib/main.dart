@@ -1,33 +1,30 @@
 import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
-import 'package:get_it/get_it.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app.dart';
-import 'data/database/app_database.dart';
-import 'stores/app_store.dart';
-
-/// 依赖注入容器（阶段 3d：AppStore 组装注册；阶段 4 UI 从中取 store）。
-final GetIt getIt = GetIt.instance;
+import 'providers/app.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Riverpod 容器是状态层的唯一实例源。启动期先 await 装配完成再 runApp，
+  // 保持“数据库不可用 → 错误页”的既有启动语义（启动期不引入加载屏，
+  // 避免启动顺序与错误兜底行为发生变化）。
+  final container = ProviderContainer();
   try {
-    // 组装数据层 + 全部 store（打开平台数据库、seed、启动编排）。
-    final appStore = await AppStore.create(database: AppDatabase.open());
-    // **重复注册防护（r 修复）**：main 被重复执行（测试复用同一容器/多实例
-    // 启动）时，重复 registerSingleton 抛 StateError——已注册则替换（测试
-    // 场景可 reset 容器后重建；替换避免启动崩溃）。
-    if (getIt.isRegistered<AppStore>()) {
-      getIt.unregister<AppStore>();
-    }
-    getIt.registerSingleton<AppStore>(appStore);
-    runApp(TimeTrack2App(appStore: appStore));
+    final appStore = await container.read(appStoreProvider.future);
+    // 路由/壳层经 TimeTrack2App 的 container 参数接入同一容器
+    // （UncontrolledProviderScope 由根组件内部安装）。
+    runApp(TimeTrack2App(appStore: appStore, container: container));
   } catch (e, st) {
-    // 启动失败兜底（模块门禁 medium）：数据库损坏/迁移异常不得静默空白
-    // 窗口——输出可诊断日志（含堆栈）后渲染错误页。
+    // 启动失败兜底（模块门禁 medium）：数据库损坏/迁移异常不得静默空白窗口
+    // ——输出可诊断日志（含堆栈）后渲染错误页。
     // debug 下对非预期 Error（编程缺陷）rethrow 暴露真实 bug；预期的
     // 数据库异常（损坏/迁移）走错误页兜底。
     debugPrint('应用启动失败：$e\n$st');
+    // 失败时释放容器：关闭数据库连接、释放装配过程中已创建的 store。
+    container.dispose();
     if (kDebugMode && e is Error) rethrow;
     runApp(const _StartupErrorApp());
   }

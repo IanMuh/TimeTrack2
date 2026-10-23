@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'components/app_theme.dart';
 import 'l10n/app_localizations.dart';
+import 'providers/foundation.dart';
 import 'viewmodels/profile_settings.dart' show ThemeModeSetting;
 import 'routes/app_router.dart';
 import 'stores/app_store.dart';
@@ -17,14 +19,27 @@ import 'stores/theme_mode_store.dart';
 ///   （默认浅色，契约 §9.7）；ThemeModeStore 为 UI 状态类——持久化
 ///   （ProfileSettings 加 theme 列）随设置页批次 4 一起做，本批次仅内存态；
 /// - [locale] 可注入（widget 测试固定中/英文验证 ARB 注入）；
+/// - **Riverpod 作用域（迁移期）**：[container] 非 null 时用
+///   [UncontrolledProviderScope] 接管（main 先装配容器再 runApp）；为 null
+///   时（widget 测试 / 占位模式）内部自建 [ProviderScope]，并把 [appStore]
+///   的 undo 实例桥接进容器——保证页面（ConsumerWidget）在测试里也能拿到
+///   与 AppStore 同一份撤销状态。B4 删除 AppStore 后此桥接一并移除。
 /// - **系统字号钳制**：textScaler 最大 1.3 倍——无障碍放大 1.0-1.3 生效，
 ///   超出部分钳制（大计时数字/统计树行/活动卡等临界布局按 1.3 上限设计，
 ///   无钳制时极端放大会全屏溢出）。
 class TimeTrack2App extends StatefulWidget {
-  const TimeTrack2App({super.key, this.locale, this.appStore});
+  const TimeTrack2App({
+    super.key,
+    this.locale,
+    this.appStore,
+    this.container,
+  });
 
   final Locale? locale;
   final AppStore? appStore;
+
+  /// 外部已装配的 Riverpod 容器（main 注入；测试可注入预置覆盖的容器）。
+  final ProviderContainer? container;
 
   /// 系统字号放大上限（超出钳制）。
   static const double _maxTextScaleFactor = 1.3;
@@ -73,26 +88,41 @@ class _TimeTrack2AppState extends State<TimeTrack2App> {
     final listenable = settingsListenable == null
         ? _themeMode
         : Listenable.merge([_themeMode, settingsListenable]);
-    return ListenableBuilder(
-      listenable: listenable,
-      builder: (context, _) {
-        final theme = TimeTrack2App._light;
-        final darkTheme = TimeTrack2App._dark;
-        final persisted = settingsListenable?.current?.themeMode;
-        final themeMode = persisted == null
-            ? _themeMode.mode
-            : themeModeFromSetting(persisted);
-        final locale = widget.locale;
-        const delegates = [
-          AppLocalizations.delegate,
-          GlobalMaterialLocalizations.delegate,
-          GlobalWidgetsLocalizations.delegate,
-          GlobalCupertinoLocalizations.delegate,
-        ];
-        const supportedLocales = AppLocalizations.supportedLocales;
-        // 占位模式（appStore == null）：最小 home，供基座/主题冒烟测试。
-        if (router == null) {
-          return MaterialApp(
+    return _withProviderScope(
+      ListenableBuilder(
+        listenable: listenable,
+        builder: (context, _) {
+          final theme = TimeTrack2App._light;
+          final darkTheme = TimeTrack2App._dark;
+          final persisted = settingsListenable?.current?.themeMode;
+          final themeMode = persisted == null
+              ? _themeMode.mode
+              : themeModeFromSetting(persisted);
+          final locale = widget.locale;
+          const delegates = [
+            AppLocalizations.delegate,
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ];
+          const supportedLocales = AppLocalizations.supportedLocales;
+          // 占位模式（appStore == null）：最小 home，供基座/主题冒烟测试。
+          if (router == null) {
+            return MaterialApp(
+              title: 'TimeTrack2',
+              theme: theme,
+              darkTheme: darkTheme,
+              themeMode: themeMode,
+              localizationsDelegates: delegates,
+              supportedLocales: supportedLocales,
+              locale: locale,
+              builder: _clampTextScaler,
+              home: const _ShellPage(),
+            );
+          }
+          // 路由模式（appStore 注入）：GoRouter 须经 MaterialApp.router 装配
+          //（Flutter 3.44：MaterialApp 本体不再接受 routerConfig）。
+          return MaterialApp.router(
             title: 'TimeTrack2',
             theme: theme,
             darkTheme: darkTheme,
@@ -101,23 +131,26 @@ class _TimeTrack2AppState extends State<TimeTrack2App> {
             supportedLocales: supportedLocales,
             locale: locale,
             builder: _clampTextScaler,
-            home: const _ShellPage(),
+            routerConfig: router,
           );
-        }
-        // 路由模式（appStore 注入）：GoRouter 须经 MaterialApp.router 装配
-        //（Flutter 3.44：MaterialApp 本体不再接受 routerConfig）。
-        return MaterialApp.router(
-          title: 'TimeTrack2',
-          theme: theme,
-          darkTheme: darkTheme,
-          themeMode: themeMode,
-          localizationsDelegates: delegates,
-          supportedLocales: supportedLocales,
-          locale: locale,
-          builder: _clampTextScaler,
-          routerConfig: router,
-        );
-      },
+        },
+      ),
+    );
+  }
+
+  /// 迁移期作用域装配：外部容器优先；否则内部建 [ProviderScope] 并桥接
+  /// [TimeTrack2App.appStore] 的撤销实例（测试/占位模式）。
+  Widget _withProviderScope(Widget child) {
+    final container = widget.container;
+    if (container != null) {
+      return UncontrolledProviderScope(container: container, child: child);
+    }
+    final store = widget.appStore;
+    return ProviderScope(
+      overrides: [
+        if (store != null) undoStoreProvider.overrideWithValue(store.undo),
+      ],
+      child: child,
     );
   }
 
