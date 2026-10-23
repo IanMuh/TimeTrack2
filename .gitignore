@@ -67,6 +67,9 @@ secrets.*
 /tmp/
 *.tmp
 
+# 编辑器本地配置（ASCII 存盘编码、launch.json 等因机器而异）
+.vscode/
+
 # ZCode 会话内部文件
 .zcode/
 _tmp_*.json
