@@ -140,7 +140,7 @@ class _TimelinePageState extends ConsumerState<TimelinePage> {
       // 会预填首个活动，无条件传会把条目静默改挂——不传 = 部分更新语义
       // 下的"保持现有活动"。
       final target = _activityById(draft.activityId);
-      final r = await app.dispatcher.dispatch(CommandInvocation(
+      final r = await ref.read(commandDispatcherProvider).dispatch(CommandInvocation(
         name: 'entry_update',
         args: [draft.entryId!],
         options: {
@@ -153,7 +153,7 @@ class _TimelinePageState extends ConsumerState<TimelinePage> {
     }
     final targetNew = _activityById(draft.activityId) ?? _activities.firstOrNull;
     if (targetNew == null) return false;
-    final r = await app.dispatcher.dispatch(
+    final r = await ref.read(commandDispatcherProvider).dispatch(
       CommandInvocation(name: 'add', args: [targetNew.name], options: {
         ...options,
         // add 指令需要 HH:MM（不支持 now 特值）；新条目必在今日，HH:MM
@@ -198,19 +198,19 @@ class _TimelinePageState extends ConsumerState<TimelinePage> {
       },
       existing: _entries,
       onSubmit: _submitEntry,
-      onDelete: (id) async => _ok(await app.dispatcher
+      onDelete: (id) async => _ok(await ref.read(commandDispatcherProvider)
           .dispatch(CommandInvocation(name: 'delete', args: [id]))),
-      onMerge: (id, direction) async => _ok(await app.dispatcher.dispatch(
+      onMerge: (id, direction) async => _ok(await ref.read(commandDispatcherProvider).dispatch(
           CommandInvocation(
               name: 'merge', args: [id], options: {'direction': direction}))),
-      onSplit: (id, at) async => _ok(await app.dispatcher.dispatch(
+      onSplit: (id, at) async => _ok(await ref.read(commandDispatcherProvider).dispatch(
           CommandInvocation(
               name: 'split', args: [id], options: {'at': _hm(at)}))),
       onExtendToNow: (id) async {
         // 延伸 = 单条 entry_update（--end=now 绝对语义，跨天遗留条目也
         // 精确结束在当前时刻；HH:MM 会按条目所在日还原，≥2 天前的条目
         // 会算错）。
-        return _ok(await app.dispatcher.dispatch(CommandInvocation(
+        return _ok(await ref.read(commandDispatcherProvider).dispatch(CommandInvocation(
           name: 'entry_update',
           args: [id],
           options: const {'end': 'now'},
@@ -604,3 +604,4 @@ class _TimelinePageState extends ConsumerState<TimelinePage> {
         _ => const Color(0xff71717a),
       };
 }
+

@@ -917,7 +917,7 @@ class _AppShellState extends ConsumerState<AppShell>
 
   Future<void> _dispatch(CommandInvocation invocation) async {
     final messenger = ScaffoldMessenger.of(context);
-    final result = await widget.app.dispatcher.dispatch(invocation);
+    final result = await ref.read(commandDispatcherProvider).dispatch(invocation);
     if (!mounted) return;
     final l10n = AppLocalizations.of(context)!;
     messenger.hideCurrentSnackBar();

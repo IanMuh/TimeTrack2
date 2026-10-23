@@ -1,7 +1,8 @@
-import 'package:flutter/foundation.dart';
+﻿import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../stores/app_store.dart';
+import '../stores/command_dispatcher.dart';
 import '../stores/category_store.dart';
 import '../stores/reminder_store.dart';
 import '../stores/settings_store.dart';
@@ -361,4 +362,10 @@ final updateChangeProvider = NotifierProvider<_EngineChangeNotifier, int>(
 );
 
 
+
+
+/// 命令分发器（迁移期：仍由 AppStore 装配，PR5 改由 provider 直接构造）。
+final commandDispatcherProvider = Provider<CommandDispatcher>(
+  (ref) => ref.watch(appStoreInstanceProvider).dispatcher,
+);
 

@@ -11,13 +11,13 @@ import '../stores/app_store.dart';
 import 'settings_widgets.dart';
 
 /// 云同步分区。
-class SyncSection extends StatelessWidget {
+class SyncSection extends ConsumerWidget {
   const SyncSection({super.key, required this.app});
 
   final AppStore app;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final l10n = AppLocalizations.of(context)!;
     return Consumer(
       builder: (context, ref, _) {
@@ -40,7 +40,7 @@ class SyncSection extends StatelessWidget {
               children: [
                 FilledButton.icon(
                   onPressed: sync.isConfigured && !sync.syncing
-                      ? () => _syncNow(context)
+                      ? () => _syncNow(context, ref)
                       : null,
                   icon: sync.syncing
                       ? const SizedBox(
@@ -72,10 +72,10 @@ class SyncSection extends StatelessWidget {
     );
   }
 
-  Future<void> _syncNow(BuildContext context) async {
+  Future<void> _syncNow(BuildContext context, WidgetRef ref) async {
     // 经指令通道（铁律 7）：'sync' 指令已注册——与深链/AI/未来快捷键同入口。
     final result =
-        await app.dispatcher.dispatch(CommandInvocation(name: 'sync'));
+        await ref.read(commandDispatcherProvider).dispatch(CommandInvocation(name: 'sync'));
     if (!context.mounted) return;
     final l10n = AppLocalizations.of(context)!;
     final messenger = ScaffoldMessenger.of(context);
@@ -530,3 +530,6 @@ class AiSection extends StatelessWidget {
     );
   }
 }
+
+
+

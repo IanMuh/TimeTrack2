@@ -11,13 +11,13 @@ import '../viewmodels/commands/command_invocation.dart';
 import 'settings_widgets.dart';
 
 /// 版本更新分区。
-class UpdateSection extends StatelessWidget {
+class UpdateSection extends ConsumerWidget {
   const UpdateSection({super.key, required this.app});
 
   final AppStore app;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final l10n = AppLocalizations.of(context)!;
     return Consumer(
       builder: (context, ref, _) {
@@ -136,13 +136,13 @@ class _VersionCell extends StatelessWidget {
 
 /// 状态机主卡：按当前状态渲染主操作区（idle/available/downloading/
 /// verifying/installing/restartRequired/failed/upToDate/checking）。
-class _UpdateStateCard extends StatelessWidget {
+class _UpdateStateCard extends ConsumerWidget {
   const _UpdateStateCard({required this.app});
 
   final AppStore app;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final l10n = AppLocalizations.of(context)!;
     final scheme = Theme.of(context).colorScheme;
     final update = app.update;
@@ -176,7 +176,7 @@ class _UpdateStateCard extends StatelessWidget {
                 children: [
                   OutlinedButton.icon(
                     key: const ValueKey('update-check'),
-                    onPressed: busy ? null : _check,
+                    onPressed: busy ? null : () => _check(ref),
                     icon: const Icon(Icons.refresh, size: 16),
                     label: Text(l10n.settingsUpdateCheck),
                   ),
@@ -279,8 +279,8 @@ class _UpdateStateCard extends StatelessWidget {
 
   /// 经指令通道（铁律 7）：'update_check' 指令已注册——与深链/AI/壳层
   /// 同入口；结果经 update store 监听驱动 UI，无需在此处理。
-  Future<void> _check() async {
-    await app.dispatcher
+  Future<void> _check(WidgetRef ref) async {
+    await ref.read(commandDispatcherProvider)
         .dispatch(CommandInvocation(name: 'update_check'));
   }
 
@@ -362,13 +362,13 @@ class _ProgressBlock extends StatelessWidget {
 }
 
 /// 关于分区。
-class AboutSection extends StatelessWidget {
+class AboutSection extends ConsumerWidget {
   const AboutSection({super.key, required this.app});
 
   final AppStore app;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final l10n = AppLocalizations.of(context)!;
     final scheme = Theme.of(context).colorScheme;
     return SettingsSectionCard(
@@ -435,7 +435,7 @@ class AboutSection extends StatelessWidget {
           trailing: OutlinedButton(
             onPressed: () {
               // 跳更新卡（滚动锚点由设置页骨架处理）；检查经指令通道。
-              app.dispatcher
+              ref.read(commandDispatcherProvider)
                   .dispatch(CommandInvocation(name: 'update_check'));
             },
             child: Text(l10n.settingsAboutCheckUpdate),
@@ -456,3 +456,7 @@ class AboutSection extends StatelessWidget {
     );
   }
 }
+
+
+
+

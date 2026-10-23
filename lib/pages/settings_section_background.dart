@@ -140,7 +140,7 @@ class _BackgroundSectionState extends ConsumerState<BackgroundSection> {
                     Expanded(child: Text(l10n.bgManualHoldBanner)),
                     TextButton(
                       // 经指令通道（铁律 7）：manual_hold_clear 指令化落点。
-                      onPressed: () => widget.app.dispatcher
+                      onPressed: () => ref.read(commandDispatcherProvider)
                           .dispatch(CommandInvocation(name: 'manual_hold_clear')),
                       child: Text(l10n.bgManualHoldResume),
                     ),
@@ -272,14 +272,14 @@ class _BackgroundSectionState extends ConsumerState<BackgroundSection> {
   }
 
   Future<void> _updateRule(TrackingRule rule, {Map<String, String> options = const {}}) async {
-    await widget.app.dispatcher
+    await ref.read(commandDispatcherProvider)
         .dispatch(CommandInvocation(name: 'tracking_rule_update', args: [rule.id], options: options));
     if (mounted) setState(() {});
   }
 
   Future<void> _deleteRule(TrackingRule rule) async {
     final l10n = AppLocalizations.of(context)!;
-    await widget.app.dispatcher.dispatch(
+    await ref.read(commandDispatcherProvider).dispatch(
         CommandInvocation(name: 'tracking_rule_delete', args: [rule.id]));
     if (!mounted) return;
     ScaffoldMessenger.of(context)
@@ -598,7 +598,7 @@ class _MiniToggle extends StatelessWidget {
 }
 
 /// 规则表单对话框（新建/编辑共用）。
-class RuleFormDialog extends StatefulWidget {
+class RuleFormDialog extends ConsumerStatefulWidget {
   const RuleFormDialog({
     super.key,
     required this.app,
@@ -611,10 +611,10 @@ class RuleFormDialog extends StatefulWidget {
   final TrackingRule? existing;
 
   @override
-  State<RuleFormDialog> createState() => _RuleFormDialogState();
+  ConsumerState<RuleFormDialog> createState() => _RuleFormDialogState();
 }
 
-class _RuleFormDialogState extends State<RuleFormDialog> {
+class _RuleFormDialogState extends ConsumerState<RuleFormDialog> {
   late final TextEditingController _pattern;
   late TrackingRuleMatchKind _kind;
   late String? _activityId;
@@ -720,7 +720,7 @@ class _RuleFormDialogState extends State<RuleFormDialog> {
         .where((a) => a.id == _activityId)
         .firstOrNull;
     if (activity == null) return;
-    final dispatcher = widget.app.dispatcher;
+    final dispatcher = ref.read(commandDispatcherProvider);
     if (widget.existing == null) {
       await dispatcher.dispatch(CommandInvocation(
         name: 'tracking_rule_create',
@@ -941,3 +941,6 @@ class _KindRadio extends StatelessWidget {
     );
   }
 }
+
+
+

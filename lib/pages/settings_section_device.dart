@@ -18,13 +18,13 @@ import '../viewmodels/commands/command_invocation.dart';
 import 'settings_widgets.dart';
 
 /// 备份与导出分区。
-class BackupSection extends StatelessWidget {
+class BackupSection extends ConsumerWidget {
   const BackupSection({super.key, required this.app});
 
   final AppStore app;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final l10n = AppLocalizations.of(context)!;
     return SettingsSectionCard(
       key: const ValueKey('sec-backup'),
@@ -37,7 +37,7 @@ class BackupSection extends StatelessWidget {
           subtitle: l10n.settingsExportHint,
           trailing: OutlinedButton.icon(
             key: const ValueKey('backup-export'),
-            onPressed: () => _export(context),
+            onPressed: () => _export(context, ref),
             icon: const Icon(Icons.download, size: 16),
             label: Text(l10n.settingsExportBtn),
           ),
@@ -47,7 +47,7 @@ class BackupSection extends StatelessWidget {
           subtitle: l10n.settingsImportHint,
           trailing: OutlinedButton.icon(
             key: const ValueKey('backup-import'),
-            onPressed: () => _import(context),
+            onPressed: () => _import(context, ref),
             icon: const Icon(Icons.upload, size: 16),
             label: Text(l10n.settingsImportBtn),
           ),
@@ -56,15 +56,15 @@ class BackupSection extends StatelessWidget {
           title: l10n.settingsDangerTitle,
           message: l10n.settingsDangerMessage,
           actionLabel: l10n.settingsDangerBtn,
-          onAction: () => _confirmWipe(context),
+          onAction: () => _confirmWipe(context, ref),
         ),
       ],
     );
   }
 
-  Future<void> _export(BuildContext context) async {
+  Future<void> _export(BuildContext context, WidgetRef ref) async {
     final l10n = AppLocalizations.of(context)!;
-    final result = await app.dispatcher
+    final result = await ref.read(commandDispatcherProvider)
         .dispatch(CommandInvocation(name: 'export'));
     if (!context.mounted) return;
     final messenger = ScaffoldMessenger.of(context)..hideCurrentSnackBar();
@@ -86,9 +86,9 @@ class BackupSection extends StatelessWidget {
     }
   }
 
-  Future<void> _import(BuildContext context) async {
+  Future<void> _import(BuildContext context, WidgetRef ref) async {
     final l10n = AppLocalizations.of(context)!;
-    final result = await app.dispatcher
+    final result = await ref.read(commandDispatcherProvider)
         .dispatch(CommandInvocation(name: 'import'));
     if (!context.mounted) return;
     final messenger = ScaffoldMessenger.of(context)..hideCurrentSnackBar();
@@ -110,7 +110,7 @@ class BackupSection extends StatelessWidget {
   }
 
   /// 清除前强制提示先导出备份（契约硬约束）。
-  Future<void> _confirmWipe(BuildContext context) async {
+  Future<void> _confirmWipe(BuildContext context, WidgetRef ref) async {
     final l10n = AppLocalizations.of(context)!;
     final action = await showDialog<String>(
       context: context,
@@ -144,7 +144,7 @@ class BackupSection extends StatelessWidget {
     if (!context.mounted) return;
     switch (action) {
       case 'export':
-        await _export(context);
+        await _export(context, ref);
       case 'wipe':
         await _wipe(context);
       default:
@@ -251,13 +251,13 @@ class _DeviceSectionState extends ConsumerState<DeviceSection> {
                   ),
                 ),
                 OutlinedButton.icon(
-                  onPressed: () => _export(context),
+                  onPressed: () => _export(context, ref),
                   icon: const Icon(Icons.file_download_outlined, size: 16),
                   label: Text(l10n.settingsExportBtn),
                 ),
                 const SizedBox(width: 8),
                 OutlinedButton.icon(
-                  onPressed: () => _import(context),
+                  onPressed: () => _import(context, ref),
                   icon: const Icon(Icons.file_upload_outlined, size: 16),
                   label: Text(l10n.settingsImportBtn),
                 ),
@@ -297,9 +297,9 @@ class _DeviceSectionState extends ConsumerState<DeviceSection> {
     );
   }
 
-  Future<void> _export(BuildContext context) async {
+  Future<void> _export(BuildContext context, WidgetRef ref) async {
     final l10n = AppLocalizations.of(context)!;
-    final result = await widget.app.dispatcher
+    final result = await ref.read(commandDispatcherProvider)
         .dispatch(CommandInvocation(name: 'export'));
     if (!context.mounted) return;
     if (result case CommandSuccess success) {
@@ -311,9 +311,9 @@ class _DeviceSectionState extends ConsumerState<DeviceSection> {
     }
   }
 
-  Future<void> _import(BuildContext context) async {
+  Future<void> _import(BuildContext context, WidgetRef ref) async {
     final l10n = AppLocalizations.of(context)!;
-    final result = await widget.app.dispatcher
+    final result = await ref.read(commandDispatcherProvider)
         .dispatch(CommandInvocation(name: 'import'));
     if (!context.mounted) return;
     if (result case CommandSuccess success) {
@@ -596,3 +596,7 @@ class _LanClientCard extends StatelessWidget {
     await lan.pairClient(host: hostController.text, code: codeController.text);
   }
 }
+
+
+
+
