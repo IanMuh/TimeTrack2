@@ -35,23 +35,35 @@
 utils 不动；分 2 个 PR（PR1 = B0 地基 + B1 基础状态，PR2 = 其余）。存量引擎类
 （sync/update/tracking/lan/ai）也按 Notifier 包装（用户选 B），但排在最后。
 
-**已完成（分支 `feat/riverpod-migration`）**：
+**已完成（`feat/riverpod-migration` / `feat/riverpod-migration-2`）**：
 - B0（`ba04571`）：容器启动装配（`ProviderContainer` + `UncontrolledProviderScope`）、
   `lib/providers/infrastructure.dart` + `app.dart`（appDatabase/appStore provider、
   装配参数 provider 化）、删除 get_it、`test/support/provider_harness.dart`、
   `test/providers/app_store_provider_test.dart`、AGENTS.md 迁移期规则。
-- B1：`lib/providers/foundation.dart`——`clockTickProvider`（1Hz ClockStore 包装）、
-  `currentDayProvider`（跨午夜自动翻日）、`dataRevisionProvider`（Notifier 镜像）、
-  `undoStateProvider`（撤销可用性快照，undo/redo 走 Notifier）；基础服务所有权从
-  AppStore 移到容器（`AppStore.create(clock/revision/undo + ownsFoundation)`）；
+- B1（PR #15）：`lib/providers/foundation.dart`——`clockTickProvider`（1Hz ClockStore
+  包装）、`currentDayProvider`（跨午夜自动翻日）、`dataRevisionProvider`（Notifier
+  镜像）、`undoStateProvider`（撤销可用性快照，undo/redo 走 Notifier）；基础服务
+  所有权从 AppStore 移到容器（`AppStore.create(clock/revision/undo + ownsFoundation)`）；
   壳层 undo/redo 按钮改为 `ConsumerWidget` 示例；`TimeTrack2App(container:)` 安装
-  作用域（测试内自建 ProviderScope 并桥接 AppStore.undo）。
+  作用域（测试内自建 ProviderScope 并桥接 AppStore 的数据库/时钟/修订号/undo）。
+- B2（`9e1d133`）：`lib/providers/data.dart` 查询即 provider——`dayEntriesProvider(day)`、
+  `rangeEntriesProvider((start,end))`、`activitiesProvider`、
+  `unassignedActivityIdProvider`、`actionLogsProvider(limit)`（family autoDispose、
+  统一 watch 修订号）；删除 TodayStore/TimelineStore 及其测试；今日页/时间线页改
+  ConsumerStatefulWidget（跨午夜自动翻日；前日对比按前一日边界裁剪，修旧 bug）；
+  计时页/统计页/设备分区改读 provider；视图中不再持有仓储结果副本。
+- B3：`statsProvider(StatsQuery)` family 替代 StatsStore 缓存（值相等键 +
+  `StatsSnapshot` 下沉 `lib/viewmodels/stats/`，删 stats_store.dart 及其 659 行
+  测试）；TimerStore 空闲秒级 notify 收敛；删除 ThemeModeStore 双源（主题唯一
+  事实源 = `ProfileSettings.themeMode`）；计时页删除全部手工监听（活动/今日条目
+  走 provider、1Hz 仅运行中订阅），并补测试作用域对时钟/修订号的桥接（修“写后
+  页面不刷新”的根因）。
 
-**后续批次**：今日/时间线/统计 → 计时（TimerNotifier + reminder/tracking/dispatcher
-端口）→ 分类/活动/设置 → 引擎与 AppShell → 删 AppStore/get_it 残留、文档与全量
-审查。顺序相对批准确认版有调整：原 B1 的计时切片因 TimerStore 被 reminder/
-tracking/dispatcher/通知深度引用（517/397/346 行测试绑定 store 类型），拆到基础
-状态之后单独一批，避免一次改写四层。
+**剩余（PR3）**：TimerStore/ReminderStore/CategoryStore/SettingsStore/ActivityStore
+→ Notifier；Sync/Update/Tracking/Lan/AI 引擎 Notifier 包装；CommandDispatcher 改
+Ref；删除 AppStore（`appStartupProvider` 装配）；AppShell 仍监听 4 个引擎（过渡
+白名单）；执行计划文档阶段 0 技术栈段落与目录约定改写。
+
 
 ## 阶段 5 收尾清单（待办）
 
