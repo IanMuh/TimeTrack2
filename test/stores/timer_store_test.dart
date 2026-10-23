@@ -1,4 +1,4 @@
-import 'package:drift/native.dart';
+﻿import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timetrack2/data/database/app_database.dart' hide ProfileSettings;
 import 'package:timetrack2/data/repositories/activity_repository.dart';
@@ -52,7 +52,6 @@ class TestHarness {
     timer.dispose();
     clock.dispose();
     revision.dispose();
-    undo.dispose();
     await db.close();
   }
 }
@@ -537,3 +536,4 @@ void main() {
     });
   });
 }
+

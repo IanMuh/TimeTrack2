@@ -1,4 +1,4 @@
-/// 应用级聚合 store（模块 3d②）：组装全部 store + 启动编排。
+﻿/// 应用级聚合 store（模块 3d②）：组装全部 store + 启动编排。
 ///
 /// 设计：
 /// - **只编排不转发通知**（防 rebuild 风暴——框架调研结论）：AppStore 持有
@@ -420,7 +420,7 @@ class AppStore {
     if (ownsFoundation) {
       clock.dispose();
       dataRevision.dispose();
-      undo.dispose();
     }
   }
 }
+

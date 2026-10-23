@@ -1,4 +1,4 @@
-/// undo/redo 栈（快照 diff 机制，计划决策 3：快照 diff 存内存）。
+﻿/// undo/redo 栈（快照 diff 机制，计划决策 3：快照 diff 存内存）。
 ///
 /// 设计：
 /// - 快照为**字段级 diff**（before/after 实体），由领域 store（模块 3b）在
@@ -14,7 +14,8 @@ library;
 
 import 'dart:io' show stderr;
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
+
 
 import '../utils/result.dart';
 
@@ -91,7 +92,7 @@ class UndoRecord {
 /// - undo/redo **执行期间**触发的 [record] 被忽略（防恢复写库把 redo 误清空，
 ///   同 Flutter 官方 UndoHistory 的 _duringTrigger 防护）；
 /// - [undo]/[redo] 失败时**栈不动**（记录不迁移、不弹出）。
-class UndoStore extends ChangeNotifier {
+class UndoStore {
   UndoStore({int maxDepth = defaultMaxDepth}) : _maxDepth = maxDepth {
     // 运行时校验（非 assert）：release 下 assert 被裁剪，若 maxDepth <= 0 会
     // 导致 record() 立即移除新记录、undo 栈永远为空、功能静默失效。
@@ -102,6 +103,9 @@ class UndoStore extends ChangeNotifier {
 
   /// 默认栈深度上限。
   static const defaultMaxDepth = 50;
+
+  /// 栈变更通知（由 `undoStateProvider` 挂载，PR4-b）。
+  void Function()? onChanged;
 
   final int _maxDepth;
   final List<UndoRecord> _undoStack = [];
@@ -120,7 +124,7 @@ class UndoStore extends ChangeNotifier {
   void clear() {
     _undoStack.clear();
     _redoStack.clear();
-    notifyListeners();
+    onChanged?.call();
   }
 
   /// 栈深度（供 UI/测试观察）。
@@ -168,7 +172,7 @@ class UndoStore extends ChangeNotifier {
       _undoStack.removeAt(0);
     }
     _redoStack.clear();
-    notifyListeners();
+    onChanged?.call();
   }
 
   /// 撤销最近一条记录；失败时栈不动并返回明确原因。
@@ -204,7 +208,7 @@ class UndoStore extends ChangeNotifier {
       if (target.length > _maxDepth) {
         target.removeAt(0);
       }
-      notifyListeners();
+      onChanged?.call();
       return result;
     } finally {
       _executing = false;
@@ -257,3 +261,6 @@ class UndoStore extends ChangeNotifier {
     return const AppSuccess(null);
   }
 }
+
+
+

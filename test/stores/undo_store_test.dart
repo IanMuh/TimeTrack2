@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timetrack2/stores/undo_store.dart';
@@ -104,7 +104,6 @@ void main() {
     late UndoStore store;
 
     setUp(() => store = UndoStore());
-    tearDown(() => store.dispose());
 
     test('undo 校验 after（最近状态）并应用 before；redo 对称', () async {
       final applier = _FakeApplier();
@@ -169,7 +168,6 @@ void main() {
 
     test('深度超限丢最旧', () async {
       final boundedStore = UndoStore(maxDepth: 2);
-      addTearDown(boundedStore.dispose); // 创建后立即注册：断言失败也保证释放
       final applier = _FakeApplier();
       for (var i = 0; i < 3; i++) {
         boundedStore.record(
@@ -489,7 +487,7 @@ void main() {
 
     test('record/undo/redo 各触发一次通知', () async {
       var notifications = 0;
-      store.addListener(() => notifications++);
+      store.onChanged = () => notifications++;
 
       store.record(
         label: 'op',
@@ -527,7 +525,6 @@ void main() {
       // 最小合法边界：maxDepth: 1 必须可用（构造本身即隐含"不抛"校验），
       // 且丢最旧生效。
       final minStore = UndoStore(maxDepth: 1);
-      addTearDown(minStore.dispose); // 创建后立即注册：断言失败也保证释放
       minStore.record(
         label: 'a',
         changes: [UndoChange(before: 'B1', after: 'A1', applier: _FakeApplier())],
@@ -541,3 +538,6 @@ void main() {
     });
   });
 }
+
+
+

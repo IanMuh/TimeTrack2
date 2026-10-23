@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -122,7 +122,6 @@ class _Harness {
     timer.dispose();
     clock.dispose();
     revision.dispose();
-    undo.dispose();
     await db.close();
   }
 }
@@ -344,3 +343,4 @@ void main() {
     });
   });
 }
+
