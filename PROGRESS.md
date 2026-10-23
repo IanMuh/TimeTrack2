@@ -59,10 +59,20 @@ utils 不动；分 2 个 PR（PR1 = B0 地基 + B1 基础状态，PR2 = 其余�
   走 provider、1Hz 仅运行中订阅），并补测试作用域对时钟/修订号的桥接（修“写后
   页面不刷新”的根因）。
 
+- B4a（`feat/riverpod-migration-3`）：`lib/providers/engines.dart` 引擎状态镜像——
+  `appStoreInstanceProvider`（main 用 `late bootStore` 绑定、测试作用域
+  `overrideWithValue`）+ `timerSnapshotProvider`/`reminderSnapshotProvider`/
+  `updateSnapshotProvider`（监听物理引擎 → 值快照，`==` 过滤，dispose 摘监听）；
+  AppShell 改 `ConsumerStatefulWidget`，3 个引擎 `addListener` 换成 build 内
+  `ref.listen`（通知语义不变，只剩 settings 一个过渡白名单监听）；
+  `test/support` 基座绑定 store 实例；新增 `test/providers/engines_test.dart`
+  （快照只在运行条目真实变化时通知、stop=切未分配的语义）。801→803 测试。
+
 **剩余（PR3）**：TimerStore/ReminderStore/CategoryStore/SettingsStore/ActivityStore
 → Notifier；Sync/Update/Tracking/Lan/AI 引擎 Notifier 包装；CommandDispatcher 改
-Ref；删除 AppStore（`appStartupProvider` 装配）；AppShell 仍监听 4 个引擎（过渡
-白名单）；执行计划文档阶段 0 技术栈段落与目录约定改写。
+Ref；删除 AppStore（`appStartupProvider` 装配）；AppShell 最后一个 settings 监听
+（Android 服务同步）随 SettingsStore 迁移；执行计划文档阶段 0 技术栈段落与目录
+约定改写。分刀顺序与验收见 `docs/Riverpod迁移B4执行计划.md`。
 
 
 ## 阶段 5 收尾清单（待办）

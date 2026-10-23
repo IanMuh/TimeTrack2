@@ -8,6 +8,7 @@ import '../api/platform/android_tracking.dart' show AndroidTrackingBridge;
 import '../components/global_timer_bar.dart';
 import '../constants/storage_keys.dart';
 import '../l10n/app_localizations.dart';
+import '../providers/engines.dart';
 import '../providers/foundation.dart';
 import '../stores/app_store.dart';
 import '../stores/reminder_store.dart';
@@ -40,7 +41,7 @@ import '../viewmodels/profile_settings.dart' show ReminderMethod;
 ///   lastUndoLabel/lastRedoLabel），tooltip 用 ARB undoWithLabel/redoWithLabel，
 ///   禁用时给中性提示（不可用原因语义批次 5 补全——含冲突校验原因与移动端
 ///   收纳菜单；快捷键 Ctrl+Z/Y 与输入框让位同属批次 5）。
-class AppShell extends StatefulWidget {
+class AppShell extends ConsumerStatefulWidget {
   const AppShell({
     super.key,
     required this.app,
@@ -57,10 +58,10 @@ class AppShell extends StatefulWidget {
   static const double _contentMaxWidth = 1024;
 
   @override
-  State<AppShell> createState() => _AppShellState();
+  ConsumerState<AppShell> createState() => _AppShellState();
 }
 
-class _AppShellState extends State<AppShell>
+class _AppShellState extends ConsumerState<AppShell>
     with WidgetsBindingObserver {
   /// 合并 timer（运行条目变化）+ clock（秒级推进）为单一 listenable，
   /// 避免每次 build 重建合并对象反复换订阅（计时条每秒重建）。
@@ -106,8 +107,6 @@ class _AppShellState extends State<AppShell>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _sessionStart = widget.app.clock.now();
-    widget.app.reminder.addListener(_onReminderChanged);
-    widget.app.update.addListener(_onUpdateChanged);
     _wireTray();
     _wireAndroidTracking();
     // 可疑条目启动检测：AppStore.init 已 await timer.refresh()，postFrame
@@ -116,15 +115,11 @@ class _AppShellState extends State<AppShell>
       unawaited(_checkSuspiciousEntry());
       unawaited(_syncAndroidService());
     });
-    widget.app.timer.addListener(_onTimerForSuspicious);
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    widget.app.reminder.removeListener(_onReminderChanged);
-    widget.app.update.removeListener(_onUpdateChanged);
-    widget.app.timer.removeListener(_onTimerForSuspicious);
     widget.app.settings.removeListener(_syncAndroidService);
     // 托盘回调指向本 State：dispose 后必须摘除（服务随 AppStore 存活）。
     widget.app.tray.onCommand = null;
@@ -708,6 +703,12 @@ class _AppShellState extends State<AppShell>
 
   @override
   Widget build(BuildContext context) {
+    // B4a：引擎状态经 provider 值快照订阅（替代 initState 里的 addListener）。
+    // handler 体不变、仍读物理引擎；快照只在状态值真正变化时通知，避免
+    // TimerStore 内部无关字段变更引起壳层重建。
+    ref.listen(timerSnapshotProvider, (_, _) => _onTimerForSuspicious());
+    ref.listen(reminderSnapshotProvider, (_, _) => _onReminderChanged());
+    ref.listen(updateSnapshotProvider, (_, _) => _onUpdateChanged());
     final shell = widget.navigationShell;
     final isWide = MediaQuery.sizeOf(context).width >= AppShell.wideBreakpoint;
     final content = Expanded(child: shell);

@@ -13,9 +13,17 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:timetrack2/api/supabase/sync_backend.dart';
 import 'package:timetrack2/data/database/app_database.dart';
 import 'package:timetrack2/providers/app.dart';
+import 'package:timetrack2/providers/engines.dart';
 import 'package:timetrack2/providers/foundation.dart';
 import 'package:timetrack2/providers/infrastructure.dart';
 import 'package:timetrack2/stores/app_store.dart';
+
+/// 当前用例装配出的 AppStore（`appStoreInstanceProvider` 的测试绑定源）。
+///
+/// 生产由 main 的 `late bootStore` 绑定；测试里 store 在容器创建之后才由
+/// [pumpAppStore] 装配，故用模块级变量承接（每个测试文件独立 isolate，文件内
+/// 用例串行执行，teardown 复位）。
+AppStore? _bootStore;
 
 /// 每个用例独立的内存库（不落磁盘）。
 AppDatabase createTestDatabase() => AppDatabase(NativeDatabase.memory());
@@ -42,6 +50,14 @@ ProviderContainer createTestContainer({
       appDatabaseProvider.overrideWithValue(db),
       syncBackendProvider.overrideWithValue(backend ?? NoopSyncBackend()),
       runStartupChecksProvider.overrideWithValue(false),
+      // B4a：壳层引擎快照的实例源（pumpAppStore 装配后赋值）。
+      appStoreInstanceProvider.overrideWith((ref) {
+        final store = _bootStore;
+        if (store == null) {
+          throw StateError('pumpAppStore 尚未装配：请在读取引擎快照前调用');
+        }
+        return store;
+      }),
       // 测试默认不让 1Hz 时钟空转（需要 tick 的用例自行覆盖更短间隔）。
       clockIntervalProvider.overrideWithValue(const Duration(hours: 1)),
       if (now != null) nowProvider.overrideWithValue(now),
@@ -53,5 +69,13 @@ ProviderContainer createTestContainer({
 }
 
 /// 装配 AppStore（等价于启动期 main 的 `await container.read(...future)`）。
-Future<AppStore> pumpAppStore(ProviderContainer container) =>
-    container.read(appStoreProvider.future);
+///
+/// 装配完成后绑定 [appStoreInstanceProvider]，使壳层引擎快照 provider 可用。
+Future<AppStore> pumpAppStore(ProviderContainer container) async {
+  final store = await container.read(appStoreProvider.future);
+  _bootStore = store;
+  addTearDown(() {
+    if (identical(_bootStore, store)) _bootStore = null;
+  });
+  return store;
+}

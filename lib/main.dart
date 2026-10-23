@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app.dart';
 import 'providers/app.dart';
+import 'providers/engines.dart';
+import 'stores/app_store.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -11,9 +13,17 @@ Future<void> main() async {
   // Riverpod 容器是状态层的唯一实例源。启动期先 await 装配完成再 runApp，
   // 保持“数据库不可用 → 错误页”的既有启动语义（启动期不引入加载屏，
   // 避免启动顺序与错误兜底行为发生变化）。
-  final container = ProviderContainer();
+  //
+  // B4a：壳层经 `appStoreInstanceProvider` 订阅物理引擎状态。实例在装配完成前
+  // 不可读（容器内镜像 provider 只在 runApp 后才会被 widget watch），这里用
+  // late 变量做一次性绑定，避免“先有 store 才有容器”的循环装配。
+  late AppStore bootStore;
+  final container = ProviderContainer(
+    overrides: [appStoreInstanceProvider.overrideWith((ref) => bootStore)],
+  );
   try {
     final appStore = await container.read(appStoreProvider.future);
+    bootStore = appStore;
     // 路由/壳层经 TimeTrack2App 的 container 参数接入同一容器
     // （UncontrolledProviderScope 由根组件内部安装）。
     runApp(TimeTrack2App(appStore: appStore, container: container));
