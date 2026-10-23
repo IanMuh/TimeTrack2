@@ -20,8 +20,6 @@ library;
 
 import 'dart:io' show stderr;
 
-import 'package:flutter/foundation.dart';
-
 import '../data/repositories/category_repository.dart';
 import '../utils/result.dart';
 import '../viewmodels/activity_category.dart';
@@ -114,7 +112,7 @@ class CategoryChangeApplier implements UndoApplier {
 }
 
 /// 分类树 store。
-class CategoryStore extends ChangeNotifier {
+class CategoryStore {
   CategoryStore({
     required this.categories,
     required this.undo,
@@ -137,6 +135,10 @@ class CategoryStore extends ChangeNotifier {
   final DataRevision dataRevision;
 
   final CategoryChangeApplier _applier;
+
+  /// 树缓存重建/加载失败后的通知（由 `categoryChangeProvider` 挂载，
+  /// PR4-b）。ChangeNotifier 移除后，UI 通知走 provider。
+  void Function()? onChanged;
 
   bool _disposed = false;
   bool _loadFailed = false; // reload 失败标志（缓存保持旧值，UI 提示用）
@@ -189,7 +191,7 @@ class CategoryStore extends ChangeNotifier {
         if (_disposed || seq != _reloadSeq) return;
         // 失败置位供 UI 提示（缓存保持旧值）——防"写成功但缓存静默陈旧"。
         _loadFailed = true;
-        notifyListeners();
+        onChanged?.call();
         return;
       }
       if (_disposed || seq != _reloadSeq) return; // await 期间 dispose/更新的 reload
@@ -197,7 +199,7 @@ class CategoryStore extends ChangeNotifier {
       if (linksResult case AppFailure<List<ActivityCategoryLink>> _) {
         if (_disposed || seq != _reloadSeq) return;
         _loadFailed = true;
-        notifyListeners();
+        onChanged?.call();
         return;
       }
       if (_disposed || seq != _reloadSeq) return;
@@ -205,7 +207,7 @@ class CategoryStore extends ChangeNotifier {
       _links = List<ActivityCategoryLink>.unmodifiable(linksResult.requireValue());
       _loadFailed = false;
       _rebuildIndexes();
-      notifyListeners();
+      onChanged?.call();
     } catch (e, st) {
       // 契约外异常（仓储直接抛错等）：不崩溃、不静默——置失败位供 UI 提示，
       // stderr 记录便于排障。
@@ -213,7 +215,7 @@ class CategoryStore extends ChangeNotifier {
       // ignore: avoid_print
       stderr.writeln('[category] reload 未预期异常：$e\n$st');
       _loadFailed = true;
-      notifyListeners();
+      onChanged?.call();
     }
   }
 
@@ -482,10 +484,10 @@ class CategoryStore extends ChangeNotifier {
     dataRevision.bump();
   }
 
-  @override
+  /// 容器释放时标记（不继承 ChangeNotifier）。
   void dispose() {
     _disposed = true;
     dataRevision.removeListener(_reloadOnDataChange);
-    super.dispose();
   }
 }
+

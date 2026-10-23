@@ -251,3 +251,4 @@ slicesForRange/computeDayMetrics）+ 自然语言→指令解析。
 - 每模块一个 Conventional Commit；合并到 main 走 feature 分支 + PR（用户审批）；未经用户明确指示不 push 除 feature 分支以外的任何分支
 - ocr 审查：日常 `--commit` 增量、模块门禁 `--from main --to` 分支 diff、全仓库 `ocr scan`；属实缺陷清零 + 误报硬证据排除；停循环=连续 2 轮无新增属实 high/medium
 
+
