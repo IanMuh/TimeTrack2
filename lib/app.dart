@@ -84,15 +84,19 @@ class _TimeTrack2AppState extends State<TimeTrack2App> {
       return _withProviderScope(_buildApp(router, ThemeMode.light));
     }
     // 有 store：只订阅设置这一件事（主题/时制等），库变化即重建。
+    // PR4-b：SettingsStore 已去 ChangeNotifier，经 settingsChangeProvider 订阅。
     return _withProviderScope(
-      ListenableBuilder(
-        listenable: settings,
-        builder: (context, _) => _buildApp(
-          router,
-          themeModeFromSetting(
-            settings.current?.themeMode ?? ThemeModeSetting.light,
-          ),
-        ),
+      Consumer(
+        builder: (context, ref, _) {
+          ref.watch(settingsChangeProvider);
+          final store = ref.read(settingsStoreProvider);
+          return _buildApp(
+            router,
+            themeModeFromSetting(
+              store.current?.themeMode ?? ThemeModeSetting.light,
+            ),
+          );
+        },
       ),
     );
   }

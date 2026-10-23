@@ -270,8 +270,10 @@ class SettingsChangeNotifier extends Notifier<int> {
       state = state + 1;
     }
 
-    store.addListener(onChange);
-    ref.onDispose(() => store.removeListener(onChange));
+    store.onChanged = onChange;
+    ref.onDispose(() {
+      if (identical(store.onChanged, onChange)) store.onChanged = null;
+    });
     return 0;
   }
 }

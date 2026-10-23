@@ -33,10 +33,9 @@ void main() {
 
     // ChangeNotifier 在 dispose 后再被监听会抛 FlutterError；能抛说明释放
     // 路径由 provider 走通，且 AppStore 没有重复 dispose 触发断言。
-    expect(() => domain.settings.addListener(() {}), throwsFlutterError);
     expect(() => domain.timer.addListener(() {}), throwsFlutterError);
     expect(() => domain.category.addListener(() {}), throwsFlutterError);
-    // 活动已去 ChangeNotifier（PR4-b），无 dispose 可断言；其通知走
-    // activityProvider，见 activity_test.dart。
+    // 活动/设置已去 ChangeNotifier（PR4-b），无 addListener 可断言；通知分别
+    // 走 activityProvider / settingsChangeProvider。
   });
 }
