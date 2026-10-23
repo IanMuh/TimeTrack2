@@ -1,4 +1,4 @@
-/// 设置分区实现 ④：备份与导出（含清除全部数据危险区）+ 设备互通
+﻿/// 设置分区实现 ④：备份与导出（含清除全部数据危险区）+ 设备互通
 ///（LAN 主机/客户端/文件互通，契约 §4.5）。
 ///
 /// 导出/导入走指令通道（export/import——铁律 7，dispatcher 内处理设备 id
@@ -7,8 +7,10 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../l10n/app_localizations.dart';
+import '../providers/engines.dart';
 import '../stores/app_store.dart';
 import '../stores/lan_store.dart';
 import '../utils/result.dart';
@@ -180,16 +182,16 @@ class BackupSection extends StatelessWidget {
 }
 
 /// 设备互通分区。
-class DeviceSection extends StatefulWidget {
+class DeviceSection extends ConsumerStatefulWidget {
   const DeviceSection({super.key, required this.app});
 
   final AppStore app;
 
   @override
-  State<DeviceSection> createState() => _DeviceSectionState();
+  ConsumerState<DeviceSection> createState() => _DeviceSectionState();
 }
 
-class _DeviceSectionState extends State<DeviceSection> {
+class _DeviceSectionState extends ConsumerState<DeviceSection> {
   final _hostController = TextEditingController();
   final _codeController = TextEditingController();
 
@@ -209,11 +211,10 @@ class _DeviceSectionState extends State<DeviceSection> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final app = widget.app;
-    return ListenableBuilder(
-      listenable: app.lan,
-      builder: (context, _) {
-        final lan = app.lan;
+    return Consumer(
+      builder: (context, ref, _) {
+        ref.watch(lanChangeProvider);
+        final lan = ref.read(appStoreInstanceProvider).lan;
         return SettingsSectionCard(
           key: const ValueKey('sec-device'),
           icon: Icons.devices_outlined,

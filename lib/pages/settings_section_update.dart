@@ -1,9 +1,10 @@
-/// 设置分区实现 ⑤：版本更新（状态机全态卡，契约 §7）+ 关于。
+﻿/// 设置分区实现 ⑤：版本更新（状态机全态卡，契约 §7）+ 关于。
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../l10n/app_localizations.dart';
+import '../l10n/app_localizations.dart';import '../providers/engines.dart';
 import '../stores/app_store.dart';
 import '../stores/update_store.dart';
 import '../viewmodels/commands/command_invocation.dart';
@@ -18,10 +19,10 @@ class UpdateSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    return ListenableBuilder(
-      listenable: app.update,
-      builder: (context, _) {
-        final status = app.update.status;
+    return Consumer(
+      builder: (context, ref, _) {
+        ref.watch(updateChangeProvider);
+        final status = ref.read(appStoreInstanceProvider).update.status;
         return SettingsSectionCard(
           key: const ValueKey('sec-update'),
           icon: Icons.system_update_alt_outlined,

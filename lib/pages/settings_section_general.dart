@@ -1,4 +1,4 @@
-/// 设置分区实现 ①：通用 / 提醒 / 时间线（批次 4）。
+﻿/// 设置分区实现 ①：通用 / 提醒 / 时间线（批次 4）。
 ///
 /// 三区全部是 ProfileSettings 表单——变更经 [SettingsStore.save] 落库
 /// （即时生效 + undo + LWW 时间戳推进），不另设本地草稿态。
@@ -24,9 +24,9 @@ class GeneralSection extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final l10n = AppLocalizations.of(context)!;
-    return ListenableBuilder(
-      listenable: ref.read(settingsStoreProvider),
-      builder: (context, _) {
+    return Consumer(
+      builder: (context, ref, _) {
+        ref.watch(settingsChangeProvider);
         final s = ref.read(settingsStoreProvider).current;
         return SettingsSectionCard(
           key: const ValueKey('sec-general'),
@@ -119,9 +119,9 @@ class ReminderSection extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final l10n = AppLocalizations.of(context)!;
-    return ListenableBuilder(
-      listenable: ref.read(settingsStoreProvider),
-      builder: (context, _) {
+    return Consumer(
+      builder: (context, ref, _) {
+        ref.watch(settingsChangeProvider);
         final s = ref.read(settingsStoreProvider).current;
         final quickOn = s?.quickReminderEnabled ?? true;
         return SettingsSectionCard(
@@ -208,9 +208,9 @@ class TimelineSection extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final l10n = AppLocalizations.of(context)!;
-    return ListenableBuilder(
-      listenable: ref.read(settingsStoreProvider),
-      builder: (context, _) {
+    return Consumer(
+      builder: (context, ref, _) {
+        ref.watch(settingsChangeProvider);
         final s = ref.read(settingsStoreProvider).current;
         final value = s?.mergeNeighborThresholdMinutes ?? 1;
         return SettingsSectionCard(

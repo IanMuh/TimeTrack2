@@ -1,9 +1,10 @@
-/// 设置分区实现 ②：云同步（登录/登出/摘要/立即同步）+ AI 配置二期占位。
+﻿/// 设置分区实现 ②：云同步（登录/登出/摘要/立即同步）+ AI 配置二期占位。
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../l10n/app_localizations.dart';
+import '../l10n/app_localizations.dart';import '../providers/engines.dart';
 import '../utils/result.dart';
 import '../viewmodels/commands/command_invocation.dart';
 import '../stores/app_store.dart';
@@ -18,10 +19,10 @@ class SyncSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    return ListenableBuilder(
-      listenable: app.sync,
-      builder: (context, _) {
-        final sync = app.sync;
+    return Consumer(
+      builder: (context, ref, _) {
+        ref.watch(syncChangeProvider);
+        final sync = ref.read(appStoreInstanceProvider).sync;
         return SettingsSectionCard(
           key: const ValueKey('sec-sync'),
           icon: Icons.cloud_outlined,

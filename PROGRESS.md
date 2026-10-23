@@ -90,9 +90,19 @@ utils 不动；分 2 个 PR（PR1 = B0 地基 + B1 基础状态，PR2 = 其余�
 `ListenableBuilder` 过渡。完整方案与风险表见
 `docs/Riverpod迁移B4全替代方案.md`。
 
-**剩余（PR3）**：B4c-2 读取面收尾——其余设置分区（sync/update/background/device
-的引擎监听改 `ref.listen`/`ref.watch`）与 TodayPage/StatsPage/TimelinePage/
-TimerPage 的 category/settings 读取面；验收 `lib/pages` 中 `app.*` 读取归零。
+**B4c-2（同分支，PR3 收尾）**：读取面去 store——`lib/providers/engines.dart`
+新增通用 `_EngineChangeNotifier` 与 `timer/tracking/lan/sync/updateChangeProvider`
+（任意引擎 `Listenable` → int 变更计数）；`today_page`/`stats_page`/
+`timeline_page`/`timer_page` 的 `app.category`/`app.settings` 读取改
+`ref.watch(categoryChangeProvider|settingsChangeProvider)` + `ref.read(...StoreProvider)`；
+`AppShell` 提醒横幅改 `Consumer`（无提醒时不订阅 1Hz）、同步状态小字改
+`ref.watch(syncChangeProvider)`；设置分区 general（3 处）/sync/update/device（LAN）
+/background（tracking+settings+timer 合并监听）全部由 `ListenableBuilder` 改
+`Consumer`；`DeviceSection`/`BackgroundSection` 改 `ConsumerStatefulWidget`。
+验收：`lib/pages` 中 `ListenableBuilder` 与 `addListener` 均为 0；analyze 0；
+803 测试全绿。PR3 可合并。
+
+**剩余（PR4/PR5）**：见下。
 
 **剩余（PR4）**：Settings → Activity → Category → Timer → Reminder → Undo →
 CommandDispatcher 依次改 Notifier（按 A 方案），页面/测试切 provider，删对应

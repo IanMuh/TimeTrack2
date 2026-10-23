@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,6 +8,7 @@ import '../api/platform/android_tracking.dart' show AndroidTrackingBridge;
 import '../components/global_timer_bar.dart';
 import '../constants/storage_keys.dart';
 import '../l10n/app_localizations.dart';
+import '../providers/data.dart';
 import '../providers/engines.dart';
 import '../providers/foundation.dart';
 import '../stores/app_store.dart';
@@ -159,7 +160,7 @@ class _AppShellState extends ConsumerState<AppShell>
     String content = '';
     final matchedId = app.tracking.lastMatchedActivityId;
     if (matchedId != null) {
-      final activity = await app.activities.activityById(matchedId);
+      final activity = await ref.read(activityRepositoryProvider).activityById(matchedId);
       if (!mounted) return;
       content = activity?.name ?? '';
     }
@@ -392,8 +393,7 @@ class _AppShellState extends ConsumerState<AppShell>
     if (!running.isRunning) return; // 无运行条目：无需检测
     if (!running.startAt!.isBefore(_sessionStart)) return; // 本会话内开始
     _suspiciousChecked = true;
-    if (await widget.app.activities
-        .activityIdIsUnassigned(running.activityId!)) {
+    if (await ref.read(activityRepositoryProvider).activityIdIsUnassigned(running.activityId!)) {
       return;
     }
     if (!mounted) return;
@@ -707,11 +707,14 @@ class _AppShellState extends ConsumerState<AppShell>
     final shell = widget.navigationShell;
     final isWide = MediaQuery.sizeOf(context).width >= AppShell.wideBreakpoint;
     final content = Expanded(child: shell);
-    final banner = ListenableBuilder(
-      // 横幅时长实时显示需跟随时钟 tick 重绘（见 _buildReminderBanner）。
-      listenable: Listenable.merge([widget.app.reminder, widget.app.clock]),
-      builder: (context, _) =>
-          _buildReminderBanner() ?? const SizedBox.shrink(),
+    final banner = Consumer(
+      builder: (context, ref, _) {
+        // 横幅时长实时显示需跟随时钟 tick 重绘（见 _buildReminderBanner）；
+        // 无提醒时不订阅 1Hz，避免空闲秒级重建。
+        final reminder = ref.watch(reminderSnapshotProvider);
+        if (reminder.hasReminder) ref.watch(clockTickProvider);
+        return _buildReminderBanner() ?? const SizedBox.shrink();
+      },
     );
     return Scaffold(
       body: isWide
@@ -902,7 +905,7 @@ class _AppShellState extends ConsumerState<AppShell>
     _entryIsUnassigned = false;
     Future.microtask(() async {
       final isUnassigned =
-          await widget.app.activities.activityIdIsUnassigned(activityId);
+          await ref.read(activityRepositoryProvider).activityIdIsUnassigned(activityId);
       if (!mounted || _checkedActivityId != activityId) return;
       setState(() => _entryIsUnassigned = isUnassigned);
     });
@@ -1218,10 +1221,10 @@ class _SyncStatusText extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    return ListenableBuilder(
-      listenable: app.sync,
-      builder: (context, _) {
-        final sync = app.sync;
+    return Consumer(
+      builder: (context, ref, _) {
+        ref.watch(syncChangeProvider);
+        final sync = ref.read(appStoreInstanceProvider).sync;
         final l10n = AppLocalizations.of(context)!;
         final String label;
         if (sync.syncing) {

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../stores/app_store.dart';
@@ -292,4 +293,49 @@ class CategoryChangeNotifier extends Notifier<int> {
     return 0;
   }
 }
+
+/// 通用"引擎变更计数"：把任意 `Listenable` 的通知折算成 int 递增。
+///
+/// 迁移期用于引擎 store（timer/tracking/lan/sync/update）——它们仍是
+/// `ChangeNotifier`，页面不再 `ListenableBuilder`，而是
+/// `ref.watch(xxxChangeProvider)` + `ref.read(...StoreProvider)`。
+class _EngineChangeNotifier extends Notifier<int> {
+  _EngineChangeNotifier(this._listen);
+
+  final Listenable Function(AppStore) _listen;
+
+  @override
+  int build() {
+    final listenable = _listen(ref.watch(appStoreInstanceProvider));
+    void onChange() {
+      if (!ref.mounted) return;
+      state = state + 1;
+    }
+
+    listenable.addListener(onChange);
+    ref.onDispose(() => listenable.removeListener(onChange));
+    return 0;
+  }
+}
+
+final timerChangeProvider = NotifierProvider<_EngineChangeNotifier, int>(
+  () => _EngineChangeNotifier((store) => store.timer),
+);
+
+final trackingChangeProvider = NotifierProvider<_EngineChangeNotifier, int>(
+  () => _EngineChangeNotifier((store) => store.tracking),
+);
+
+final lanChangeProvider = NotifierProvider<_EngineChangeNotifier, int>(
+  () => _EngineChangeNotifier((store) => store.lan),
+);
+
+final syncChangeProvider = NotifierProvider<_EngineChangeNotifier, int>(
+  () => _EngineChangeNotifier((store) => store.sync),
+);
+
+final updateChangeProvider = NotifierProvider<_EngineChangeNotifier, int>(
+  () => _EngineChangeNotifier((store) => store.update),
+);
+
 

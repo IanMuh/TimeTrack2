@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../components/activity_picker/activity_picker.dart';
@@ -8,6 +8,7 @@ import '../components/state_views.dart';
 import '../components/tnum_text.dart';
 import '../l10n/app_localizations.dart';
 import '../providers/data.dart';
+import '../providers/engines.dart';
 import '../providers/foundation.dart';
 import '../stores/app_store.dart';
 import '../utils/day_metrics.dart';
@@ -39,7 +40,8 @@ class _TimelinePageState extends ConsumerState<TimelinePage> {
   AppStore get app => widget.app;
 
   /// 时制偏好（设置即时生效——设置保存会 bump 修订号，查询 provider 失效重建）。
-  bool get _use24 => app.settings.current?.use24HourFormat ?? true;
+  bool get _use24 =>
+      ref.read(settingsStoreProvider).current?.use24HourFormat ?? true;
   AppLocalizations get l10n => AppLocalizations.of(context)!;
 
   static const _spans = [1, 3, 7]; // 今天/三天/本周（天）
@@ -218,7 +220,7 @@ class _TimelinePageState extends ConsumerState<TimelinePage> {
   }
 
   Future<Activity?> _pickActivity() async {
-    final category = app.category;
+    final category = ref.read(categoryStoreProvider);
     final primary = <String, String?>{};
     final all = <String, Set<String>>{};
     for (final link in category.links) {
@@ -268,6 +270,8 @@ class _TimelinePageState extends ConsumerState<TimelinePage> {
     // initState，午夜后与数据窗口错位）。
     final today = ref.watch(currentDayProvider);
     if (_followToday) _anchor = today;
+    // 迁移期桥接：24 小时制等设置变更需重建时间轴。
+    ref.watch(settingsChangeProvider);
 
     // 查询即 provider：切日/切跨度只改键，不手工 reload；写操作会 bump
     // 修订号 → provider 失效 → 本页重建。

@@ -9,8 +9,11 @@ import '../components/state_views.dart';
 import '../components/tnum_text.dart';
 import '../l10n/app_localizations.dart';
 import '../providers/data.dart';
+import '../providers/engines.dart';
 import '../providers/foundation.dart';
 import '../stores/app_store.dart';
+import '../stores/category_store.dart';
+import '../stores/settings_store.dart';
 import '../utils/time_format.dart';
 import '../utils/day_metrics.dart';
 import '../viewmodels/activity_category.dart';
@@ -93,8 +96,13 @@ class _TodayPageState extends ConsumerState<TodayPage> {
         unassignedActivityId: unassignedActivityId,
       );
 
+  /// 迁移期桥接：分类树/设置仍由 ChangeNotifier store 持有（B4 换 Notifier），
+  /// build 里 watch 变更计数保证重建，方法体经 read 取当前快照。
+  CategoryStore get _categories => ref.read(categoryStoreProvider);
+  SettingsStore get _settings => ref.read(settingsStoreProvider);
+
   String? _primaryOf(String activityId) {
-    for (final link in app.category.links) {
+    for (final link in _categories.links) {
       if (link.activityId == activityId) return link.categoryId;
     }
     return null;
@@ -102,19 +110,19 @@ class _TodayPageState extends ConsumerState<TodayPage> {
 
   String? _rootById(String? primary) {
     if (primary == null) return null;
-    final chain = app.category.ancestorChains[primary] ?? const [];
+    final chain = _categories.ancestorChains[primary] ?? const [];
     return chain.isEmpty ? null : chain.first;
   }
 
   String _groupLabel(String? rootId) {
     if (rootId == null) return l10n.unassignedActivity;
-    final chain = app.category.ancestorChains[rootId] ?? const [];
+    final chain = _categories.ancestorChains[rootId] ?? const [];
     if (chain.length > 1) return chain.join(' / ');
-    return app.category.categoryById[rootId]?.name ?? '';
+    return _categories.categoryById[rootId]?.name ?? '';
   }
 
   int? _groupColor(String? rootId) =>
-      rootId == null ? 0xffa1a1aa : app.category.categoryById[rootId]?.color;
+      rootId == null ? 0xffa1a1aa : _categories.categoryById[rootId]?.color;
 
   Duration _totalOfEntries(List<TimeEntry> entries, DateTime now) {
     var t = Duration.zero;
@@ -152,7 +160,7 @@ class _TodayPageState extends ConsumerState<TodayPage> {
   String _pathOf(String activityId) {
     final primary = _primaryOf(activityId);
     if (primary == null) return '';
-    final chain = app.category.ancestorChains[primary] ?? const [];
+    final chain = _categories.ancestorChains[primary] ?? const [];
     return chain.length > 1 ? chain.join(' / ') : '';
   }
 
@@ -182,6 +190,9 @@ class _TodayPageState extends ConsumerState<TodayPage> {
   @override
   Widget build(BuildContext context) {
     final day = _day;
+    // 迁移期桥接：分类树/设置变更（B4 换 Notifier 后由 state 直接驱动）。
+    ref.watch(categoryChangeProvider);
+    ref.watch(settingsChangeProvider);
     final isToday = day == _today;
     final entriesAsync = ref.watch(dayEntriesProvider(day));
     final previousDay = DateTime(day.year, day.month, day.day - 1);
@@ -257,7 +268,7 @@ class _TodayPageState extends ConsumerState<TodayPage> {
         const SizedBox(height: 16),
         _FilterRow(
           l10n: l10n,
-          rootCategories: app.category.childrenByParent[null] ?? const [],
+          rootCategories: _categories.childrenByParent[null] ?? const [],
           filters: _filters,
           onToggleRoot: (id) => setState(() {
             _filters.contains(id) ? _filters.remove(id) : _filters.add(id);
@@ -287,7 +298,7 @@ class _TodayPageState extends ConsumerState<TodayPage> {
           child: _TimelinePreview(
             l10n: l10n,
             entries: previewEntries,
-            use24: app.settings.current?.use24HourFormat ?? true,
+            use24: _settings.current?.use24HourFormat ?? true,
             entryCount: previewEntries.length,
           ),
         ),
