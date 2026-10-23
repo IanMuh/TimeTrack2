@@ -46,9 +46,7 @@ import 'settings_store.dart';
 import 'stats_store.dart';
 import 'sync_store.dart';
 import 'lan_store.dart';
-import 'timeline_store.dart';
 import 'timer_store.dart';
-import 'today_store.dart';
 import 'tracking_store.dart';
 import 'undo_store.dart';
 import 'update_store.dart';
@@ -67,8 +65,6 @@ class AppStore {
     required this.activity,
     required this.settings,
     required this.reminder,
-    required this.today,
-    required this.timeline,
     required this.stats,
     required this.sync,
     required this.update,
@@ -111,8 +107,6 @@ class AppStore {
 
   /// 提醒 store（批次 5c 弹窗体系：运行阈值「仍在进行？」+ 触发时刻提醒）。
   final ReminderStore reminder;
-  final TodayStore today;
-  final TimelineStore timeline;
   final StatsStore stats;
   final SyncStore sync;
   final UpdateStore update;
@@ -216,13 +210,6 @@ class AppStore {
       undo: undo,
       dataRevision: revision,
     );
-    final today = TodayStore(
-      entries: entries,
-      dataRevision: revision,
-      clock: clock,
-      now: now,
-    );
-    final timeline = TimelineStore(entries: entries, dataRevision: revision);
     final stats = StatsStore(
       repository: StatsRepository(
         activities: activities,
@@ -325,8 +312,6 @@ class AppStore {
       activity: activity,
       settings: settings,
       reminder: reminder,
-      today: today,
-      timeline: timeline,
       stats: stats,
       sync: sync,
       update: update,
@@ -356,7 +341,6 @@ class AppStore {
     // 2. 各 store 加载缓存。
     await category.reload();
     await settings.reload();
-    await today.loadToday();
     await timer.refresh();
     if (!runStartupChecks) return; // 测试路径：跳过网络/清理编排
     // 3. 静默更新检查（失败静默，不阻塞启动）。
@@ -410,8 +394,6 @@ class AppStore {
     update.dispose();
     sync.dispose();
     stats.dispose();
-    timeline.dispose();
-    today.dispose();
     settings.dispose();
     reminder.dispose();
     category.dispose();

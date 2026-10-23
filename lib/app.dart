@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'components/app_theme.dart';
 import 'l10n/app_localizations.dart';
 import 'providers/foundation.dart';
+import 'providers/infrastructure.dart';
 import 'viewmodels/profile_settings.dart' show ThemeModeSetting;
 import 'routes/app_router.dart';
 import 'stores/app_store.dart';
@@ -139,7 +140,10 @@ class _TimeTrack2AppState extends State<TimeTrack2App> {
   }
 
   /// 迁移期作用域装配：外部容器优先；否则内部建 [ProviderScope] 并桥接
-  /// [TimeTrack2App.appStore] 的撤销实例（测试/占位模式）。
+  /// [TimeTrack2App.appStore]（测试/占位模式）。
+  ///
+  /// 桥接内容：数据库（页面查询 provider 必须命中同一个测试库，否则会
+  /// 打开真实 drift 文件）、undo 实例（撤销按钮与 AppStore 同一份状态）。
   Widget _withProviderScope(Widget child) {
     final container = widget.container;
     if (container != null) {
@@ -148,7 +152,10 @@ class _TimeTrack2AppState extends State<TimeTrack2App> {
     final store = widget.appStore;
     return ProviderScope(
       overrides: [
-        if (store != null) undoStoreProvider.overrideWithValue(store.undo),
+        if (store != null) ...[
+          appDatabaseProvider.overrideWithValue(store.database),
+          undoStoreProvider.overrideWithValue(store.undo),
+        ],
       ],
       child: child,
     );

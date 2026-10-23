@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../components/controls.dart' show AppToggle;
@@ -6,6 +7,7 @@ import '../components/feedback.dart';
 import '../components/state_views.dart';
 import '../components/tnum_text.dart';
 import '../l10n/app_localizations.dart';
+import '../providers/data.dart';
 import '../stores/app_store.dart';
 import '../utils/day_metrics.dart' show formatHm;
 import '../viewmodels/stats/stats_models.dart';
@@ -17,16 +19,16 @@ import 'stats_widgets.dart';
 ///
 /// 批次 5b 已收口：分类筛选与"排除自动条目"经 compute 参数在仓储切片层
 /// 生效（聚合行/环形图/明细同口径）；页内仅保留明细条目列表的等价过滤。
-class StatsPage extends StatefulWidget {
+class StatsPage extends ConsumerStatefulWidget {
   const StatsPage({super.key, required this.app});
 
   final AppStore app;
 
   @override
-  State<StatsPage> createState() => _StatsPageState();
+  ConsumerState<StatsPage> createState() => _StatsPageState();
 }
 
-class _StatsPageState extends State<StatsPage> {
+class _StatsPageState extends ConsumerState<StatsPage> {
   AppStore get app => widget.app;
   AppLocalizations get l10n => AppLocalizations.of(context)!;
 
@@ -38,6 +40,9 @@ class _StatsPageState extends State<StatsPage> {
   bool _filterExpanded = false;
   final Set<String> _selectedCategories = {};
   final Set<String> _treeExpanded = {};
+
+  /// 范围条目只读快照：build 期从 provider 同步（明细/按日聚合用）。
+  List<TimeEntry> _entries = const [];
 
   static DateTime _today() {
     final n = DateTime.now();
@@ -81,7 +86,6 @@ class _StatsPageState extends State<StatsPage> {
   void initState() {
     super.initState();
     _compute();
-    _loadEntries();
     app.stats.addListener(_onChange);
     app.dataRevision.addListener(_onChange);
     app.category.addListener(_onChange);
@@ -115,14 +119,9 @@ class _StatsPageState extends State<StatsPage> {
     );
   }
 
-  Future<void> _loadEntries() async {
-    final (s, e) = _range;
-    await app.timeline.loadRange(s, e);
-  }
-
   /// 页内过滤后的明细条目（排除自动 / 分类筛选生效——图表与明细用）。
   List<TimeEntry> get _filteredEntries {
-    var list = app.timeline.entriesForRange;
+    var list = _entries;
     if (_excludeAuto) list = list.where((e) => !e.isAuto).toList();
     if (_selectedCategories.isNotEmpty) {
       list = list.where((e) {
@@ -155,6 +154,8 @@ class _StatsPageState extends State<StatsPage> {
 
   @override
   Widget build(BuildContext context) {
+    // 范围条目由 provider 提供（时间线 store 已删）；写操作/回滚后自动刷新。
+    _entries = ref.watch(rangeEntriesProvider(_range)).value ?? const [];
     final snapshot = app.stats.snapshot;
     final scheme = Theme.of(context).colorScheme;
     final wide = MediaQuery.sizeOf(context).width >= 840;
@@ -271,7 +272,6 @@ class _StatsPageState extends State<StatsPage> {
     setState(() => _rangeIndex = i);
     if (i == 4) _pickCustom();
     _compute();
-    _loadEntries();
   }
 
   Future<void> _pickCustom() async {
@@ -296,7 +296,6 @@ class _StatsPageState extends State<StatsPage> {
       _customEnd = e;
     });
     _compute();
-    _loadEntries();
   }
 
   void _shift(int days) {
@@ -311,7 +310,6 @@ class _StatsPageState extends State<StatsPage> {
       }
     });
     _compute();
-    _loadEntries();
   }
 
   Widget _segmented({

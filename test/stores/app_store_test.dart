@@ -59,8 +59,6 @@ void main() {
       expect(store.timer, isNotNull);
       expect(store.category, isNotNull);
       expect(store.settings, isNotNull);
-      expect(store.today, isNotNull);
-      expect(store.timeline, isNotNull);
       expect(store.stats, isNotNull);
       expect(store.sync, isNotNull);
       expect(store.update, isNotNull);
@@ -105,8 +103,7 @@ void main() {
         runStartupChecks: false,
       );
       addTearDown(store.dispose);
-      expect(store.today.today, isEmpty); // 今日窗口正常
-    });
+      });
   });
 }
 

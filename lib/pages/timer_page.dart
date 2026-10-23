@@ -1,15 +1,20 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../components/activity_picker/activity_picker.dart';
 import '../components/feedback.dart';
 import '../components/state_views.dart';
 import '../constants/theme_tokens.dart' show ActivityPalette;
 import '../l10n/app_localizations.dart';
+import '../providers/data.dart';
+import '../providers/foundation.dart';
 import '../stores/app_store.dart';
+import '../utils/day_metrics.dart';
 import '../viewmodels/activity.dart';
 import '../viewmodels/commands/command_invocation.dart';
+import '../viewmodels/time_entry.dart';
 import 'timer_widgets.dart';
 
 /// 计时页（契约 §4.1）——默认着陆页，会话焦点 + 快捷活动区。
@@ -25,16 +30,16 @@ import 'timer_widgets.dart';
 /// 批次 5a 收口：新建活动（选择器表单 + "临时活动"）统一经 activity_create
 /// 指令通道——单条撤销记录（undo=软删/redo=复活）；分类关联仍走
 /// CategoryStore.setActivityCategories（指令通道化挂账不变）。
-class TimerPage extends StatefulWidget {
+class TimerPage extends ConsumerStatefulWidget {
   const TimerPage({super.key, required this.app});
 
   final AppStore app;
 
   @override
-  State<TimerPage> createState() => _TimerPageState();
+  ConsumerState<TimerPage> createState() => _TimerPageState();
 }
 
-class _TimerPageState extends State<TimerPage> {
+class _TimerPageState extends ConsumerState<TimerPage> {
   AppStore get app => widget.app;
   AppLocalizations get l10n => AppLocalizations.of(context)!;
 
@@ -52,6 +57,9 @@ class _TimerPageState extends State<TimerPage> {
   bool _recording = false; // 运行条目是否处于"记录中"（未分配 = 未记录）
   bool _disposed = false;
 
+  /// 今日条目只读快照：每次 build 从 provider 同步（动作回调需要同一份数据）。
+  List<TimeEntry> _todayEntries = const [];
+
   static const _pendingTimeout = Duration(milliseconds: 2500);
 
   @override
@@ -60,7 +68,6 @@ class _TimerPageState extends State<TimerPage> {
     _load();
     app.timer.addListener(_onLiveChanged);
     app.clock.addListener(_onLiveChanged);
-    app.today.addListener(_onLiveChanged);
     app.category.addListener(_load);
     app.dataRevision.addListener(_load);
   }
@@ -71,7 +78,6 @@ class _TimerPageState extends State<TimerPage> {
     _pendingTimer?.cancel();
     app.timer.removeListener(_onLiveChanged);
     app.clock.removeListener(_onLiveChanged);
-    app.today.removeListener(_onLiveChanged);
     app.category.removeListener(_load);
     app.dataRevision.removeListener(_load);
     super.dispose();
@@ -115,14 +121,16 @@ class _TimerPageState extends State<TimerPage> {
     });
   }
 
-  /// 今日累计（running 条目截至 now——口径：含全部条目含未分配，运行中按
-  /// 当前时刻计；与今日页/统计页口径在批次 3 统一为数据层计算）。
-  Duration get _todayTotal {
-    if (app.today.today.isEmpty) return app.today.totalDuration();
-    return app.today.totalDuration();
-  }
+  /// 今日累计（口径：含全部条目含未分配，运行中按当前时刻计）。
+  Duration _todayTotal(DateTime dayStart, DateTime now, String? unassignedId) =>
+      computeDayMetrics(
+        _todayEntries,
+        dayStart: dayStart,
+        now: now,
+        unassignedActivityId: unassignedId,
+      ).total;
 
-  int get _todaySessions => app.today.today.length;
+  int get _todaySessions => _todayEntries.length;
 
   /// 活动 id → 今日时长（运行中条目仅当活动本身就是运行条目且非未分配）。
   bool get _isRecording => _recording;
@@ -303,6 +311,12 @@ class _TimerPageState extends State<TimerPage> {
 
   @override
   Widget build(BuildContext context) {
+    // 今日条目由 provider 提供（TodayStore 已删）：写操作/跨日自动失效。
+    final today = ref.watch(currentDayProvider);
+    _todayEntries = ref.watch(dayEntriesProvider(today)).value ?? const [];
+    final now = ref.watch(clockTickProvider);
+    final unassignedId = ref.watch(unassignedActivityIdProvider).value;
+
     if (_loading) return const LoadingStateView();
     final running = app.timer.runningEntry;
     if (_failed) {
@@ -340,7 +354,7 @@ class _TimerPageState extends State<TimerPage> {
       categoryIdsByActivity: _categoryIdsByActivity(),
       runningActivityId: _runningActivityId(),
       pendingActivityId: _pendingActivityId,
-      todayByActivity: _todayByActivity(),
+      todayByActivity: _todayByActivity(now),
       onFilter: (id) => setState(() => _categoryFilterId = id),
       onActivityTap: _onActivityTap,
       onActivityDoubleTap: _onActivityDoubleTap,
@@ -357,10 +371,8 @@ class _TimerPageState extends State<TimerPage> {
           runningName: running?.activityNameSnapshot,
           runningColor: running?.activityColorSnapshot,
           runningPath: _pathOfActivity(running?.activityId),
-          elapsed: running == null
-              ? Duration.zero
-              : running.durationUntil(DateTime.now()),
-          todayTotal: _todayTotal,
+          elapsed: running == null ? Duration.zero : running.durationUntil(now),
+          todayTotal: _todayTotal(today, now, unassignedId),
           todaySessions: _todaySessions,
           onStop: _isRecording
               ? () => _dispatch(CommandInvocation(name: 'stop'))
@@ -401,11 +413,11 @@ class _TimerPageState extends State<TimerPage> {
   }
 
   /// 活动 id → 今日时长（表单与网格角标共用）。
-  Map<String, Duration> _todayByActivity() {
+  Map<String, Duration> _todayByActivity(DateTime now) {
     final map = <String, Duration>{};
-    for (final e in app.today.today) {
-      map[e.activityId] = (map[e.activityId] ?? Duration.zero) +
-          e.durationUntil(DateTime.now());
+    for (final e in _todayEntries) {
+      map[e.activityId] =
+          (map[e.activityId] ?? Duration.zero) + e.durationUntil(now);
     }
     return map;
   }
