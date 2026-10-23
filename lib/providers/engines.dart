@@ -1,7 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../stores/app_store.dart';
+import '../stores/category_store.dart';
 import '../stores/reminder_store.dart';
+import '../stores/settings_store.dart';
 import '../stores/timer_store.dart';
 import '../stores/update_store.dart';
 
@@ -235,3 +237,59 @@ class UpdateSnapshotNotifier extends Notifier<UpdateSnapshot> {
     return UpdateSnapshot.from(store);
   }
 }
+
+/// 迁移期（B4c）设置/分类引擎的**实例访问器**。
+///
+/// 这两个 provider 只负责“拿到当前实例”，本身不触发重建；页面/分区在 build
+/// 里 `ref.watch(settingsChangeProvider)`（或分类对应 change provider）拿到
+/// 变更信号，再用 `ref.read(...StoreProvider)` 读最新值——等价于旧
+/// `ListenableBuilder(listenable: store)` 的语义，但订阅面收在 provider 层。
+final settingsStoreProvider = Provider<SettingsStore>(
+  (ref) => ref.watch(appStoreInstanceProvider).settings,
+);
+
+final categoryStoreProvider = Provider<CategoryStore>(
+  (ref) => ref.watch(appStoreInstanceProvider).category,
+);
+
+/// 设置变更计数：每次 `SettingsStore` 通知 +1，作为 build 的失效信号。
+///
+/// 用计数而不是直接暴露 store 实例：Provider 对相同实例做 `==` 过滤，依赖方
+/// 不会重建；计数变化才能把通知传下去。
+final settingsChangeProvider =
+    NotifierProvider<SettingsChangeNotifier, int>(SettingsChangeNotifier.new);
+
+class SettingsChangeNotifier extends Notifier<int> {
+  @override
+  int build() {
+    final store = ref.watch(settingsStoreProvider);
+    void onChange() {
+      if (!ref.mounted) return;
+      state = state + 1;
+    }
+
+    store.addListener(onChange);
+    ref.onDispose(() => store.removeListener(onChange));
+    return 0;
+  }
+}
+
+/// 分类树变更计数（`CategoryStore` 通知 → +1）。
+final categoryChangeProvider =
+    NotifierProvider<CategoryChangeNotifier, int>(CategoryChangeNotifier.new);
+
+class CategoryChangeNotifier extends Notifier<int> {
+  @override
+  int build() {
+    final store = ref.watch(categoryStoreProvider);
+    void onChange() {
+      if (!ref.mounted) return;
+      state = state + 1;
+    }
+
+    store.addListener(onChange);
+    ref.onDispose(() => store.removeListener(onChange));
+    return 0;
+  }
+}
+

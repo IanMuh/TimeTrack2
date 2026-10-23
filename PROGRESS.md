@@ -71,14 +71,22 @@ utils 不动；分 2 个 PR（PR1 = B0 地基 + B1 基础状态，PR2 = 其余�
   `timer_page` 运行态改 `ref.watch(timerSnapshotProvider)`（不再读 `app.timer`）；
   AppShell 删除 `_timerTick = Listenable.merge([timer, clock])`，计时条改
   `Consumer` + 条件 `clockTickProvider`（空闲不随秒重建），托盘推送/可疑条目
-  检测/提醒横幅改读快照。五个主页面已无 `app.timer` 引用（仅设置分区
-  后台/设备页残留，随 B4c 清）。
+  检测改读快照。五个主页面已无 `app.timer` 引用（仅设置分区残留）。
+- B4c-1（同分支）：设置变更桥接 provider——`lib/providers/engines.dart` 增
+  `settingsStoreProvider`/`categoryStoreProvider`（实例访问器）与
+  `settingsChangeProvider`/`categoryChangeProvider`（监听引擎并 +1 的变更计数，
+  解决 Provider 对同一 store 实例做 == 过滤不重建的问题）；
+  `settings_section_general` 三个分区 + `_TriggerTimeField` 转 `ConsumerWidget`，
+  经 provider 读设置；AppShell 删最后一个 settings `addListener`，改 build 内
+  `ref.listen(settingsChangeProvider)`。`lib/pages` 页面侧 `addListener` 清零。
+  803 测试保持全绿。
 
-**剩余（PR3）**：TimerStore/ReminderStore/CategoryStore/SettingsStore/ActivityStore
-→ Notifier；Sync/Update/Tracking/Lan/AI 引擎 Notifier 包装；CommandDispatcher 改
-Ref；删除 AppStore（`appStartupProvider` 装配）；AppShell 最后一个 settings 监听
-（Android 服务同步）随 SettingsStore 迁移；执行计划文档阶段 0 技术栈段落与目录
-约定改写。分刀顺序与验收见 `docs/Riverpod迁移B4执行计划.md`。
+**剩余（PR3）**：B4c-2 其余设置分区（sync/update/background/device 的引擎监听）
+与 TodayPage/StatsPage/TimelinePage/TimerPage 的 category 读取面；TimerStore/
+ReminderStore/CategoryStore/SettingsStore/ActivityStore → Notifier（须先做 B4e
+装配图：AppStore 装配与 Notifier 构造互锁）；CommandDispatcher 改 Ref；删除
+AppStore（`appStartupProvider` 装配）；执行计划文档阶段 0 技术栈段落与目录约定
+改写。分刀顺序与验收见 `docs/Riverpod迁移B4执行计划.md`。
 
 
 ## 阶段 5 收尾清单（待办）

@@ -115,7 +115,6 @@ class _AppShellState extends ConsumerState<AppShell>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    widget.app.settings.removeListener(_syncAndroidService);
     // 托盘回调指向本 State：dispose 后必须摘除（服务随 AppStore 存活）。
     widget.app.tray.onCommand = null;
     widget.app.tray.onCloseToTray = null;
@@ -134,7 +133,6 @@ class _AppShellState extends ConsumerState<AppShell>
       setState(() {});
       unawaited(_syncAndroidService());
     };
-    widget.app.settings.addListener(_syncAndroidService);
   }
 
   /// 依据 总开关+使用情况授权 决定前台服务启停，并同步通知文案
@@ -146,7 +144,8 @@ class _AppShellState extends ConsumerState<AppShell>
   Future<void> _syncAndroidService() async {
     if (!AndroidTrackingBridge.isSupported || !mounted) return;
     final app = widget.app;
-    final enabled = app.settings.current?.backgroundTrackingEnabled ?? false;
+    final enabled =
+        ref.read(settingsStoreProvider).current?.backgroundTrackingEnabled ?? false;
     final granted = await app.androidTracking.isUsageGranted();
     if (!mounted) return;
     if (!(enabled && granted)) {
@@ -205,7 +204,7 @@ class _AppShellState extends ConsumerState<AppShell>
   }
 
   Future<void> _loadTrayCloseMode() async {
-    final mode = await widget.app.settings.trayCloseMode();
+    final mode = await ref.read(settingsStoreProvider).trayCloseMode();
     if (!mounted) return;
     setState(() => _trayCloseMode = mode);
     // 加载完成后立即推送一次托盘配置（非 Windows no-op）。
@@ -238,7 +237,7 @@ class _AppShellState extends ConsumerState<AppShell>
     final bridge = widget.app.androidTracking;
     if (!AndroidTrackingBridge.isSupported) return;
     final enabled =
-        widget.app.settings.current?.backgroundTrackingEnabled ?? false;
+        ref.read(settingsStoreProvider).current?.backgroundTrackingEnabled ?? false;
     if (!bridge.notificationPermissionAsked && enabled) {
       unawaited(bridge.requestNotificationPermission());
     }
@@ -306,7 +305,7 @@ class _AppShellState extends ConsumerState<AppShell>
               onPressed: () async {
                 Navigator.of(dialogContext).pop();
                 if (remember) {
-                  await widget.app.settings.setTrayCloseMode(selected);
+                  await ref.read(settingsStoreProvider).setTrayCloseMode(selected);
                 }
                 if (!mounted) return;
                 setState(() => _trayCloseMode = selected);
@@ -703,6 +702,8 @@ class _AppShellState extends ConsumerState<AppShell>
     ref.listen(timerSnapshotProvider, (_, _) => _onTimerForSuspicious());
     ref.listen(reminderSnapshotProvider, (_, _) => _onReminderChanged());
     ref.listen(updateSnapshotProvider, (_, _) => _onUpdateChanged());
+    // B4c：设置变更 → Android 前台服务同步（原 settings.addListener 白名单）。
+    ref.listen(settingsChangeProvider, (_, _) => unawaited(_syncAndroidService()));
     final shell = widget.navigationShell;
     final isWide = MediaQuery.sizeOf(context).width >= AppShell.wideBreakpoint;
     final content = Expanded(child: shell);
