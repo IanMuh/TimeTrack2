@@ -81,12 +81,27 @@ utils 不动；分 2 个 PR（PR1 = B0 地基 + B1 基础状态，PR2 = 其余�
   `ref.listen(settingsChangeProvider)`。`lib/pages` 页面侧 `addListener` 清零。
   803 测试保持全绿。
 
-**剩余（PR3）**：B4c-2 其余设置分区（sync/update/background/device 的引擎监听）
-与 TodayPage/StatsPage/TimelinePage/TimerPage 的 category 读取面；TimerStore/
-ReminderStore/CategoryStore/SettingsStore/ActivityStore → Notifier（须先做 B4e
-装配图：AppStore 装配与 Notifier 构造互锁）；CommandDispatcher 改 Ref；删除
-AppStore（`appStartupProvider` 装配）；执行计划文档阶段 0 技术栈段落与目录约定
-改写。分刀顺序与验收见 `docs/Riverpod迁移B4执行计划.md`。
+**全替代决策（2026-10-23，用户确认）**：剩余迁移一律采用 **A 方案「Notifier
+原地改造」**——保留 store 内部字段与方法体，只替换类声明/构造注入/通知语句
+（`notifyListeners()` → `_publish(state = XState(...))`），业务协议零重写；
+测试只换夹具（容器 + 读 provider），断言不变。迁移完成后再按热点做**增量纯化**
+（C 方案：provider API 不变，把状态转移抽成纯函数），不一次性重写。
+配套决定：PR4/PR5 分两个 PR；PR3 先合 main 再开 PR4；迁移期**不允许**保留
+`ListenableBuilder` 过渡。完整方案与风险表见
+`docs/Riverpod迁移B4全替代方案.md`。
+
+**剩余（PR3）**：B4c-2 读取面收尾——其余设置分区（sync/update/background/device
+的引擎监听改 `ref.listen`/`ref.watch`）与 TodayPage/StatsPage/TimelinePage/
+TimerPage 的 category/settings 读取面；验收 `lib/pages` 中 `app.*` 读取归零。
+
+**剩余（PR4）**：Settings → Activity → Category → Timer → Reminder → Undo →
+CommandDispatcher 依次改 Notifier（按 A 方案），页面/测试切 provider，删对应
+store 与 store 测试（迁移为容器测试）。
+
+**剩余（PR5）**：Sync/Update/Tracking/LAN 改 Notifier；托盘/安装器/Android 桥
+变纯服务 provider；`appStartupProvider` 接管 seed/rollover/清理；删除
+`lib/stores/` 与 `AppStore`（lib 74 处 / test 34 处参数传递）；文档终稿。
+分刀顺序与验收见 `docs/Riverpod迁移B4执行计划.md`。
 
 
 ## 阶段 5 收尾清单（待办）
