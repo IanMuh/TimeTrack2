@@ -205,7 +205,7 @@ class TimeEntryRepository with RepositoryMappings {
       final unassigned = await _activityRepo.ensureUnassignedActivity();
       final running = await runningEntry();
       if (running == null) {
-        return switchToActivity(unassigned.id, at: now);
+        return await switchToActivity(unassigned.id, at: now);
       }
       if (running.activityId == unassigned.id) {
         await mergeAdjacentUnassignedEntries(unassigned.id, updatedAt: now);
@@ -221,7 +221,7 @@ class TimeEntryRepository with RepositoryMappings {
           running.activityId,
           updatedAt: now,
         );
-        return switchToActivity(unassigned.id, at: now);
+        return await switchToActivity(unassigned.id, at: now);
       }
       final ended = running.copyWith(endAt: now, updatedAt: now);
       await _saveEntry(ended);
@@ -236,7 +236,7 @@ class TimeEntryRepository with RepositoryMappings {
         occurredAt: now,
         message: '停止事项',
       );
-      return switchToActivity(unassigned.id, at: now);
+      return await switchToActivity(unassigned.id, at: now);
     } catch (e) {
       return AppFailure('停止活动失败：$e');
     }

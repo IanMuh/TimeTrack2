@@ -232,7 +232,10 @@ class SyncStore extends ChangeNotifier implements SyncNowProvider {
       if (cursorOverride != null && !await _cleanupDue()) {
         return const AppSuccess(null); // 同步触发受限频：未到期跳过
       }
-      return _runCleanup(userId: userId ?? _userId, cursorOverride: cursorOverride);
+      return await _runCleanup(
+        userId: userId ?? _userId,
+        cursorOverride: cursorOverride,
+      );
     } finally {
       _cleanupRunning = false;
       if (!_disposed) notifyListeners(); // await 期间可能已 dispose
