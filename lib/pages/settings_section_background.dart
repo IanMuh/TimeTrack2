@@ -16,7 +16,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api/platform/windows_foreground_detector.dart'
     show WindowsForegroundDetector;
 import '../components/activity_picker/activity_picker.dart';
-import '../l10n/app_localizations.dart';import '../providers/engines.dart';
+import '../l10n/app_localizations.dart';import '../providers/data.dart';
+import '../providers/engines.dart';
 import '../stores/app_store.dart';
 import '../stores/tracking_store.dart' show NoopForegroundDetector;
 import '../utils/result.dart';
@@ -50,7 +51,7 @@ class _BackgroundSectionState extends ConsumerState<BackgroundSection> {
   }
 
   Future<void> _load() async {
-    final result = await widget.app.activities.activities(includeDeleted: false);
+    final result = await ref.read(activityRepositoryProvider).activities(includeDeleted: false);
     await widget.app.tracking.reloadRules();
     if (!mounted) return;
     if (result.isSuccess) {
@@ -109,7 +110,7 @@ class _BackgroundSectionState extends ConsumerState<BackgroundSection> {
         ref.watch(trackingChangeProvider);
         ref.watch(settingsChangeProvider);
         ref.watch(timerChangeProvider);
-        final settings = app.settings.current;
+        final settings = ref.read(settingsStoreProvider).current;
         final rules = app.tracking.ruleList;
         // §6.2：Android 未授权时总开关禁用（引导用户先去系统设置授权）。
         final androidNeedsPermission =
@@ -129,7 +130,7 @@ class _BackgroundSectionState extends ConsumerState<BackgroundSection> {
             ),
             // 手动会话保持可见化（批次 6b 用户反馈）：手动点过活动卡后自动
             // 切换挂起——给出状态与一键恢复，防"功能坏了"的误判。
-            if (app.timer.manualSessionHold) ...[
+            if (ref.read(timerStoreProvider).manualSessionHold) ...[
               const SizedBox(height: 14),
               SettingsInfoBanner(
                 child: Row(
@@ -250,7 +251,7 @@ class _BackgroundSectionState extends ConsumerState<BackgroundSection> {
   }
 
   Future<void> _saveMaster(bool value) async {
-    final store = widget.app.settings;
+    final store = ref.read(settingsStoreProvider);
     final current = store.current;
     if (current == null) return;
     // Android 开启时先补通知权限请求（API 33+；前台服务常驻通知可见性）。
@@ -663,8 +664,8 @@ class _RuleFormDialogState extends ConsumerState<RuleFormDialog> {
     });
   }
 
-  Future<void> _pickActivity() async {    final app = widget.app;
-    final category = app.category;
+  Future<void> _pickActivity() async {
+    final category = ref.read(categoryStoreProvider);
     final primary = <String, String?>{};
     final all = <String, Set<String>>{};
     for (final link in category.links) {
@@ -941,6 +942,9 @@ class _KindRadio extends StatelessWidget {
     );
   }
 }
+
+
+
 
 
 

@@ -369,3 +369,14 @@ final commandDispatcherProvider = Provider<CommandDispatcher>(
   (ref) => ref.watch(appStoreInstanceProvider).dispatcher,
 );
 
+
+/// 计时引擎实例（迁移期只读入口；写路径仍经命令分发）。
+final timerStoreProvider = Provider<TimerStore>(
+  (ref) => ref.watch(appStoreInstanceProvider).timer,
+);
+
+/// 提醒引擎实例（迁移期只读入口；动作仍经命令分发）。
+final reminderStoreProvider = Provider<ReminderStore>(
+  (ref) => ref.watch(appStoreInstanceProvider).reminder,
+);
+

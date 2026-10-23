@@ -10,7 +10,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../l10n/app_localizations.dart';
+import '../providers/data.dart';
 import '../providers/engines.dart';
+import '../providers/foundation.dart';
 import '../stores/app_store.dart';
 import '../stores/lan_store.dart';
 import '../utils/result.dart';
@@ -146,13 +148,13 @@ class BackupSection extends ConsumerWidget {
       case 'export':
         await _export(context, ref);
       case 'wipe':
-        await _wipe(context);
+        await _wipe(context, ref);
       default:
         break;
     }
   }
 
-  Future<void> _wipe(BuildContext context) async {
+  Future<void> _wipe(BuildContext context, WidgetRef ref) async {
     final l10n = AppLocalizations.of(context)!;
     final result = await app.wipe.wipeAll();
     if (!context.mounted) return;
@@ -164,16 +166,16 @@ class BackupSection extends ConsumerWidget {
       return;
     }
     // 全量重载：数据已空，各 store 缓存必须失效（含 seed 默认活动重建）。
-    await app.activities.seedActivities();
-    await app.category.reload();
-    await app.settings.reload();
-    await app.timer.refresh();
+    await ref.read(activityRepositoryProvider).seedActivities();
+    await ref.read(categoryStoreProvider).reload();
+    await ref.read(settingsStoreProvider).reload();
+    await ref.read(timerStoreProvider).refresh();
     await app.tracking.reloadRules();
     await app.lan.reloadPeer(); // sync_peers 已清空，内存配对态同步失效
     // 时间线/统计页监听 dataRevision 自动失效缓存（bump 即全页一致）。
     app.dataRevision.bump();
     // 撤销/重做历史指向已物理删除的数据——清空防"可撤销"语义失真。
-    app.undo.clear();
+    ref.read(undoStoreProvider).clear();
     if (!context.mounted) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
@@ -596,6 +598,9 @@ class _LanClientCard extends StatelessWidget {
     await lan.pairClient(host: hostController.text, code: codeController.text);
   }
 }
+
+
+
 
 
 
