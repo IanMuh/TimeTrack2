@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,6 +8,8 @@ import '../api/platform/android_tracking.dart' show AndroidTrackingBridge;
 import '../components/global_timer_bar.dart';
 import '../constants/storage_keys.dart';
 import '../l10n/app_localizations.dart';
+import '../providers/data.dart';
+import '../providers/engines.dart';
 import '../providers/foundation.dart';
 import '../stores/app_store.dart';
 import '../stores/reminder_store.dart';
@@ -40,7 +42,7 @@ import '../viewmodels/profile_settings.dart' show ReminderMethod;
 ///   lastUndoLabel/lastRedoLabel），tooltip 用 ARB undoWithLabel/redoWithLabel，
 ///   禁用时给中性提示（不可用原因语义批次 5 补全——含冲突校验原因与移动端
 ///   收纳菜单；快捷键 Ctrl+Z/Y 与输入框让位同属批次 5）。
-class AppShell extends StatefulWidget {
+class AppShell extends ConsumerStatefulWidget {
   const AppShell({
     super.key,
     required this.app,
@@ -57,16 +59,11 @@ class AppShell extends StatefulWidget {
   static const double _contentMaxWidth = 1024;
 
   @override
-  State<AppShell> createState() => _AppShellState();
+  ConsumerState<AppShell> createState() => _AppShellState();
 }
 
-class _AppShellState extends State<AppShell>
+class _AppShellState extends ConsumerState<AppShell>
     with WidgetsBindingObserver {
-  /// 合并 timer（运行条目变化）+ clock（秒级推进）为单一 listenable，
-  /// 避免每次 build 重建合并对象反复换订阅（计时条每秒重建）。
-  late final Listenable _timerTick =
-      Listenable.merge([widget.app.timer, widget.app.clock]);
-
   /// 未分配活动判定缓存：按运行条目所属 activityId 记录异步查询结果
   /// （防每帧查库）。
   String? _checkedActivityId;
@@ -106,8 +103,6 @@ class _AppShellState extends State<AppShell>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _sessionStart = widget.app.clock.now();
-    widget.app.reminder.addListener(_onReminderChanged);
-    widget.app.update.addListener(_onUpdateChanged);
     _wireTray();
     _wireAndroidTracking();
     // 可疑条目启动检测：AppStore.init 已 await timer.refresh()，postFrame
@@ -116,16 +111,11 @@ class _AppShellState extends State<AppShell>
       unawaited(_checkSuspiciousEntry());
       unawaited(_syncAndroidService());
     });
-    widget.app.timer.addListener(_onTimerForSuspicious);
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    widget.app.reminder.removeListener(_onReminderChanged);
-    widget.app.update.removeListener(_onUpdateChanged);
-    widget.app.timer.removeListener(_onTimerForSuspicious);
-    widget.app.settings.removeListener(_syncAndroidService);
     // 托盘回调指向本 State：dispose 后必须摘除（服务随 AppStore 存活）。
     widget.app.tray.onCommand = null;
     widget.app.tray.onCloseToTray = null;
@@ -144,7 +134,6 @@ class _AppShellState extends State<AppShell>
       setState(() {});
       unawaited(_syncAndroidService());
     };
-    widget.app.settings.addListener(_syncAndroidService);
   }
 
   /// 依据 总开关+使用情况授权 决定前台服务启停，并同步通知文案
@@ -156,7 +145,8 @@ class _AppShellState extends State<AppShell>
   Future<void> _syncAndroidService() async {
     if (!AndroidTrackingBridge.isSupported || !mounted) return;
     final app = widget.app;
-    final enabled = app.settings.current?.backgroundTrackingEnabled ?? false;
+    final enabled =
+        ref.read(settingsStoreProvider).current?.backgroundTrackingEnabled ?? false;
     final granted = await app.androidTracking.isUsageGranted();
     if (!mounted) return;
     if (!(enabled && granted)) {
@@ -170,7 +160,7 @@ class _AppShellState extends State<AppShell>
     String content = '';
     final matchedId = app.tracking.lastMatchedActivityId;
     if (matchedId != null) {
-      final activity = await app.activities.activityById(matchedId);
+      final activity = await ref.read(activityRepositoryProvider).activityById(matchedId);
       if (!mounted) return;
       content = activity?.name ?? '';
     }
@@ -215,7 +205,7 @@ class _AppShellState extends State<AppShell>
   }
 
   Future<void> _loadTrayCloseMode() async {
-    final mode = await widget.app.settings.trayCloseMode();
+    final mode = await ref.read(settingsStoreProvider).trayCloseMode();
     if (!mounted) return;
     setState(() => _trayCloseMode = mode);
     // 加载完成后立即推送一次托盘配置（非 Windows no-op）。
@@ -248,7 +238,7 @@ class _AppShellState extends State<AppShell>
     final bridge = widget.app.androidTracking;
     if (!AndroidTrackingBridge.isSupported) return;
     final enabled =
-        widget.app.settings.current?.backgroundTrackingEnabled ?? false;
+        ref.read(settingsStoreProvider).current?.backgroundTrackingEnabled ?? false;
     if (!bridge.notificationPermissionAsked && enabled) {
       unawaited(bridge.requestNotificationPermission());
     }
@@ -316,7 +306,7 @@ class _AppShellState extends State<AppShell>
               onPressed: () async {
                 Navigator.of(dialogContext).pop();
                 if (remember) {
-                  await widget.app.settings.setTrayCloseMode(selected);
+                  await ref.read(settingsStoreProvider).setTrayCloseMode(selected);
                 }
                 if (!mounted) return;
                 setState(() => _trayCloseMode = selected);
@@ -340,10 +330,9 @@ class _AppShellState extends State<AppShell>
   /// 推送托盘状态（模式 + 记录态 + 暂停态 + 本地化文案；服务内按全量签名
   /// 去重）。在计时条构建器中每秒调用——重复推送被 TrayService 拦截。
   void _pushTrayStatus() {
-    final running = widget.app.timer.runningEntry;
-    final recording =
-        running != null && !_entryIsUnassigned;
-    final activity = recording ? running.activityNameSnapshot : '';
+    final snap = ref.read(timerSnapshotProvider);
+    final recording = snap.isRunning && !_entryIsUnassigned;
+    final activity = recording ? (snap.activityName ?? '') : '';
     final l10n = AppLocalizations.of(context);
     unawaited(widget.app.tray.configure(
       mode: _trayCloseMode,
@@ -400,12 +389,11 @@ class _AppShellState extends State<AppShell>
   /// 未分配判定放在标志位之后：await 间隙 timer 变化触发的重入被去重。
   Future<void> _checkSuspiciousEntry() async {
     if (_suspiciousChecked || !mounted) return;
-    final running = widget.app.timer.runningEntry;
-    if (running == null) return; // 无运行条目：无需检测
-    if (!running.startAt.isBefore(_sessionStart)) return; // 本会话内开始
+    final running = ref.read(timerSnapshotProvider);
+    if (!running.isRunning) return; // 无运行条目：无需检测
+    if (!running.startAt!.isBefore(_sessionStart)) return; // 本会话内开始
     _suspiciousChecked = true;
-    if (await widget.app.activities
-        .activityIdIsUnassigned(running.activityId)) {
+    if (await ref.read(activityRepositoryProvider).activityIdIsUnassigned(running.activityId!)) {
       return;
     }
     if (!mounted) return;
@@ -441,7 +429,7 @@ class _AppShellState extends State<AppShell>
               ),
             ),
           ]),
-          content: Text(l10n.suspiciousEntryContent(_hm(running.startAt))),
+          content: Text(l10n.suspiciousEntryContent(_hm(running.startAt!))),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(),
@@ -454,7 +442,7 @@ class _AppShellState extends State<AppShell>
                 //（HH:MM 会按条目所在日还原，≥2 天前的条目会算错）。
                 unawaited(_dispatch(CommandInvocation(
                   name: 'entry_update',
-                  args: [running.id],
+                  args: [running.entryId!],
                   options: const {'end': 'now'},
                 )));
               },
@@ -708,14 +696,25 @@ class _AppShellState extends State<AppShell>
 
   @override
   Widget build(BuildContext context) {
+    // B4a：引擎状态经 provider 值快照订阅（替代 initState 里的 addListener）。
+    // handler 体不变、仍读物理引擎；快照只在状态值真正变化时通知，避免
+    // TimerStore 内部无关字段变更引起壳层重建。
+    ref.listen(timerSnapshotProvider, (_, _) => _onTimerForSuspicious());
+    ref.listen(reminderSnapshotProvider, (_, _) => _onReminderChanged());
+    ref.listen(updateSnapshotProvider, (_, _) => _onUpdateChanged());
+    // B4c：设置变更 → Android 前台服务同步（原 settings.addListener 白名单）。
+    ref.listen(settingsChangeProvider, (_, _) => unawaited(_syncAndroidService()));
     final shell = widget.navigationShell;
     final isWide = MediaQuery.sizeOf(context).width >= AppShell.wideBreakpoint;
     final content = Expanded(child: shell);
-    final banner = ListenableBuilder(
-      // 横幅时长实时显示需跟随时钟 tick 重绘（见 _buildReminderBanner）。
-      listenable: Listenable.merge([widget.app.reminder, widget.app.clock]),
-      builder: (context, _) =>
-          _buildReminderBanner() ?? const SizedBox.shrink(),
+    final banner = Consumer(
+      builder: (context, ref, _) {
+        // 横幅时长实时显示需跟随时钟 tick 重绘（见 _buildReminderBanner）；
+        // 无提醒时不订阅 1Hz，避免空闲秒级重建。
+        final reminder = ref.watch(reminderSnapshotProvider);
+        if (reminder.hasReminder) ref.watch(clockTickProvider);
+        return _buildReminderBanner() ?? const SizedBox.shrink();
+      },
     );
     return Scaffold(
       body: isWide
@@ -781,9 +780,9 @@ class _AppShellState extends State<AppShell>
     if (active is OngoingReminder) {
       // 横幅常驻期间时长实时计算（触发时刻快照仅在该条目已不运行时兜底）；
       // 对话框载体无重绘时机，保持触发时刻快照。
-      final running = widget.app.timer.runningEntry;
-      final elapsed = running != null && running.id == active.entryId
-          ? widget.app.clock.now().difference(running.startAt)
+      final running = ref.read(timerSnapshotProvider);
+      final elapsed = running.entryId == active.entryId
+          ? widget.app.clock.now().difference(running.startAt!)
           : active.elapsed;
       title = l10n.bannerOngoingTitle(_formatElapsed(elapsed));
       subtitle = l10n.bannerOngoingSub(active.activityName);
@@ -857,21 +856,22 @@ class _AppShellState extends State<AppShell>
   // ---------------------------------------------------------------------------
 
   Widget _buildTimerBar({required bool compact}) {
-    return ListenableBuilder(
-      listenable: _timerTick,
-      builder: (context, _) {
-        final running = widget.app.timer.runningEntry;
+    return Consumer(
+      builder: (context, ref, _) {
+        final snap = ref.watch(timerSnapshotProvider);
+        // 1Hz 仅在计时中订阅：空闲时秒级 tick 不重建壳层。
+        final now = snap.isRunning ? ref.watch(clockTickProvider) : null;
         var recording = false;
         String? name;
         Color? color;
         var elapsed = Duration.zero;
-        if (running != null) {
-          _ensureUnassignedCheckQueued(running.activityId);
+        if (snap.isRunning) {
+          _ensureUnassignedCheckQueued(snap.activityId!);
           if (!_entryIsUnassigned) {
             recording = true;
-            name = running.activityNameSnapshot;
-            color = Color(running.activityColorSnapshot ?? Activity.defaultColor);
-            elapsed = running.durationUntil(widget.app.clock.now());
+            name = snap.activityName;
+            color = Color(snap.activityColor ?? Activity.defaultColor);
+            elapsed = now!.difference(snap.startAt!);
           }
         }
         final canStop = recording;
@@ -905,7 +905,7 @@ class _AppShellState extends State<AppShell>
     _entryIsUnassigned = false;
     Future.microtask(() async {
       final isUnassigned =
-          await widget.app.activities.activityIdIsUnassigned(activityId);
+          await ref.read(activityRepositoryProvider).activityIdIsUnassigned(activityId);
       if (!mounted || _checkedActivityId != activityId) return;
       setState(() => _entryIsUnassigned = isUnassigned);
     });
@@ -1221,10 +1221,10 @@ class _SyncStatusText extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    return ListenableBuilder(
-      listenable: app.sync,
-      builder: (context, _) {
-        final sync = app.sync;
+    return Consumer(
+      builder: (context, ref, _) {
+        ref.watch(syncChangeProvider);
+        final sync = ref.read(appStoreInstanceProvider).sync;
         final l10n = AppLocalizations.of(context)!;
         final String label;
         if (sync.syncing) {

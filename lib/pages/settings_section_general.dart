@@ -1,31 +1,33 @@
-/// 设置分区实现 ①：通用 / 提醒 / 时间线（批次 4）。
+﻿/// 设置分区实现 ①：通用 / 提醒 / 时间线（批次 4）。
 ///
 /// 三区全部是 ProfileSettings 表单——变更经 [SettingsStore.save] 落库
 /// （即时生效 + undo + LWW 时间戳推进），不另设本地草稿态。
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../l10n/app_localizations.dart';
 import '../utils/result.dart';
+import '../providers/engines.dart';
 import '../stores/app_store.dart';
 import '../utils/time_format.dart';
 import '../viewmodels/profile_settings.dart';
 import 'settings_widgets.dart';
 
 /// 通用分区。
-class GeneralSection extends StatelessWidget {
+class GeneralSection extends ConsumerWidget {
   const GeneralSection({super.key, required this.app});
 
   final AppStore app;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final l10n = AppLocalizations.of(context)!;
-    return ListenableBuilder(
-      listenable: app.settings,
-      builder: (context, _) {
-        final s = app.settings.current;
+    return Consumer(
+      builder: (context, ref, _) {
+        ref.watch(settingsChangeProvider);
+        final s = ref.read(settingsStoreProvider).current;
         return SettingsSectionCard(
           key: const ValueKey('sec-general'),
           icon: Icons.tune_rounded,
@@ -55,7 +57,7 @@ class GeneralSection extends StatelessWidget {
                   ),
                 ],
                 groupValue: s?.themeMode ?? ThemeModeSetting.light,
-                onChanged: (v) => _save(app, context, (cur) => cur.copyWith(themeMode: v)),
+                onChanged: (v) => _save(ref, context, (cur) => cur.copyWith(themeMode: v)),
               ),
             ),
             SettingsDropdownRow<int>(
@@ -67,7 +69,7 @@ class GeneralSection extends StatelessWidget {
                 SettingsDropdownItem(value: 7, label: l10n.settingsWeekSunday),
                 SettingsDropdownItem(value: 6, label: l10n.settingsWeekSaturday),
               ],
-              onChanged: (v) => _save(app, context, (cur) => cur.copyWith(weekStartDay: v)),
+              onChanged: (v) => _save(ref, context, (cur) => cur.copyWith(weekStartDay: v)),
             ),
             SettingsSegmentedRow(
               title: l10n.settingsTimeFormat,
@@ -75,7 +77,7 @@ class GeneralSection extends StatelessWidget {
               segments: [l10n.settingsHour12, l10n.settingsHour24],
               selectedIndex: (s?.use24HourFormat ?? true) ? 1 : 0,
               onChanged: (i) => _save(
-                app,
+                ref,
                 context,
                 (cur) => cur.copyWith(use24HourFormat: i == 1),
               ),
@@ -92,14 +94,14 @@ class GeneralSection extends StatelessWidget {
                   ),
               ],
               onChanged: (v) =>
-                  _save(app, context, (cur) => cur.copyWith(defaultRecordMinutes: v)),
+                  _save(ref, context, (cur) => cur.copyWith(defaultRecordMinutes: v)),
             ),
             SettingsSwitchRow(
               title: l10n.settingsQuickReminder,
               subtitle: l10n.settingsQuickReminderHint,
               value: s?.quickReminderEnabled ?? true,
               onChanged: (v) =>
-                  _save(app, context, (cur) => cur.copyWith(quickReminderEnabled: v)),
+                  _save(ref, context, (cur) => cur.copyWith(quickReminderEnabled: v)),
             ),
           ],
         );
@@ -109,18 +111,18 @@ class GeneralSection extends StatelessWidget {
 }
 
 /// 提醒分区。
-class ReminderSection extends StatelessWidget {
+class ReminderSection extends ConsumerWidget {
   const ReminderSection({super.key, required this.app});
 
   final AppStore app;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final l10n = AppLocalizations.of(context)!;
-    return ListenableBuilder(
-      listenable: app.settings,
-      builder: (context, _) {
-        final s = app.settings.current;
+    return Consumer(
+      builder: (context, ref, _) {
+        ref.watch(settingsChangeProvider);
+        final s = ref.read(settingsStoreProvider).current;
         final quickOn = s?.quickReminderEnabled ?? true;
         return SettingsSectionCard(
           key: const ValueKey('sec-reminder'),
@@ -144,7 +146,7 @@ class ReminderSection extends StatelessWidget {
               valueLabel: minutesLabel(l10n, s?.reminderMinutes ?? 45),
               marks: ['15', '60', '120', '180'],
               onChangeEnd: quickOn
-                  ? (v) => _save(app, context, (cur) => cur.copyWith(reminderMinutes: v))
+                  ? (v) => _save(ref, context, (cur) => cur.copyWith(reminderMinutes: v))
                   : (v) {},
             ),
             SettingsSliderRow(
@@ -157,7 +159,7 @@ class ReminderSection extends StatelessWidget {
               marks: ['5', '15', '30', '60'],
               onChangeEnd: quickOn
                   ? (v) => _save(
-                      app, context, (cur) => cur.copyWith(reminderIntervalMinutes: v))
+                      ref, context, (cur) => cur.copyWith(reminderIntervalMinutes: v))
                   : (v) {},
             ),
             _Field(
@@ -187,7 +189,7 @@ class ReminderSection extends StatelessWidget {
                 ],
                 groupValue: s?.reminderMethod ?? ReminderMethod.dialog,
                 onChanged: (v) =>
-                    _save(app, context, (cur) => cur.copyWith(reminderMethod: v)),
+                    _save(ref, context, (cur) => cur.copyWith(reminderMethod: v)),
               ),
             ),
           ],
@@ -198,18 +200,18 @@ class ReminderSection extends StatelessWidget {
 }
 
 /// 时间线分区。
-class TimelineSection extends StatelessWidget {
+class TimelineSection extends ConsumerWidget {
   const TimelineSection({super.key, required this.app});
 
   final AppStore app;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final l10n = AppLocalizations.of(context)!;
-    return ListenableBuilder(
-      listenable: app.settings,
-      builder: (context, _) {
-        final s = app.settings.current;
+    return Consumer(
+      builder: (context, ref, _) {
+        ref.watch(settingsChangeProvider);
+        final s = ref.read(settingsStoreProvider).current;
         final value = s?.mergeNeighborThresholdMinutes ?? 1;
         return SettingsSectionCard(
           key: const ValueKey('sec-timeline'),
@@ -263,7 +265,7 @@ class TimelineSection extends StatelessWidget {
                   label: minutesLabel(l10n, value),
                   onChanged: (_) {},
                   onChangeEnd: (v) => _save(
-                    app,
+                    ref,
                     context,
                     (cur) => cur.copyWith(mergeNeighborThresholdMinutes: v.round()),
                   ),
@@ -337,28 +339,28 @@ class _Field extends StatelessWidget {
 }
 
 /// 触发时刻选择（分钟 ↔ TimeOfDay）。
-class _TriggerTimeField extends StatelessWidget {
+class _TriggerTimeField extends ConsumerWidget {
   const _TriggerTimeField({required this.app, required this.minutes});
 
   final AppStore app;
   final int minutes;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
     final time = TimeOfDay(
       hour: minutes ~/ 60,
       minute: minutes % 60,
     );
     // 跟随 24 小时制偏好（偏好已全局接线，此处曾固定 24h 渲染漏改）。
-    final use24 = app.settings.current?.use24HourFormat ?? true;
+    final use24 = ref.read(settingsStoreProvider).current?.use24HourFormat ?? true;
     return InkWell(
       onTap: () async {
         final picked = await showTimePicker(context: context, initialTime: time);
         if (picked == null || !context.mounted) return;
         final value = picked.hour * 60 + picked.minute;
         await _save(
-          app,
+          ref,
           context,
           (cur) => cur.copyWith(reminderTimeOfDayMinutes: value),
         );
@@ -391,11 +393,11 @@ class _TriggerTimeField extends StatelessWidget {
 /// 统一保存入口：以 store 当前值为基准派生 next（防闭包过期值覆盖并发
 /// 修改），失败经 SnackBar 呈现（设置保存极少失败，不弹对话框）。
 Future<void> _save(
-  AppStore app,
+  WidgetRef ref,
   BuildContext context,
   ProfileSettings Function(ProfileSettings current) transform,
 ) async {
-  final store = app.settings;
+  final store = ref.read(settingsStoreProvider);
   final current = store.current;
   if (current == null) return;
   final result = await store.save(transform(current));

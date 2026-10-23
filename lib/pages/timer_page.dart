@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,8 +9,10 @@ import '../components/state_views.dart';
 import '../constants/theme_tokens.dart' show ActivityPalette;
 import '../l10n/app_localizations.dart';
 import '../providers/data.dart';
+import '../providers/engines.dart';
 import '../providers/foundation.dart';
 import '../stores/app_store.dart';
+import '../stores/category_store.dart';
 import '../utils/day_metrics.dart';
 import '../viewmodels/activity.dart';
 import '../viewmodels/commands/command_invocation.dart';
@@ -66,6 +68,10 @@ class _TimerPageState extends ConsumerState<TimerPage> {
   List<Activity> get _loadedActivities =>
       ref.read(activitiesProvider).value ?? const [];
 
+  /// 迁移期桥接：分类树仍由 ChangeNotifier store 持有（B4 换 Notifier），
+  /// build 里 watch 变更计数保证重建，这里读当前快照。
+  CategoryStore get _categories => ref.read(categoryStoreProvider);
+
   /// 今日累计（口径：含全部条目含未分配，运行中按当前时刻计）。
   Duration _todayTotal(DateTime dayStart, DateTime now, String? unassignedId) =>
       computeDayMetrics(
@@ -106,20 +112,20 @@ class _TimerPageState extends ConsumerState<TimerPage> {
       onSelectActivity: _switchTo,
       onCreateActivity: _createActivity,
       onCreateCategory: (d) async =>
-            (await app.category.createCategory(
+            (await _categories.createCategory(
               name: d.name,
               color: d.color,
               parentId: d.parentId,
             )).isSuccess,
       onEditCategory: (c) async =>
-            (await app.category.updateCategory(
+            (await _categories.updateCategory(
               name: c.name,
               color: c.color,
               parentId: c.parentId,
               category: c,
             )).isSuccess,
       onDeleteCategory: (c) async =>
-          (await app.category.deleteCategory(c.id)).isSuccess,
+          (await _categories.deleteCategory(c.id)).isSuccess,
       onEditActivity: _editActivity,
     );
     if (isWide) {
@@ -139,10 +145,10 @@ class _TimerPageState extends ConsumerState<TimerPage> {
     }
   }
 
-  String? _runningActivityId() => app.timer.runningEntry?.activityId;
+  String? _runningActivityId() => ref.read(timerSnapshotProvider).activityId;
 
   ActivityPickerModel _buildPickerModel() {
-    final category = app.category;
+    final category = _categories;
     final primary = <String, String?>{};
     final all = <String, Set<String>>{};
     for (final link in category.links) {
@@ -189,7 +195,7 @@ class _TimerPageState extends ConsumerState<TimerPage> {
 
   Future<bool> _editActivity(Activity activity) async {
     // 名/色支持；isOneOff 切换落库能力批次 5（仓储 updateActivity 仅名/色）。
-    final result = await app.activities.updateActivity(
+    final result = await ref.read(activityRepositoryProvider).updateActivity(
       activity: activity,
       name: activity.name,
       color: activity.color,
@@ -202,7 +208,7 @@ class _TimerPageState extends ConsumerState<TimerPage> {
     String? mainCategoryId,
     List<String> secondaryIds,
   ) async {
-    final result = await app.category.setActivityCategories(
+    final result = await _categories.setActivityCategories(
       activityId: activityId,
       primaryCategoryId: mainCategoryId,
       secondaryCategoryIds: secondaryIds,
@@ -253,9 +259,9 @@ class _TimerPageState extends ConsumerState<TimerPage> {
 
   @override
   Widget build(BuildContext context) {
-    // 迁移期桥：分类树仍由 CategoryStore 持有（B4 换 provider），分类/关联
-    // 变更都会 bump 修订号——页面级 watch 让筛选树与运行路径随库刷新。
-    ref.watch(dataRevisionProvider);
+    // 迁移期桥：分类树仍由 CategoryStore 持有（B4 换 Notifier），变更计数
+    // 驱动重建让筛选树与运行路径随库刷新。
+    ref.watch(categoryChangeProvider);
     // 今日条目/活动列表均由 provider 提供（TodayStore 已删）：写操作/跨日失效。
     final today = ref.watch(currentDayProvider);
     _todayEntries = ref.watch(dayEntriesProvider(today)).value ?? const [];
@@ -272,10 +278,10 @@ class _TimerPageState extends ConsumerState<TimerPage> {
         onRetry: () => ref.invalidate(activitiesProvider),
       );
     }
-    final running = app.timer.runningEntry;
+    final running = ref.watch(timerSnapshotProvider);
     // 1Hz 只在有运行条目时订阅：空闲页面不随秒重建。
-    final now = running == null ? DateTime.now() : ref.watch(clockTickProvider);
-    final recording = running != null && running.activityId != unassignedId;
+    final now = !running.isRunning ? DateTime.now() : ref.watch(clockTickProvider);
+    final recording = running.isRunning && running.activityId != unassignedId;
     if (activities.isEmpty) {
       return EmptyStateView(
         icon: Icons.business_center_outlined,
@@ -291,10 +297,10 @@ class _TimerPageState extends ConsumerState<TimerPage> {
     final quick = TimerQuickSection(
       l10n: l10n,
       categoryFilterId: _categoryFilterId,
-      rootCategories: app.category.childrenByParent[null] ?? const [],
-      childrenByParent: app.category.childrenByParent,
-      ancestorChain: app.category.ancestorChains,
-      descendantsOf: app.category.descendantsOf,
+      rootCategories: _categories.childrenByParent[null] ?? const [],
+      childrenByParent: _categories.childrenByParent,
+      ancestorChain: _categories.ancestorChains,
+      descendantsOf: _categories.descendantsOf,
       activities: visible,
       categoryIdsByActivity: _categoryIdsByActivity(),
       runningActivityId: _runningActivityId(),
@@ -313,10 +319,10 @@ class _TimerPageState extends ConsumerState<TimerPage> {
         TimerFocusSection(
           l10n: l10n,
           recording: recording,
-          runningName: running?.activityNameSnapshot,
-          runningColor: running?.activityColorSnapshot,
-          runningPath: _pathOfActivity(running?.activityId),
-          elapsed: running == null ? Duration.zero : running.durationUntil(now),
+          runningName: running.activityName,
+          runningColor: running.activityColor,
+          runningPath: _pathOfActivity(running.activityId),
+          elapsed: running.isRunning ? now.difference(running.startAt!) : Duration.zero,
           todayTotal: _todayTotal(today, now, unassignedId),
           todaySessions: _todaySessions,
           onStop: recording
@@ -336,12 +342,12 @@ class _TimerPageState extends ConsumerState<TimerPage> {
     if (activityId == null) return null;
     final primary = _primaryCategoryIdOf(activityId);
     if (primary == null) return null;
-    final chain = app.category.ancestorChains[primary] ?? const [];
+    final chain = _categories.ancestorChains[primary] ?? const [];
     return chain.isEmpty ? null : chain.join(' / ');
   }
 
   String? _primaryCategoryIdOf(String activityId) {
-    for (final link in app.category.links) {
+    for (final link in _categories.links) {
       if (link.activityId == activityId && link.isPrimary) {
         return link.categoryId;
       }
@@ -351,7 +357,7 @@ class _TimerPageState extends ConsumerState<TimerPage> {
 
   Map<String, Set<String>> _categoryIdsByActivity() {
     final map = <String, Set<String>>{};
-    for (final link in app.category.links) {
+    for (final link in _categories.links) {
       map.putIfAbsent(link.activityId, () => {}).add(link.categoryId);
     }
     return map;
@@ -370,9 +376,9 @@ class _TimerPageState extends ConsumerState<TimerPage> {
   bool _matchesFilter(Activity activity) {
     final filter = _categoryFilterId;
     if (filter == null) return true;
-    final descendants = app.category.descendantsOf[filter] ?? const <String>{};
+    final descendants = _categories.descendantsOf[filter] ?? const <String>{};
     final cats = <String>{};
-    for (final link in app.category.links) {
+    for (final link in _categories.links) {
       if (link.activityId == activity.id) cats.add(link.categoryId);
     }
     return cats.contains(filter) || cats.any(descendants.contains);

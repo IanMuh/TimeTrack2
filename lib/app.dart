@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import 'components/app_theme.dart';
 import 'l10n/app_localizations.dart';
+import 'providers/engines.dart';
 import 'providers/foundation.dart';
 import 'providers/infrastructure.dart';
 import 'routes/app_router.dart';
@@ -152,6 +153,9 @@ class _TimeTrack2AppState extends State<TimeTrack2App> {
       overrides: [
         if (store != null) ...[
           appDatabaseProvider.overrideWithValue(store.database),
+          // 壳层引擎快照（B4a）从同一 store 派生：否则测试里壳层读镜像
+          // provider 会命中未装配的默认实现（StateError）。
+          appStoreInstanceProvider.overrideWithValue(store),
           // 时钟/修订号/撤销都与 AppStore 同一实例：否则页面 watch 的
           // provider 状态永远收不到 store 写操作的 bump（测试里表现为
           // 页面不刷新），生产走 main 的容器不受此分支影响。

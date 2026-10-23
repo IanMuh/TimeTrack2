@@ -59,10 +59,59 @@ utils 不动；分 2 个 PR（PR1 = B0 地基 + B1 基础状态，PR2 = 其余�
   走 provider、1Hz 仅运行中订阅），并补测试作用域对时钟/修订号的桥接（修“写后
   页面不刷新”的根因）。
 
-**剩余（PR3）**：TimerStore/ReminderStore/CategoryStore/SettingsStore/ActivityStore
-→ Notifier；Sync/Update/Tracking/Lan/AI 引擎 Notifier 包装；CommandDispatcher 改
-Ref；删除 AppStore（`appStartupProvider` 装配）；AppShell 仍监听 4 个引擎（过渡
-白名单）；执行计划文档阶段 0 技术栈段落与目录约定改写。
+- B4a（`feat/riverpod-migration-3`）：`lib/providers/engines.dart` 引擎状态镜像——
+  `appStoreInstanceProvider`（main 用 `late bootStore` 绑定、测试作用域
+  `overrideWithValue`）+ `timerSnapshotProvider`/`reminderSnapshotProvider`/
+  `updateSnapshotProvider`（监听物理引擎 → 值快照，`==` 过滤，dispose 摘监听）；
+  AppShell 改 `ConsumerStatefulWidget`，3 个引擎 `addListener` 换成 build 内
+  `ref.listen`（通知语义不变，只剩 settings 一个过渡白名单监听）；
+  `test/support` 基座绑定 store 实例；新增 `test/providers/engines_test.dart`
+  （快照只在运行条目真实变化时通知、stop=切未分配的语义）。801→803 测试。
+- B4b-1（同分支）：计时引擎订阅面收敛——`TimerSnapshot` 增活动名/色快照；
+  `timer_page` 运行态改 `ref.watch(timerSnapshotProvider)`（不再读 `app.timer`）；
+  AppShell 删除 `_timerTick = Listenable.merge([timer, clock])`，计时条改
+  `Consumer` + 条件 `clockTickProvider`（空闲不随秒重建），托盘推送/可疑条目
+  检测改读快照。五个主页面已无 `app.timer` 引用（仅设置分区残留）。
+- B4c-1（同分支）：设置变更桥接 provider——`lib/providers/engines.dart` 增
+  `settingsStoreProvider`/`categoryStoreProvider`（实例访问器）与
+  `settingsChangeProvider`/`categoryChangeProvider`（监听引擎并 +1 的变更计数，
+  解决 Provider 对同一 store 实例做 == 过滤不重建的问题）；
+  `settings_section_general` 三个分区 + `_TriggerTimeField` 转 `ConsumerWidget`，
+  经 provider 读设置；AppShell 删最后一个 settings `addListener`，改 build 内
+  `ref.listen(settingsChangeProvider)`。`lib/pages` 页面侧 `addListener` 清零。
+  803 测试保持全绿。
+
+**全替代决策（2026-10-23，用户确认）**：剩余迁移一律采用 **A 方案「Notifier
+原地改造」**——保留 store 内部字段与方法体，只替换类声明/构造注入/通知语句
+（`notifyListeners()` → `_publish(state = XState(...))`），业务协议零重写；
+测试只换夹具（容器 + 读 provider），断言不变。迁移完成后再按热点做**增量纯化**
+（C 方案：provider API 不变，把状态转移抽成纯函数），不一次性重写。
+配套决定：PR4/PR5 分两个 PR；PR3 先合 main 再开 PR4；迁移期**不允许**保留
+`ListenableBuilder` 过渡。完整方案与风险表见
+`docs/Riverpod迁移B4全替代方案.md`。
+
+**B4c-2（同分支，PR3 收尾）**：读取面去 store——`lib/providers/engines.dart`
+新增通用 `_EngineChangeNotifier` 与 `timer/tracking/lan/sync/updateChangeProvider`
+（任意引擎 `Listenable` → int 变更计数）；`today_page`/`stats_page`/
+`timeline_page`/`timer_page` 的 `app.category`/`app.settings` 读取改
+`ref.watch(categoryChangeProvider|settingsChangeProvider)` + `ref.read(...StoreProvider)`；
+`AppShell` 提醒横幅改 `Consumer`（无提醒时不订阅 1Hz）、同步状态小字改
+`ref.watch(syncChangeProvider)`；设置分区 general（3 处）/sync/update/device（LAN）
+/background（tracking+settings+timer 合并监听）全部由 `ListenableBuilder` 改
+`Consumer`；`DeviceSection`/`BackgroundSection` 改 `ConsumerStatefulWidget`。
+验收：`lib/pages` 中 `ListenableBuilder` 与 `addListener` 均为 0；analyze 0；
+803 测试全绿。PR3 可合并。
+
+**剩余（PR4/PR5）**：见下。
+
+**剩余（PR4）**：Settings → Activity → Category → Timer → Reminder → Undo →
+CommandDispatcher 依次改 Notifier（按 A 方案），页面/测试切 provider，删对应
+store 与 store 测试（迁移为容器测试）。
+
+**剩余（PR5）**：Sync/Update/Tracking/LAN 改 Notifier；托盘/安装器/Android 桥
+变纯服务 provider；`appStartupProvider` 接管 seed/rollover/清理；删除
+`lib/stores/` 与 `AppStore`（lib 74 处 / test 34 处参数传递）；文档终稿。
+分刀顺序与验收见 `docs/Riverpod迁移B4执行计划.md`。
 
 
 ## 阶段 5 收尾清单（待办）

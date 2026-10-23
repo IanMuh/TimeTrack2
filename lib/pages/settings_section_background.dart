@@ -1,4 +1,4 @@
-/// 设置分区实现 ③：后台记录（平台卡 + 总开关 + 规则列表/表单，契约 §6.2）。
+﻿/// 设置分区实现 ③：后台记录（平台卡 + 总开关 + 规则列表/表单，契约 §6.2）。
 ///
 /// 规则 CRUD 经指令通道（tracking_rule_create/update/delete）——铁律 7；
 /// 总开关写 ProfileSettings（SettingsStore）；平台卡按平台分派：
@@ -11,11 +11,12 @@ import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../api/platform/windows_foreground_detector.dart'
     show WindowsForegroundDetector;
 import '../components/activity_picker/activity_picker.dart';
-import '../l10n/app_localizations.dart';
+import '../l10n/app_localizations.dart';import '../providers/engines.dart';
 import '../stores/app_store.dart';
 import '../stores/tracking_store.dart' show NoopForegroundDetector;
 import '../utils/result.dart';
@@ -27,16 +28,16 @@ import 'settings_widgets.dart';
 import 'tracking_guide_page.dart';
 
 /// 后台记录分区。
-class BackgroundSection extends StatefulWidget {
+class BackgroundSection extends ConsumerStatefulWidget {
   const BackgroundSection({super.key, required this.app});
 
   final AppStore app;
 
   @override
-  State<BackgroundSection> createState() => _BackgroundSectionState();
+  ConsumerState<BackgroundSection> createState() => _BackgroundSectionState();
 }
 
-class _BackgroundSectionState extends State<BackgroundSection> {
+class _BackgroundSectionState extends ConsumerState<BackgroundSection> {
   List<Activity> _activities = const [];
 
   /// 「使用情况访问」授权状态（null = 未查询/非 Android）。
@@ -103,9 +104,11 @@ class _BackgroundSectionState extends State<BackgroundSection> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final app = widget.app;
-    return ListenableBuilder(
-      listenable: Listenable.merge([app.tracking, app.settings, app.timer]),
-      builder: (context, _) {
+    return Consumer(
+      builder: (context, ref, _) {
+        ref.watch(trackingChangeProvider);
+        ref.watch(settingsChangeProvider);
+        ref.watch(timerChangeProvider);
         final settings = app.settings.current;
         final rules = app.tracking.ruleList;
         // §6.2：Android 未授权时总开关禁用（引导用户先去系统设置授权）。

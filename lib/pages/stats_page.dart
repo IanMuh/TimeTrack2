@@ -8,8 +8,11 @@ import '../components/state_views.dart';
 import '../components/tnum_text.dart';
 import '../l10n/app_localizations.dart';
 import '../providers/data.dart';
+import '../providers/engines.dart';
 import '../providers/foundation.dart';
 import '../stores/app_store.dart';
+import '../stores/category_store.dart';
+import '../stores/settings_store.dart';
 import '../utils/day_metrics.dart' show formatHm;
 import '../viewmodels/stats/stats_models.dart';
 import '../viewmodels/time_entry.dart';
@@ -50,12 +53,17 @@ class _StatsPageState extends ConsumerState<StatsPage> {
     return DateTime(n.year, n.month, n.day);
   }
 
+  /// 迁移期桥接：分类树/设置仍由 ChangeNotifier store 持有（B4 换 Notifier），
+  /// build 里 watch 变更计数保证重建，方法体经 read 取当前快照。
+  CategoryStore get _categories => ref.read(categoryStoreProvider);
+  SettingsStore get _settings => ref.read(settingsStoreProvider);
+
   (DateTime, DateTime) get _range {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     // 周始随用户偏好（ISO：1=周一…7=周日；Dart % 恒非负，周日始=7 时
     // (weekday-7)%7 ∈ 0..6 正确回退）。默认周一。
-    final weekStart = app.settings.current?.weekStartDay ?? 1;
+    final weekStart = _settings.current?.weekStartDay ?? 1;
     final weekDay = (today.weekday - weekStart) % 7;
     switch (_rangeIndex) {
       case 0:
@@ -93,7 +101,7 @@ class _StatsPageState extends ConsumerState<StatsPage> {
     if (_excludeAuto) list = list.where((e) => !e.isAuto).toList();
     if (_selectedCategories.isNotEmpty) {
       list = list.where((e) {
-        for (final link in app.category.links) {
+        for (final link in _categories.links) {
           if (link.activityId == e.activityId &&
               _selectedCategories.contains(link.categoryId)) {
             return true;
@@ -122,9 +130,10 @@ class _StatsPageState extends ConsumerState<StatsPage> {
 
   @override
   Widget build(BuildContext context) {
-    // 迁移期桥接：分类/设置仍由 ChangeNotifier store 持有（B4 换 provider），
-    // 其变更都 bump 修订号——页面级 watch 保证筛选树/周起始日随库刷新。
-    ref.watch(dataRevisionProvider);
+    // 迁移期桥接：分类树/设置仍由 ChangeNotifier store 持有（B4 换 Notifier），
+    // 变更计数驱动重建（筛选树/周起始日随库刷新）。
+    ref.watch(categoryChangeProvider);
+    ref.watch(settingsChangeProvider);
     // 范围条目 + 统计聚合均由 provider 提供（StatsStore 缓存已删）：
     // 范围/维度/过滤参数变化 = family 换键；写操作 bump 修订号失效。
     final (start, end) = _range;
@@ -353,8 +362,8 @@ class _StatsPageState extends ConsumerState<StatsPage> {
       ),
       child: StFilterTree(
         l10n: l10n,
-        roots: app.category.childrenByParent[null] ?? const [],
-        childrenByParent: app.category.childrenByParent,
+        roots: _categories.childrenByParent[null] ?? const [],
+        childrenByParent: _categories.childrenByParent,
         selected: _selectedCategories,
         expanded: _treeExpanded,
         onToggleSelect: (id) => setState(() {
@@ -368,7 +377,7 @@ class _StatsPageState extends ConsumerState<StatsPage> {
               : _treeExpanded.add(id);
         }),
         onAll: () => setState(() {
-          _selectedCategories.addAll(app.category.all.map((c) => c.id));
+          _selectedCategories.addAll(_categories.all.map((c) => c.id));
               }),
         onNone: () => setState(() {
           _selectedCategories.clear();
