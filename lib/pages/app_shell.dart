@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 
 import '../api/platform/android_tracking.dart' show AndroidTrackingBridge;
 import '../components/global_timer_bar.dart';
+import '../constants/layout.dart';
 import '../constants/storage_keys.dart';
 import '../l10n/app_localizations.dart';
 import '../api/platform/tray_service.dart';
@@ -49,10 +50,7 @@ class AppShell extends ConsumerStatefulWidget {
   final StatefulNavigationShell navigationShell;
 
   /// 宽屏断点：Material 逻辑像素 840（design min-[840px]）。
-  static const double wideBreakpoint = 840;
-
-  /// 主内容最大宽度：design max-w-5xl（1024）居中。
-  static const double _contentMaxWidth = 1024;
+  static const double wideBreakpoint = AppBreakpoints.expanded;
 
   @override
   ConsumerState<AppShell> createState() => _AppShellState();
@@ -809,19 +807,10 @@ class _AppShellState extends ConsumerState<AppShell>
                 Expanded(
                   child: Column(
                     children: [
-                      // 设计稿：主内容 mx-auto max-w-5xl（min-[840px] 起约束）。
-                      // Expanded 必须是 Column 直接子代——约束包在 Expanded 内。
                       banner,
-                      Expanded(
-                        child: Center(
-                          child: ConstrainedBox(
-                            constraints: const BoxConstraints(
-                              maxWidth: AppShell._contentMaxWidth,
-                            ),
-                            child: shell,
-                          ),
-                        ),
-                      ),
+                      // 内容宽度由各页面用 PageFrame 自行声明（旧实现全壳
+                      // 统一 max-w-5xl，宽屏时代计时/统计无法铺开）。
+                      Expanded(child: shell),
                       _buildTimerBar(compact: false),
                     ],
                   ),
@@ -1348,5 +1337,3 @@ class _SyncStatusText extends StatelessWidget {
     );
   }
 }
-
-
