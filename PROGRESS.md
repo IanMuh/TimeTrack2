@@ -1,4 +1,4 @@
-﻿# 开发进度记录
+# 开发进度记录
 
 > 供中断后快速恢复。权威细节以 `TimeTrack2 从零重建执行计划（完整最终版）.md` 为准；
 > 开发纪律见 `AGENTS.md`（逐模块确认、审查循环至清零、无用户指示不 push）。
@@ -123,19 +123,39 @@ notifier build 时挂载，写成功与撤销恢复都推进；`ActivityStore` �
 `test/providers/activity_test.dart` 2 例（指令写路径递增、undo 恢复递增）。
 验收：analyze 0；全量 **807 passed**。
 
-**剩余（PR4/PR5）**：见下。
+**PR4-b 其余步骤（feat/riverpod-migration-4，PR #18 已合并 `a47652b`）**：
+按 A 方案原地改造，形状统一为“去 `ChangeNotifier` + 单一 `onChanged` 槽（或
+`addChangeListener` 监听表）+ provider 挂载/摘除（identical 守卫）”：
+Settings（save/reload/applier 三处通知；`settingsChangeProvider` 挂载）、
+Category（`43492a7`）、Timer（多监听者用 `addChangeListener` 监听表）、
+Reminder（`d6a7f78`）、Undo（`cbea01e`，`undoStateProvider` 挂 `onChanged`，
+删除 `undo.dispose`）、CommandDispatcher 读面（`aa74c4f` 新增
+`commandDispatcherProvider`，20 处页面调用改 `ref.read`；`19b2d2a` 页面剩余
+引擎读改 provider，`lib/pages` 对领域 store 引用归零）。新增
+`activity/settings/category/timer` 四个 provider 测试文件。全量 812 绿。
 
-**剩余（PR4）**：Activity 已完成 → Settings → Category → Timer → Reminder →
-Undo → CommandDispatcher 依次改 Notifier（按 A 方案），页面/测试切 provider，
-删对应 store 与 store 测试（迁移为容器测试）。
-顺序修订原因见 `docs/Riverpod迁移B4全替代方案.md` §8：Notifier 实例只能由
-`NotifierProvider` 创建，而领域 store 目前在 `AppStore.create` 内 new 出来并交给
-Dispatcher，跳过 PR4-a 会产生双实例或容器反向依赖 AppStore 的坏形状。
-
-**剩余（PR5）**：Sync/Update/Tracking/LAN 改 Notifier；托盘/安装器/Android 桥
-变纯服务 provider；`appStartupProvider` 接管 seed/rollover/清理；删除
-`lib/stores/` 与 `AppStore`（lib 74 处 / test 34 处参数传递）；文档终稿。
-分刀顺序与验收见 `docs/Riverpod迁移B4执行计划.md`。
+**PR5（feat/riverpod-migration-5，PR #19 草稿）**：
+- 引擎去 ChangeNotifier（`3c5d443`/`788cad6`）：Sync/Update/Tracking/LAN 改
+  `onChanged` 单槽；`lib/providers/engines.dart` 用显式 Notifier 挂载并 +1，
+  新增 `sync/update/tracking/lanStoreProvider`；页面 22 处改 `ref.read`。
+- 平台服务 provider 化（`20c994d`）：`lib/providers/services.dart`（托盘/前台
+  检测/Android 桥/数据清除/文件互通/分发器）；AppShell 与设置分区改 provider。
+- 页面/路由去 AppStore 参数（`31b37c3`）：5 页面改无参构造，`AppRouter.create()`。
+- **删除 `AppStore`（`de32f0e`）**：`lib/providers/bootstrap.dart` 构造全部后台
+  引擎/服务（`trackingRuleRepositoryProvider`、`androidDetectionStoreProvider`、
+  `lanStoreProvider`、`syncStatusServiceProvider`、`cleanUpServiceProvider`、
+  `syncStoreProvider`、`updateStoreProvider`、`trackingStoreProvider`、
+  `commandDispatcherProvider`、`reminderStoreProvider` 等），`startupProvider`
+  承接 seed/rollover/normalize/加载缓存/静默更新检查/清理；`main.dart` 只建
+  容器并 await 启动；`app.dart` 只收容器（测试桥接只剩数据库/时钟/修订号/
+  undo/领域 store 五个 override）；删除 `lib/stores/app_store.dart`、
+  `test/stores/app_store_test.dart`，新增 `test/providers/bootstrap_test.dart`；
+  测试基座 `test/support/app_store_fixture.dart` 的 `TestStore` 以同名 getter
+  兼容既有 74 处 `store.xxx` 写法。全量 **806 passed**（删除 app_store 旧测试、
+  其余用例改写为容器读取）。
+- 迁移收尾：`lib/main.dart`、`lib/providers`、`stores/` 注释中 AppStore 引用清理；
+  AGENTS.md 技术栈/目录注释终稿；PROGRESS 本节与 `docs/Riverpod迁移B4执行计划.md`
+  `/docs/Riverpod迁移B4全替代方案.md` 记录完成状态与遗留项。
 
 
 ## 阶段 5 收尾清单（待办）
