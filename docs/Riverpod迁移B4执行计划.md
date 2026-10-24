@@ -107,3 +107,16 @@
   B4d 同步 LWW 语义。这三处必须有对应测试再改页面。
 - 禁止在 B4 期间新增 `ChangeNotifier`；临时桥接代码必须标 `TODO(B4e)` 并在
   收尾时删除。
+
+## 完成状态（2026-10-23）
+
+- B4a–B4c、PR4（B4b 全步骤 + dispatcher 读面）、PR5（引擎 onChanged、
+  `providers/services.dart`、页面去参、删除 `AppStore` + `providers/bootstrap.dart`）
+  已全部落地；PR #15–#18 已合并，PR #19 待审。
+- 验收：`flutter analyze` 0 issues；全量 806 测试绿；`lib/pages` 中
+  `addListener`/`ListenableBuilder`/`app.<store>` 引用均为 0；`lib/stores/`
+  仅剩无 UI 依赖的后台引擎/领域服务（不继承 `ChangeNotifier`）。
+- 本计划中的 `TODO(B4e)` 桥接已随 PR4 清零；测试基座改为容器装配
+  （`createTestContainer` + `test/support/app_store_fixture.dart` 的 `TestStore`）。
+- 未按原计划实现的两点及理由、纯化 C 的遗留热点，见
+  `docs/Riverpod迁移B4全替代方案.md` 末尾「执行结果与偏差」。

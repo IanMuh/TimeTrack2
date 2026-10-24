@@ -1,4 +1,4 @@
-/// 指令分发器（模块 3d①，铁律 7 统一通道落位）：UI/快捷键/深链/AI 收敛
+﻿/// 指令分发器（模块 3d①，铁律 7 统一通道落位）：UI/快捷键/深链/AI 收敛
 /// 到同一分发入口——`[CommandInvocation]` → 各 store 既有写路径。
 ///
 /// 设计：
@@ -97,7 +97,10 @@ class CommandDispatcher {
         }
         final result = await timer.switchToActivity(
           resolved.id!,
-          at: at,
+          // 显式以调度器时钟为基准（与 entry_update --end=now 同源）：仓储层
+          // 的 `at == null` 会退回系统时钟，注入 now 的测试/回放会与页面
+          // elapsed（ClockStore）产生巨大偏差。
+          at: at ?? _now(),
         );
         return _fromAppResult(result, successMessage: '已切换到活动');
       case 'stop':
@@ -519,3 +522,5 @@ class CommandDispatcher {
     );
   }
 }
+
+

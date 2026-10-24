@@ -1,4 +1,4 @@
-/// PR4-b 第一步：活动写路径的通知从 `ChangeNotifier` 迁移到 `activityProvider`。
+﻿/// PR4-b 第一步：活动写路径的通知从 `ChangeNotifier` 迁移到 `activityProvider`。
 library;
 
 import 'package:flutter_test/flutter_test.dart';
@@ -49,3 +49,4 @@ void main() {
     expect(container.read(activityProvider), 2);
   });
 }
+

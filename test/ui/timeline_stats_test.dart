@@ -1,13 +1,12 @@
-import 'package:drift/native.dart';
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timetrack2/api/supabase/sync_backend.dart';
 import 'package:timetrack2/app.dart';
-import 'package:timetrack2/data/database/app_database.dart' hide ProfileSettings;
+
+import '../support/provider_harness.dart';
 import 'package:timetrack2/providers/data.dart';
 import 'package:timetrack2/providers/infrastructure.dart';
-import 'package:timetrack2/stores/app_store.dart';
 import 'package:timetrack2/utils/result.dart';
 import 'package:timetrack2/viewmodels/commands/command_invocation.dart';
 import 'package:timetrack2/viewmodels/stats/stats_models.dart';
@@ -55,16 +54,12 @@ final DateTime _harnessNow = () {
   return DateTime(r.year, r.month, r.day, 0, 30);
 }();
 
-Future<AppStore> _createStore() {
-  return AppStore.create(
-    database: AppDatabase(NativeDatabase.memory()),
+Future<TestStore> _createStore() => pumpAppStore(createTestContainer(
     backend: _FakeBackend(),
-    runStartupChecks: false,
     now: () => _harnessNow,
-  );
-}
+  ));
 
-Future<void> _addToday(AppStore store, String start, String end) async {
+Future<void> _addToday(TestStore store, String start, String end) async {
   await store.dispatcher.dispatch(CommandInvocation(
     name: 'add',
     args: const ['学习'],
@@ -72,13 +67,13 @@ Future<void> _addToday(AppStore store, String start, String end) async {
   ));
 }
 
-Future<void> _pump(WidgetTester tester, AppStore store,
+Future<void> _pump(WidgetTester tester, TestStore store,
     {Size size = const Size(1280, 900)}) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.reset);
   await tester.pumpWidget(
-    TimeTrack2App(appStore: store, locale: const Locale('zh')),
+    TimeTrack2App(container: store.container, locale: const Locale('zh')),
   );
   await tester.pumpAndSettle();
 }
@@ -86,7 +81,7 @@ Future<void> _pump(WidgetTester tester, AppStore store,
 /// 以 store 的同一数据库建独立容器读统计快照（页面与断言同源聚合逻辑）。
 /// 显式 includeAuto 用于锁定「排除自动」开关极性。
 Future<StatsSnapshot> _snapshotOf(
-  AppStore store, {
+  TestStore store, {
   required bool includeAuto,
 }) async {
   final container = ProviderContainer(overrides: [
@@ -390,3 +385,6 @@ void main() {
     store.dispose();
   });
 }
+
+
+

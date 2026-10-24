@@ -1,4 +1,4 @@
-/// PR4-b 第二步：设置写路径的通知从 `ChangeNotifier` 迁移到
+﻿/// PR4-b 第二步：设置写路径的通知从 `ChangeNotifier` 迁移到
 /// `settingsChangeProvider`。
 library;
 
@@ -47,3 +47,4 @@ void main() {
     );
   });
 }
+

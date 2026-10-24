@@ -1,30 +1,13 @@
-﻿import 'package:flutter/foundation.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+﻿import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../stores/app_store.dart';
-import '../stores/command_dispatcher.dart';
 import '../stores/category_store.dart';
 import '../stores/reminder_store.dart';
 import '../stores/settings_store.dart';
 import '../stores/timer_store.dart';
 import '../stores/update_store.dart';
+import 'bootstrap.dart';
 import 'stores.dart';
 
-/// 迁移期（B4a）AppStore 实例接入点。
-///
-/// `AppStore` 仍是物理引擎（计时/同步/更新/追踪/LAN/托盘）的装配者，B4e 才会
-/// 拆散。在拆散之前，壳层需要以 Riverpod 的方式**订阅**这些引擎的状态，而不是
-/// 直接 `addListener`：
-/// - main：容器创建时用 `overrideWith((ref) => bootStore)` 绑定，启动装配完成
-///   前不会被读取；
-/// - widget 测试：`TimeTrack2App` 内部作用域用 `overrideWithValue(store)` 绑定；
-/// - 未装配即读取是编程错误，直接抛错（而不是悄悄给 null 让页面静默失效）。
-final appStoreInstanceProvider = Provider<AppStore>((ref) {
-  throw StateError(
-    'appStoreInstanceProvider 未装配：main 必须用 overrideWith 绑定启动实例，'
-    'widget 测试必须用 overrideWithValue 传入测试 store。',
-  );
-});
 
 /// 运行中计时条目的**值快照**（只含壳层展示/判定需要的字段）。
 ///
@@ -187,7 +170,7 @@ final timerSnapshotProvider =
 class TimerSnapshotNotifier extends Notifier<TimerSnapshot> {
   @override
   TimerSnapshot build() {
-    final store = ref.watch(appStoreInstanceProvider).timer;
+    final store = ref.watch(domainStoresProvider).timer;
     void onChange() {
       if (!ref.mounted) return;
       state = TimerSnapshot.from(store);
@@ -208,7 +191,7 @@ final reminderSnapshotProvider =
 class ReminderSnapshotNotifier extends Notifier<ReminderSnapshot> {
   @override
   ReminderSnapshot build() {
-    final store = ref.watch(appStoreInstanceProvider).reminder;
+    final store = ref.watch(reminderStoreProvider);
     void onChange() {
       if (!ref.mounted) return;
       state = ReminderSnapshot.from(store);
@@ -231,14 +214,16 @@ final updateSnapshotProvider =
 class UpdateSnapshotNotifier extends Notifier<UpdateSnapshot> {
   @override
   UpdateSnapshot build() {
-    final store = ref.watch(appStoreInstanceProvider).update;
+    final store = ref.watch(updateStoreProvider);
     void onChange() {
       if (!ref.mounted) return;
       state = UpdateSnapshot.from(store);
     }
 
-    store.addListener(onChange);
-    ref.onDispose(() => store.removeListener(onChange));
+    store.onChanged = onChange;
+    ref.onDispose(() {
+      if (identical(store.onChanged, onChange)) store.onChanged = null;
+    });
     return UpdateSnapshot.from(store);
   }
 }
@@ -302,38 +287,14 @@ class CategoryChangeNotifier extends Notifier<int> {
   }
 }
 
-/// 通用"引擎变更计数"：把任意 `Listenable` 的通知折算成 int 递增。
-///
-/// 迁移期用于引擎 store（timer/tracking/lan/sync/update）——它们仍是
-/// `ChangeNotifier`，页面不再 `ListenableBuilder`，而是
-/// `ref.watch(xxxChangeProvider)` + `ref.read(...StoreProvider)`。
-class _EngineChangeNotifier extends Notifier<int> {
-  _EngineChangeNotifier(this._listen);
-
-  final Listenable Function(AppStore) _listen;
-
-  @override
-  int build() {
-    final listenable = _listen(ref.watch(appStoreInstanceProvider));
-    void onChange() {
-      if (!ref.mounted) return;
-      state = state + 1;
-    }
-
-    listenable.addListener(onChange);
-    ref.onDispose(() => listenable.removeListener(onChange));
-    return 0;
-  }
-}
-
+/// 计时变更计数（手动会话保持/运行条目/写路径成功 → +1）。
 final timerChangeProvider =
     NotifierProvider<TimerChangeNotifier, int>(TimerChangeNotifier.new);
 
-/// 计时变更计数（手动会话保持/运行条目/写路径成功 → +1）。
 class TimerChangeNotifier extends Notifier<int> {
   @override
   int build() {
-    final store = ref.watch(appStoreInstanceProvider).timer;
+    final store = ref.watch(timerStoreProvider);
     void onChange() {
       if (!ref.mounted) return;
       state = state + 1;
@@ -344,39 +305,97 @@ class TimerChangeNotifier extends Notifier<int> {
     return 0;
   }
 }
+/// 引擎变更计数（`SyncStore`）——`onChanged` → state+1。
+final syncChangeProvider =
+    NotifierProvider<SyncChangeNotifier, int>(SyncChangeNotifier.new);
 
-final trackingChangeProvider = NotifierProvider<_EngineChangeNotifier, int>(
-  () => _EngineChangeNotifier((store) => store.tracking),
-);
+class SyncChangeNotifier extends Notifier<int> {
+  @override
+  int build() {
+    final store = ref.watch(syncStoreProvider);
+    void onChange() {
+      if (!ref.mounted) return;
+      state = state + 1;
+    }
 
-final lanChangeProvider = NotifierProvider<_EngineChangeNotifier, int>(
-  () => _EngineChangeNotifier((store) => store.lan),
-);
+    store.onChanged = onChange;
+    ref.onDispose(() {
+      if (identical(store.onChanged, onChange)) store.onChanged = null;
+    });
+    return 0;
+  }
+}
 
-final syncChangeProvider = NotifierProvider<_EngineChangeNotifier, int>(
-  () => _EngineChangeNotifier((store) => store.sync),
-);
+/// 引擎变更计数（`UpdateStore`）。
+final updateChangeProvider =
+    NotifierProvider<UpdateChangeNotifier, int>(UpdateChangeNotifier.new);
 
-final updateChangeProvider = NotifierProvider<_EngineChangeNotifier, int>(
-  () => _EngineChangeNotifier((store) => store.update),
-);
+class UpdateChangeNotifier extends Notifier<int> {
+  @override
+  int build() {
+    final store = ref.watch(updateStoreProvider);
+    void onChange() {
+      if (!ref.mounted) return;
+      state = state + 1;
+    }
 
+    store.onChanged = onChange;
+    ref.onDispose(() {
+      if (identical(store.onChanged, onChange)) store.onChanged = null;
+    });
+    return 0;
+  }
+}
 
+/// 引擎变更计数（`TrackingStore`）。
+final trackingChangeProvider =
+    NotifierProvider<TrackingChangeNotifier, int>(TrackingChangeNotifier.new);
 
+class TrackingChangeNotifier extends Notifier<int> {
+  @override
+  int build() {
+    final store = ref.watch(trackingStoreProvider);
+    void onChange() {
+      if (!ref.mounted) return;
+      state = state + 1;
+    }
 
-/// 命令分发器（迁移期：仍由 AppStore 装配，PR5 改由 provider 直接构造）。
-final commandDispatcherProvider = Provider<CommandDispatcher>(
-  (ref) => ref.watch(appStoreInstanceProvider).dispatcher,
-);
+    store.onChanged = onChange;
+    ref.onDispose(() {
+      if (identical(store.onChanged, onChange)) store.onChanged = null;
+    });
+    return 0;
+  }
+}
 
+/// 引擎变更计数（`LanStore`）。
+final lanChangeProvider =
+    NotifierProvider<LanChangeNotifier, int>(LanChangeNotifier.new);
 
-/// 计时引擎实例（迁移期只读入口；写路径仍经命令分发）。
+class LanChangeNotifier extends Notifier<int> {
+  @override
+  int build() {
+    final store = ref.watch(lanStoreProvider);
+    void onChange() {
+      if (!ref.mounted) return;
+      state = state + 1;
+    }
+
+    store.onChanged = onChange;
+    ref.onDispose(() {
+      if (identical(store.onChanged, onChange)) store.onChanged = null;
+    });
+    return 0;
+  }
+}
+
+/// 计时引擎实例（写路径经命令分发；读取面走快照 provider）。
 final timerStoreProvider = Provider<TimerStore>(
-  (ref) => ref.watch(appStoreInstanceProvider).timer,
+  (ref) => ref.watch(domainStoresProvider).timer,
 );
 
-/// 提醒引擎实例（迁移期只读入口；动作仍经命令分发）。
-final reminderStoreProvider = Provider<ReminderStore>(
-  (ref) => ref.watch(appStoreInstanceProvider).reminder,
-);
+
+
+
+
 

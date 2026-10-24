@@ -1,10 +1,9 @@
-import 'package:drift/native.dart';
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timetrack2/api/supabase/sync_backend.dart';
 import 'package:timetrack2/app.dart';
-import 'package:timetrack2/data/database/app_database.dart' hide ProfileSettings;
-import 'package:timetrack2/stores/app_store.dart';
+
+import '../support/provider_harness.dart';
 import 'package:timetrack2/utils/result.dart';
 import 'package:timetrack2/viewmodels/commands/command_invocation.dart';
 import 'dart:async';
@@ -48,25 +47,18 @@ class _FakeBackend implements SyncBackend {
   Future<AppResult<void>> signOut() async => const AppSuccess(null);
 }
 
-Future<AppStore> _createStore() {
-  return AppStore.create(
-    database: AppDatabase(NativeDatabase.memory()),
+Future<TestStore> _createStore() => pumpAppStore(createTestContainer(
     backend: _FakeBackend(),
-    runStartupChecks: false,
-    // 固定在触发时刻（09:00）之前：默认设置下快速提醒开启，真实时刻
-    // 已过点会在 pumpAndSettle 推进时钟时弹出模态对话框挡住导航点击
-    //（批次 5c 弹窗体系引入后的确定性约束）。
     now: () => DateTime(2026, 8, 14, 8),
-  );
-}
+  ));
 
-Future<void> _openSettings(WidgetTester tester, AppStore store,
+Future<void> _openSettings(WidgetTester tester, TestStore store,
     {Size size = const Size(1280, 900)}) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.reset);
   await tester.pumpWidget(
-    TimeTrack2App(appStore: store, locale: const Locale('zh')),
+    TimeTrack2App(container: store.container, locale: const Locale('zh')),
   );
   await tester.pumpAndSettle();
   await tester.tap(find.byIcon(Icons.settings_outlined));
@@ -258,3 +250,7 @@ void main() {
     store.dispose();
   });
 }
+
+
+
+

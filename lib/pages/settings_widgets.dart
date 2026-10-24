@@ -82,8 +82,8 @@ class SettingsSectionCard extends StatelessWidget {
                       Text(
                         subtitle,
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: scheme.onSurfaceVariant,
-                            ),
+                          color: scheme.onSurfaceVariant,
+                        ),
                       ),
                     ],
                   ),
@@ -91,9 +91,15 @@ class SettingsSectionCard extends StatelessWidget {
               ],
             ),
           ),
-          Divider(height: 1, color: scheme.outlineVariant.withValues(alpha: 0.4)),
+          Divider(
+            height: 1,
+            color: scheme.outlineVariant.withValues(alpha: 0.4),
+          ),
           if (paddedChildren)
-            Padding(padding: const EdgeInsets.all(20), child: Column(children: children))
+            Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(children: children),
+            )
           else
             ...children.map((child) => _Separated(child: child)),
         ],
@@ -114,7 +120,9 @@ class _Separated extends StatelessWidget {
       children: [
         Divider(
           height: 1,
-          color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.25),
+          color: Theme.of(
+            context,
+          ).colorScheme.outlineVariant.withValues(alpha: 0.25),
         ),
         child,
       ],
@@ -145,9 +153,9 @@ class _Badge extends StatelessWidget {
       child: Text(
         label,
         style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: Colors.amber.shade800,
-              fontWeight: FontWeight.w600,
-            ),
+          color: Colors.amber.shade800,
+          fontWeight: FontWeight.w600,
+        ),
       ),
     );
   }
@@ -185,8 +193,8 @@ class SettingsRow extends StatelessWidget {
                   Text(
                     subtitle!,
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: scheme.onSurfaceVariant,
-                        ),
+                      color: scheme.onSurfaceVariant,
+                    ),
                   ),
                 ],
               ],
@@ -222,10 +230,7 @@ class SettingsSwitchRow extends StatelessWidget {
     return SettingsRow(
       title: title,
       subtitle: subtitle,
-      trailing: Switch(
-        value: value,
-        onChanged: enabled ? onChanged : null,
-      ),
+      trailing: Switch(value: value, onChanged: enabled ? onChanged : null),
     );
   }
 }
@@ -279,8 +284,8 @@ class SettingsSliderRow extends StatelessWidget {
                       Text(
                         subtitle!,
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: scheme.onSurfaceVariant,
-                            ),
+                          color: scheme.onSurfaceVariant,
+                        ),
                       ),
                     ],
                   ],
@@ -290,10 +295,10 @@ class SettingsSliderRow extends StatelessWidget {
               Text(
                 valueLabel,
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: scheme.primary,
-                      fontWeight: FontWeight.w600,
-                      fontFeatures: const [FontFeature.tabularFigures()],
-                    ),
+                  color: scheme.primary,
+                  fontWeight: FontWeight.w600,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
               ),
             ],
           ),
@@ -314,9 +319,9 @@ class SettingsSliderRow extends StatelessWidget {
                   Text(
                     mark,
                     style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: scheme.onSurfaceVariant,
-                          fontFeatures: const [FontFeature.tabularFigures()],
-                        ),
+                      color: scheme.onSurfaceVariant,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
                   ),
               ],
             ),
@@ -401,7 +406,9 @@ class _OptionCard extends StatelessWidget {
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: selected ? accent : scheme.outlineVariant.withValues(alpha: 0.6),
+            color: selected
+                ? accent
+                : scheme.outlineVariant.withValues(alpha: 0.6),
             width: selected ? 1.4 : 1,
           ),
           color: selected ? accent.withValues(alpha: 0.06) : null,
@@ -414,14 +421,19 @@ class _OptionCard extends StatelessWidget {
               color: selected ? accent : scheme.onSurfaceVariant,
             ),
             const SizedBox(width: 10),
-            Expanded(child: Text(option.label, style: Theme.of(context).textTheme.bodyMedium)),
+            Expanded(
+              child: Text(
+                option.label,
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+            ),
             if (option.desc != null) ...[
               const SizedBox(width: 8),
               Text(
                 option.desc!,
                 style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                    ),
+                  color: scheme.onSurfaceVariant,
+                ),
               ),
             ],
             const SizedBox(width: 8),
@@ -485,12 +497,17 @@ class SettingsDropdownRow<T> extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.6)),
+            border: Border.all(
+              color: scheme.outlineVariant.withValues(alpha: 0.6),
+            ),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(current.label, style: Theme.of(context).textTheme.bodyMedium),
+              Text(
+                current.label,
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
               const SizedBox(width: 6),
               Icon(Icons.expand_more, size: 16, color: scheme.onSurfaceVariant),
             ],
@@ -535,7 +552,9 @@ class SettingsSegmentedRow extends StatelessWidget {
         padding: const EdgeInsets.all(3),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.6)),
+          border: Border.all(
+            color: scheme.outlineVariant.withValues(alpha: 0.6),
+          ),
           color: scheme.surfaceContainerHighest.withValues(alpha: 0.4),
         ),
         child: Row(
@@ -546,7 +565,10 @@ class SettingsSegmentedRow extends StatelessWidget {
                 onTap: () => onChanged(i),
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 120),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(6),
                     color: i == selectedIndex ? scheme.primary : null,
@@ -554,12 +576,11 @@ class SettingsSegmentedRow extends StatelessWidget {
                   child: Text(
                     segments[i],
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: i == selectedIndex
-                              ? scheme.onPrimary
-                              : scheme.onSurfaceVariant,
-                          fontWeight:
-                              i == selectedIndex ? FontWeight.w600 : null,
-                        ),
+                      color: i == selectedIndex
+                          ? scheme.onPrimary
+                          : scheme.onSurfaceVariant,
+                      fontWeight: i == selectedIndex ? FontWeight.w600 : null,
+                    ),
                   ),
                 ),
               ),
@@ -608,9 +629,9 @@ class SettingsDangerCard extends StatelessWidget {
                 Text(
                   title,
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: error,
-                        fontWeight: FontWeight.w600,
-                      ),
+                    color: error,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ],
             ),
@@ -618,8 +639,8 @@ class SettingsDangerCard extends StatelessWidget {
             Text(
               message,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: error.withValues(alpha: 0.85),
-                  ),
+                color: error.withValues(alpha: 0.85),
+              ),
             ),
             const SizedBox(height: 12),
             FilledButton.icon(
@@ -640,7 +661,11 @@ class SettingsDangerCard extends StatelessWidget {
 
 /// 信息提示条（时间线未分配合并说明 / 匹配优先级说明等）。
 class SettingsInfoBanner extends StatelessWidget {
-  const SettingsInfoBanner({super.key, required this.child, this.compact = false});
+  const SettingsInfoBanner({
+    super.key,
+    required this.child,
+    this.compact = false,
+  });
 
   final Widget child;
   final bool compact;
@@ -657,10 +682,9 @@ class SettingsInfoBanner extends StatelessWidget {
         border: Border.all(color: SettingsSky.base.withValues(alpha: 0.25)),
       ),
       child: DefaultTextStyle(
-        style: Theme.of(context).textTheme.bodySmall!.copyWith(
-              color: scheme.onSurface,
-              height: 1.4,
-            ),
+        style: Theme.of(
+          context,
+        ).textTheme.bodySmall!.copyWith(color: scheme.onSurface, height: 1.4),
         child: child,
       ),
     );

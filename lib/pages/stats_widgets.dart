@@ -45,8 +45,10 @@ class StFilterTree extends StatelessWidget {
       children: [
         Row(
           children: [
-            Text(l10n.stFilterTitle,
-                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+            Text(
+              l10n.stFilterTitle,
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+            ),
             const Spacer(),
             TextButton(onPressed: onAll, child: Text(l10n.stFilterAll)),
             TextButton(onPressed: onNone, child: Text(l10n.stFilterNone)),
@@ -57,7 +59,11 @@ class StFilterTree extends StatelessWidget {
     );
   }
 
-  List<Widget> _nodes(List<ActivityCategory> list, int depth, ColorScheme scheme) {
+  List<Widget> _nodes(
+    List<ActivityCategory> list,
+    int depth,
+    ColorScheme scheme,
+  ) {
     return [
       for (final c in list) ...[
         Row(
@@ -132,115 +138,130 @@ class StTreeRow extends StatelessWidget {
           // 紧凑档（可用宽 <480）改两行：占比条不再固定 140px——单行固定
           // 部分（条+%+时长+条数）在 320 窗口必溢出；层级信息两行均保留
           //（契约 L113"紧凑档不得丢弃层级信息"）。
-          LayoutBuilder(builder: (context, constraints) {
-            final compact = constraints.maxWidth < 480;
-            final indent = SizedBox(width: row.depth * 16.0);
-            final label = Expanded(
-              child: Text(
-                row.label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: row.depth == 0
-                      ? FontWeight.w600
-                      : FontWeight.w500,
-                ),
-              ),
-            );
-            final duration = TnumText(
-              formatHm(row.totalDuration),
-              style: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-              ),
-            );
-            if (compact) {
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      indent,
-                      Icon(
-                        collapsed
-                            ? Icons.keyboard_arrow_right_rounded
-                            : Icons.keyboard_arrow_down_rounded,
-                        size: 14,
-                        color: scheme.onSurfaceVariant,
-                      ),
-                      const SizedBox(width: 4),
-                      ActivityColorDot(Color(row.color), size: 8, ringWidth: 0),
-                      const SizedBox(width: 8),
-                      label,
-                      const SizedBox(width: 12),
-                      duration,
-                    ],
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final compact = constraints.maxWidth < 480;
+              final indent = SizedBox(width: row.depth * 16.0);
+              final label = Expanded(
+                child: Text(
+                  row.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: row.depth == 0
+                        ? FontWeight.w600
+                        : FontWeight.w500,
                   ),
-                  const SizedBox(height: 4),
-                  Padding(
-                    padding: EdgeInsets.only(left: row.depth * 16.0 + 18),
-                    child: Row(
+                ),
+              );
+              final duration = TnumText(
+                formatHm(row.totalDuration),
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              );
+              if (compact) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
                       children: [
-                        Expanded(
-                          child: ActivityColorBar2(
-                              Color(row.color), ratio: ratio),
+                        indent,
+                        Icon(
+                          collapsed
+                              ? Icons.keyboard_arrow_right_rounded
+                              : Icons.keyboard_arrow_down_rounded,
+                          size: 14,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                        const SizedBox(width: 4),
+                        ActivityColorDot(
+                          Color(row.color),
+                          size: 8,
+                          ringWidth: 0,
                         ),
                         const SizedBox(width: 8),
-                        TnumText(
-                          '${(ratio * 100).toStringAsFixed(0)}%',
-                          style: TextStyle(
-                              fontSize: 11.5,
-                              color: scheme.onSurfaceVariant),
-                        ),
-                        const SizedBox(width: 10),
-                        Text(
-                          l10n.stCountShort(row.count),
-                          style: TextStyle(
-                              fontSize: 11,
-                              color: scheme.onSurfaceVariant),
-                        ),
+                        label,
+                        const SizedBox(width: 12),
+                        duration,
                       ],
+                    ),
+                    const SizedBox(height: 4),
+                    Padding(
+                      padding: EdgeInsets.only(left: row.depth * 16.0 + 18),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: ActivityColorBar2(
+                              Color(row.color),
+                              ratio: ratio,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          TnumText(
+                            '${(ratio * 100).toStringAsFixed(0)}%',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Text(
+                            l10n.stCountShort(row.count),
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                );
+              }
+              return Row(
+                children: [
+                  indent,
+                  Icon(
+                    collapsed
+                        ? Icons.keyboard_arrow_right_rounded
+                        : Icons.keyboard_arrow_down_rounded,
+                    size: 14,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: 4),
+                  ActivityColorDot(Color(row.color), size: 8, ringWidth: 0),
+                  const SizedBox(width: 8),
+                  label,
+                  const SizedBox(width: 12),
+                  SizedBox(
+                    width: 140,
+                    child: ActivityColorBar2(Color(row.color), ratio: ratio),
+                  ),
+                  const SizedBox(width: 8),
+                  TnumText(
+                    '${(ratio * 100).toStringAsFixed(0)}%',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  duration,
+                  const SizedBox(width: 10),
+                  Text(
+                    l10n.stCountShort(row.count),
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: scheme.onSurfaceVariant,
                     ),
                   ),
                 ],
               );
-            }
-            return Row(
-              children: [
-                indent,
-                Icon(
-                  collapsed
-                      ? Icons.keyboard_arrow_right_rounded
-                      : Icons.keyboard_arrow_down_rounded,
-                  size: 14,
-                  color: scheme.onSurfaceVariant,
-                ),
-                const SizedBox(width: 4),
-                ActivityColorDot(Color(row.color), size: 8, ringWidth: 0),
-                const SizedBox(width: 8),
-                label,
-                const SizedBox(width: 12),
-                SizedBox(
-                  width: 140,
-                  child: ActivityColorBar2(Color(row.color), ratio: ratio),
-                ),
-                const SizedBox(width: 8),
-                TnumText(
-                  '${(ratio * 100).toStringAsFixed(0)}%',
-                  style: TextStyle(
-                      fontSize: 11.5, color: scheme.onSurfaceVariant),
-                ),
-                const SizedBox(width: 12),
-                duration,
-                const SizedBox(width: 10),
-                Text(
-                  l10n.stCountShort(row.count),
-                  style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
-                ),
-              ],
-            );
-          }),
+            },
+          ),
         ],
       ),
     );
@@ -249,7 +270,12 @@ class StTreeRow extends StatelessWidget {
 
 /// 占比条（与 components 版一致——stats 内联避免跨页依赖色值换算）。
 class ActivityColorBar2 extends StatelessWidget {
-  const ActivityColorBar2(this.color, {super.key, required this.ratio, this.height = 5});
+  const ActivityColorBar2(
+    this.color, {
+    super.key,
+    required this.ratio,
+    this.height = 5,
+  });
 
   final Color color;
   final double ratio;
@@ -282,11 +308,7 @@ class ActivityColorBar2 extends StatelessWidget {
 
 /// 每日分布柱状图（fl_chart；深浅主题适配刻度/网格）。
 class StDailyBarChart extends StatelessWidget {
-  const StDailyBarChart({
-    super.key,
-    required this.days,
-    required this.values,
-  });
+  const StDailyBarChart({super.key, required this.days, required this.values});
 
   final List<DateTime> days;
   final List<Duration> values;
@@ -297,7 +319,9 @@ class StDailyBarChart extends StatelessWidget {
     final grid = dark ? const Color(0x33ffffff) : const Color(0x22000000);
     final label = dark ? const Color(0x99ffffff) : const Color(0x99000000);
     final maxV = values.fold<double>(
-        0, (m, v) => v.inMinutes > m ? v.inMinutes.toDouble() : m);
+      0,
+      (m, v) => v.inMinutes > m ? v.inMinutes.toDouble() : m,
+    );
     return SizedBox(
       height: 200,
       child: BarChart(
@@ -331,15 +355,21 @@ class StDailyBarChart extends StatelessWidget {
                 getTitlesWidget: (i, meta) => SideTitleWidget(
                   meta: meta,
                   child: Text(
-                    DateFormat('M/d', 'zh')
-                        .format(days[i.toInt().clamp(0, days.length - 1)]),
+                    DateFormat(
+                      'M/d',
+                      'zh',
+                    ).format(days[i.toInt().clamp(0, days.length - 1)]),
                     style: TextStyle(fontSize: 10, color: label),
                   ),
                 ),
               ),
             ),
-            topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            topTitles: const AxisTitles(
+              sideTitles: SideTitles(showTitles: false),
+            ),
+            rightTitles: const AxisTitles(
+              sideTitles: SideTitles(showTitles: false),
+            ),
           ),
           borderData: FlBorderData(show: false),
           barGroups: [
@@ -351,7 +381,8 @@ class StDailyBarChart extends StatelessWidget {
                     toY: values[i].inMinutes.toDouble(),
                     width: 18,
                     borderRadius: const BorderRadius.vertical(
-                        top: Radius.circular(4)),
+                      top: Radius.circular(4),
+                    ),
                     color: const Color(0xff4f46e5),
                   ),
                 ],
@@ -419,8 +450,10 @@ class StSharePieChart extends StatelessWidget {
                         Container(
                           width: 8,
                           height: 8,
-                          decoration:
-                              BoxDecoration(color: s.$2, shape: BoxShape.circle),
+                          decoration: BoxDecoration(
+                            color: s.$2,
+                            shape: BoxShape.circle,
+                          ),
                         ),
                         const SizedBox(width: 6),
                         Expanded(

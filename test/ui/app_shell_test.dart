@@ -1,16 +1,15 @@
-import 'package:drift/native.dart';
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timetrack2/api/supabase/sync_backend.dart';
 import 'package:timetrack2/app.dart';
+
+import '../support/provider_harness.dart';
 import 'package:timetrack2/components/global_timer_bar.dart';
-import 'package:timetrack2/data/database/app_database.dart' hide ProfileSettings;
 import 'package:timetrack2/pages/settings_page.dart';
 import 'package:timetrack2/pages/stats_page.dart';
 import 'package:timetrack2/pages/timeline_page.dart';
 import 'package:timetrack2/pages/timer_page.dart';
 import 'package:timetrack2/pages/today_page.dart';
-import 'package:timetrack2/stores/app_store.dart';
 import 'package:timetrack2/utils/result.dart';
 import 'package:timetrack2/viewmodels/commands/command_invocation.dart';
 
@@ -62,16 +61,10 @@ class _FakeBackend implements SyncBackend {
   Future<AppResult<void>> signOut() async => const AppSuccess(null);
 }
 
-Future<AppStore> _createStore() {
-  return AppStore.create(
-    database: AppDatabase(NativeDatabase.memory()),
+Future<TestStore> _createStore() => pumpAppStore(createTestContainer(
     backend: _FakeBackend(),
-    runStartupChecks: false,
-    // 固定在快速提醒触发时刻（09:00）之前——防 pumpAndSettle 推进时钟
-    // 时弹出模态提醒挡住导航点击（批次 5c 弹窗体系）。
     now: () => DateTime(2026, 8, 14, 8),
-  );
-}
+  ));
 
 /// 当前展示页标题（页面内独立标题，避免与导航栏同名文案混淆）。
 Finder _pageTitle(Type pageType, String title) =>
@@ -108,7 +101,7 @@ void main() {
         tester.view.devicePixelRatio = 1.0;
         addTearDown(tester.view.reset);
         await tester.pumpWidget(
-          TimeTrack2App(appStore: store, locale: const Locale('zh')),
+          TimeTrack2App(container: store.container, locale: const Locale('zh')),
         );
         await tester.pumpAndSettle();
         expect(
@@ -131,7 +124,7 @@ void main() {
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
       await tester.pumpWidget(
-        TimeTrack2App(appStore: store, locale: const Locale('zh')),
+        TimeTrack2App(container: store.container, locale: const Locale('zh')),
       );
       await tester.pumpAndSettle();
 
@@ -173,7 +166,7 @@ void main() {
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
       await tester.pumpWidget(
-        TimeTrack2App(appStore: store, locale: const Locale('zh')),
+        TimeTrack2App(container: store.container, locale: const Locale('zh')),
       );
       await tester.pumpAndSettle();
 
@@ -218,7 +211,7 @@ void main() {
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
       await tester.pumpWidget(
-        TimeTrack2App(appStore: store, locale: const Locale('zh')),
+        TimeTrack2App(container: store.container, locale: const Locale('zh')),
       );
       await tester.pumpAndSettle();
 
@@ -278,7 +271,7 @@ void main() {
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
       await tester.pumpWidget(
-        TimeTrack2App(appStore: store, locale: const Locale('zh')),
+        TimeTrack2App(container: store.container, locale: const Locale('zh')),
       );
       await tester.pumpAndSettle();
 
@@ -333,3 +326,9 @@ void main() {
     });
   });
 }
+
+
+
+
+
+

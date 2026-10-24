@@ -204,4 +204,37 @@ lib/providers/
 **测试影响**：`AppStore.create` 的 9 处测试调用改为 `createTestContainer()` + 从容器取
 store；`test/support/provider_harness.dart` 增加 store override 参数（后续每步复用）。
 
+## 执行结果与偏差（2026-10-23 完成）
+
+PR1 #15（B0/B1）→ PR2 #16（B2/B3）→ PR3 #17（B4a–B4c）→ PR4 #18（A 方案
+原地改造 + dispatcher 读面）→ PR5 #19（引擎/provider 服务/删 AppStore），
+已全部落地；`flutter analyze` 0 issues，全量 806 测试绿。
+
+与原方案的偏差（均为落地时发现的更优/更小形状，已记录）：
+
+1. **A 方案的具体形态**：store 类去掉 `ChangeNotifier`，保留字段与业务方法，
+   通知改为单一 `onChanged` 槽（Timer 因多监听者保留 `addChangeListener` 监听表）；
+   通知生命周期由 `providers/` 挂载/摘除（identical 守卫）。**没有**把
+   store 类本身改成 `Notifier`——`Notifier` 实例只能由 `NotifierProvider`
+   创建，而领域方法仍需要普通对象承载；改用“服务对象 + provider 镜像通知”
+   后，页面/测试的读面仍是 provider，符合 A 的核心承诺（业务协议零重写）。
+2. **引擎同样按第 1 条落地**（Sync/Update/Tracking/LAN），`lib/providers/engines.dart`
+   用显式 `*ChangeNotifier` 把 `onChanged` 映射为 int 变更计数，替代原计划的
+   “引擎直接 Notifier”。
+3. **CommandDispatcher 未注入 `Ref`**：直接由 `commandDispatcherProvider`
+   构造并注入窄依赖（Timer/Category/Settings/Activity + 仓储），页面 20 处
+   `app.dispatcher` 改 `ref.read(commandDispatcherProvider)`。
+4. **AppStore 删除方式**：`lib/providers/bootstrap.dart` 承接原 `create/init`
+   编排，`startupProvider` 负责 seed/rollover/normalize/缓存加载/静默更新/清理；
+   测试基座保留 `TestStore` 外观（`test/support/app_store_fixture.dart`，
+   同名 getter）以避免一次性改写 74 处断言。
+5. **页面构造参数提前清零**：PR5 第 3 步先删 5 页的 `AppStore` 参数与
+   `AppRouter.create(app)`，再删 `AppStore`，避免“类已删但页面还在传”的中间态。
+
+**遗留（纯化 C，按热点增量做，不改 provider API）**：
+- TimerStore 的写互斥 `_writing` + `runningEntry` 与 undo 的交互；
+- UndoStore 两阶段 `_applyRecord`（全 validate 后全 apply）；
+- SyncStore 的 LWW 编排与 LAN 合并路径；
+- `stores/*` 里剩余的 `debugPrint`/`stderr` 日志收口（可选）。
+
 

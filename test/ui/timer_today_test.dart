@@ -1,12 +1,11 @@
-import 'package:drift/native.dart';
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timetrack2/api/supabase/sync_backend.dart';
 import 'package:timetrack2/app.dart';
+
+import '../support/provider_harness.dart';
 import 'package:timetrack2/components/controls.dart' show AppChip;
-import 'package:timetrack2/data/database/app_database.dart' hide ProfileSettings;
 import 'package:timetrack2/pages/timer_page.dart';
-import 'package:timetrack2/stores/app_store.dart';
 import 'package:timetrack2/utils/result.dart';
 import 'package:timetrack2/viewmodels/commands/command_invocation.dart';
 
@@ -56,21 +55,17 @@ final DateTime _harnessNow = () {
   return DateTime(r.year, r.month, r.day, 0, 30);
 }();
 
-Future<AppStore> _createStore() {
-  return AppStore.create(
-    database: AppDatabase(NativeDatabase.memory()),
+Future<TestStore> _createStore() => pumpAppStore(createTestContainer(
     backend: _FakeBackend(),
-    runStartupChecks: false,
     now: () => _harnessNow,
-  );
-}
+  ));
 
-Future<void> _pumpApp(WidgetTester tester, AppStore store) async {
+Future<void> _pumpApp(WidgetTester tester, TestStore store) async {
   tester.view.physicalSize = const Size(1280, 900);
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.reset);
   await tester.pumpWidget(
-    TimeTrack2App(appStore: store, locale: const Locale('zh')),
+    TimeTrack2App(container: store.container, locale: const Locale('zh')),
   );
   await tester.pumpAndSettle();
 }
@@ -189,7 +184,7 @@ void main() {
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(
-      TimeTrack2App(appStore: store, locale: const Locale('zh')),
+      TimeTrack2App(container: store.container, locale: const Locale('zh')),
     );
     await tester.pumpAndSettle();
     await tester.tap(find.byIcon(Icons.calendar_today_outlined));
@@ -227,3 +222,6 @@ void main() {
     store.dispose();
   });
 }
+
+
+

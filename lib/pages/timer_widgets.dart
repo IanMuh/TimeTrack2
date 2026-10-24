@@ -97,8 +97,10 @@ class TimerFocusSection extends StatelessWidget {
                     runningPath!,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style:
-                        TextStyle(fontSize: 14, color: scheme.onSurfaceVariant),
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: scheme.onSurfaceVariant,
+                    ),
                   ),
                 ),
               ],
@@ -171,10 +173,10 @@ class TimerFocusSection extends StatelessWidget {
   TextStyle _statLabel(ColorScheme scheme) =>
       TextStyle(fontSize: 14, color: scheme.onSurfaceVariant);
   TextStyle _statValue(ColorScheme scheme) => TextStyle(
-        fontSize: 14,
-        fontWeight: FontWeight.w600,
-        color: scheme.onSurface,
-      );
+    fontSize: 14,
+    fontWeight: FontWeight.w600,
+    color: scheme.onSurface,
+  );
 
   /// H:MM（设计稿今日累计短格式，如 10:42）。
   static String _hm(Duration d) {
@@ -224,8 +226,9 @@ class _StatusPill extends StatelessWidget {
             style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w500,
-              color:
-                  recording ? const Color(0xffe11d48) : scheme.onSurfaceVariant,
+              color: recording
+                  ? const Color(0xffe11d48)
+                  : scheme.onSurfaceVariant,
             ),
           ),
         ],
@@ -302,8 +305,8 @@ class TimerQuickSection extends StatelessWidget {
     final visible = selected == null
         ? activities
         : activities
-            .where((a) => !a.isUnassigned && _inCategory(a.id, selected))
-            .toList();
+              .where((a) => !a.isUnassigned && _inCategory(a.id, selected))
+              .toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -381,8 +384,8 @@ class TimerQuickSection extends StatelessWidget {
             final columns = constraints.maxWidth >= 840
                 ? 4
                 : constraints.maxWidth >= 600
-                    ? 3
-                    : 2;
+                ? 3
+                : 2;
             // 卡片纵横比随系统字号放大放高：内容最小高度随字号线性增长，
             // 固定 1.75 在放大档纵向溢出（app 层钳制 1.3 → 最扁 1.35）。
             final textScale = MediaQuery.textScalerOf(context).scale(1.0);
@@ -444,21 +447,24 @@ class _GroupHeaderLine extends StatelessWidget {
         children: [
           Icon(Icons.layers_outlined, size: 14, color: muted),
           const SizedBox(width: 6),
-          Text(l10n.timerAllActivities,
-              style: TextStyle(fontSize: 12, color: muted)),
+          Text(
+            l10n.timerAllActivities,
+            style: TextStyle(fontSize: 12, color: muted),
+          ),
           const SizedBox(width: 6),
           Text('·', style: TextStyle(fontSize: 12, color: scheme.outline)),
           const SizedBox(width: 6),
-          Text(l10n.timerGroupCount(visibleCount),
-              style: TextStyle(fontSize: 12, color: muted)),
+          Text(
+            l10n.timerGroupCount(visibleCount),
+            style: TextStyle(fontSize: 12, color: muted),
+          ),
         ],
       );
     }
     final cat = rootCategories.where((c) => c.id == selected).firstOrNull;
     if (cat == null) return const SizedBox(height: 16);
     final subs = childrenByParent[cat.id] ?? const [];
-    final subText =
-        subs.map((s) => '${s.name} · ${countFor(s.id)}').join('、');
+    final subText = subs.map((s) => '${s.name} · ${countFor(s.id)}').join('、');
     return Row(
       children: [
         ActivityColorDot(Color(cat.color), size: 8, ringWidth: 0),
@@ -543,8 +549,10 @@ class _ActivityCard extends StatelessWidget {
               ),
               if (running)
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
                   decoration: BoxDecoration(
                     color: rose.withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(999),
@@ -561,7 +569,9 @@ class _ActivityCard extends StatelessWidget {
                             width: 4,
                             height: 4,
                             decoration: BoxDecoration(
-                                color: rose, shape: BoxShape.circle),
+                              color: rose,
+                              shape: BoxShape.circle,
+                            ),
                           ),
                         ),
                       ),
@@ -631,15 +641,20 @@ class _ActivityCard extends StatelessWidget {
                   Expanded(child: body),
                   Container(
                     width: double.infinity,
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 6,
+                    ),
                     color: scheme.primary.withValues(alpha: 0.08),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.touch_app_rounded,
-                            size: 12, color: scheme.primary),
+                        Icon(
+                          Icons.touch_app_rounded,
+                          size: 12,
+                          color: scheme.primary,
+                        ),
                         const SizedBox(width: 4),
                         Text(
                           l10n.timerTapToConfirm,

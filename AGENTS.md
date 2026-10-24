@@ -4,11 +4,12 @@ TimeTrack 从零重建项目（时间追踪应用）。权威细节以仓库根�
 
 ## 技术栈（阶段 0 锁定版本，不中途升级）
 - Flutter 3.44.2 / Dart 3.12.2（build_runner 需 Dart ≥ 3.4）
-- 状态管理：**迁移中 → Riverpod**（`flutter_riverpod` 3.4.3，手写 Provider/Notifier，不用 codegen）。
-  迁移期（B0-B4）约束：新增/改动的 UI 与状态代码一律 Riverpod（`ConsumerWidget` + `ref.watch` +
-  `Notifier`；`Override` 从 `flutter_riverpod/misc.dart` 导入）；存量 `ChangeNotifier` 只减不增。
-  B4 完成后 `stores/` 只留后台引擎（Sync/Update/Tracking/LAN/AI 服务类）与命令分发器。
-  导航：go_router（StatefulShellRoute 保活 5 主页面）；DI：Riverpod 容器（get_it 已于 B0 移除）
+- 状态管理：**Riverpod**（`flutter_riverpod` 3.4.3，手写 Provider/Notifier，不用 codegen）。
+  约束：UI 与状态代码一律 Riverpod（`ConsumerWidget` + `ref.watch` + `Notifier`；
+  `Override` 从 `flutter_riverpod/misc.dart` 导入）；`stores/` 只留无 UI 依赖的后台引擎
+  （Sync/Update/Tracking/LAN/Timer/Category/Settings/Activity/Reminder/Undo/Dispatcher），
+  页面状态唯一入口是 `providers/`；禁止新增 `ChangeNotifier`/`addListener` 订阅。
+  导航：go_router（StatefulShellRoute 保活 5 主页面）；DI：Riverpod 容器（get_it 已移除）
 - 数据：drift + sqlite3 3.x **默认捆绑**（不含 sqlite3_flutter_libs、不配 winsqlite3 钩子）；build_runner 生成代码纳入版本管理
 - 云同步/认证：supabase_flutter；LAN：dart:io 自研（主机手动启动）；更新：http 流式下载 + crypto SHA-256 + 平台安装器自研
 - 图表 fl_chart / 文件选择 file_selector / 本地化 flutter_localizations + ARB
@@ -26,12 +27,12 @@ lib/
 ├── pages/      # 壳、计时、今日、时间线、统计、设置、登录
 ├── providers/  # Riverpod provider 图（基础设施/仓储/领域 Notifier/编排）——唯一状态源
 ├── routes/     # go_router（5 主页面壳保活 + 深链预留）
-├── stores/     # 【迁移期】旧 ChangeNotifier 状态类；B4 后仅留后台引擎与命令分发器
+├── stores/     # 无 UI 依赖的后台引擎/领域服务（不继承 ChangeNotifier；变更经 onChanged 上报 provider）
 ├── utils/      # Result、日期扩展、版本解析、格式化、CLI 文本解析器、SHA-256
 └── viewmodels/ # 领域模型（纯类型，含 parentId）+ 统计聚合 + 指令类型 + 更新清单类型
 ```
 依赖方向：`viewmodels / utils / constants / assets` ← `data / api` ← `providers` ← `pages / components` ← `routes` → `app.dart → main.dart`。
-迁移期例外（只减不增）：`pages` 仍可经 `AppStore` 取存量 store，`providers` 包装 `stores/`；新增状态一律落 `providers/`。
+约束：`pages` 不得直接构造 store/仓储；状态一律经 `providers/`；`stores/` 只能被 `providers/` 持有，新增状态落 `providers/`。
 
 ## 铁律
 1. 老项目 `D:\MyAPP\TimeTrack` 只读：整个重建期间不修改（含 dist 产物、pubspec.lock），仅作参照

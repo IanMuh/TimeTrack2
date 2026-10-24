@@ -44,16 +44,19 @@ class TlSummaryStrip extends StatelessWidget {
               Text(' · ', style: TextStyle(color: scheme.outline)),
               const SizedBox(width: 2),
             ],
-            Text(items[i].$1,
-                style:
-                    TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+            Text(
+              items[i].$1,
+              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+            ),
             const SizedBox(width: 4),
-            TnumText(items[i].$2,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: scheme.onSurface,
-                )),
+            TnumText(
+              items[i].$2,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: scheme.onSurface,
+              ),
+            ),
           ],
         ],
       ),
@@ -197,8 +200,8 @@ class TlTimelineRow extends StatelessWidget {
     final gap = previous == null
         ? 0.0
         : entry.startAt.difference(previous!.startAt).inMinutes >= 120
-            ? 10.0
-            : 0.0;
+        ? 10.0
+        : 0.0;
 
     return InkWell(
       onTap: onTap,
@@ -226,7 +229,9 @@ class TlTimelineRow extends StatelessWidget {
                   TnumText(
                     formatHm(entry.durationUntil(now)),
                     style: TextStyle(
-                        fontSize: 11, color: scheme.onSurfaceVariant),
+                      fontSize: 11,
+                      color: scheme.onSurfaceVariant,
+                    ),
                   ),
                 ],
               ),
@@ -243,10 +248,7 @@ class TlTimelineRow extends StatelessWidget {
                     decoration: BoxDecoration(
                       color: color,
                       shape: BoxShape.circle,
-                      border: Border.all(
-                        color: scheme.surface,
-                        width: 2.5,
-                      ),
+                      border: Border.all(color: scheme.surface, width: 2.5),
                       boxShadow: [
                         BoxShadow(
                           color: color.withValues(alpha: 0.3),
@@ -335,11 +337,11 @@ class TlTimelineRow extends StatelessWidget {
   static Color _lighter(Color c) => _shift(c, 1.35);
 
   static Color _shift(Color c, double f) => Color.fromARGB(
-        255,
-        (c.r * 255.0 * f).round().clamp(0, 255),
-        (c.g * 255.0 * f).round().clamp(0, 255),
-        (c.b * 255.0 * f).round().clamp(0, 255),
-      );
+    255,
+    (c.r * 255.0 * f).round().clamp(0, 255),
+    (c.g * 255.0 * f).round().clamp(0, 255),
+    (c.b * 255.0 * f).round().clamp(0, 255),
+  );
 }
 
 class _Tag extends StatelessWidget {
@@ -377,8 +379,10 @@ class _Tag extends StatelessWidget {
                 child: Container(
                   width: 4,
                   height: 4,
-                  decoration:
-                      BoxDecoration(color: color, shape: BoxShape.circle),
+                  decoration: BoxDecoration(
+                    color: color,
+                    shape: BoxShape.circle,
+                  ),
                 ),
               ),
             ),
@@ -430,8 +434,7 @@ class TlStripTrack extends StatelessWidget {
       builder: (context, constraints) {
         final trackWidth = constraints.maxWidth * zoom;
         double dxOf(DateTime t) {
-          final m = t.difference(dayStart).inMinutes
-              .clamp(0, 24 * 60);
+          final m = t.difference(dayStart).inMinutes.clamp(0, 24 * 60);
           return m / totalMin * trackWidth;
         }
 
@@ -487,7 +490,8 @@ class TlStripTrack extends StatelessWidget {
                         now: now,
                         unassignedActivityId: unassignedActivityId,
                         onEntryTap: onEntryTap,
-                        showNow: seg ==
+                        showNow:
+                            seg ==
                             (now.hour * 60 + now.minute) ~/
                                 (24 * 60 ~/ segments),
                       ),
@@ -500,7 +504,6 @@ class TlStripTrack extends StatelessWidget {
       },
     );
   }
-
 
   /// 单段窄轨道（段内窗口 = 24h/segments；色块按全局时刻映射到段内）。
   List<Widget> _segmentRow(
@@ -580,10 +583,7 @@ class TlStripTrack extends StatelessWidget {
               left: localX(now),
               top: 0,
               bottom: 0,
-              child: Container(
-                width: 1.5,
-                color: const Color(0xfff43f5e),
-              ),
+              child: Container(width: 1.5, color: const Color(0xfff43f5e)),
             ),
           Positioned(
             left: 6,
@@ -592,7 +592,7 @@ class TlStripTrack extends StatelessWidget {
               segments > 6
                   ? (segStartMin ~/ 60).toString().padLeft(2, '0')
                   : '${(segStartMin ~/ 60).toString().padLeft(2, '0')}–'
-                      '${((segStartMin + winMin) ~/ 60).toString().padLeft(2, '0')}',
+                        '${((segStartMin + winMin) ~/ 60).toString().padLeft(2, '0')}',
               style: TextStyle(
                 fontSize: 10,
                 color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
@@ -605,18 +605,20 @@ class TlStripTrack extends StatelessWidget {
   }
 
   Widget _legend(String label, Color c) => Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 8,
-            height: 8,
-            decoration: BoxDecoration(color: c, shape: BoxShape.circle),
-          ),
-          const SizedBox(width: 4),
-          Text(label,
-              style: const TextStyle(fontSize: 10.5, color: Color(0xff71717a))),
-        ],
-      );
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Container(
+        width: 8,
+        height: 8,
+        decoration: BoxDecoration(color: c, shape: BoxShape.circle),
+      ),
+      const SizedBox(width: 4),
+      Text(
+        label,
+        style: const TextStyle(fontSize: 10.5, color: Color(0xff71717a)),
+      ),
+    ],
+  );
 }
 
 /// 条目列表行（全宽表格化：时刻+时长 | 色点+名+备注 | 徽标）。
@@ -661,7 +663,9 @@ class TlEntryListRow extends StatelessWidget {
                   TnumText(
                     formatHm(entry.durationUntil(now)),
                     style: TextStyle(
-                        fontSize: 11, color: scheme.onSurfaceVariant),
+                      fontSize: 11,
+                      color: scheme.onSurfaceVariant,
+                    ),
                   ),
                 ],
               ),
@@ -681,7 +685,9 @@ class TlEntryListRow extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                        fontSize: 13.5, fontWeight: FontWeight.w500),
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                   if (entry.note.isNotEmpty)
                     Text(
@@ -689,7 +695,9 @@ class TlEntryListRow extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                          fontSize: 11.5, color: scheme.onSurfaceVariant),
+                        fontSize: 11.5,
+                        color: scheme.onSurfaceVariant,
+                      ),
                     ),
                 ],
               ),
@@ -697,8 +705,11 @@ class TlEntryListRow extends StatelessWidget {
             if (entry.isAuto)
               Padding(
                 padding: const EdgeInsets.only(left: 6),
-                child: Icon(Icons.auto_awesome_rounded,
-                    size: 12, color: const Color(0xff0ea5e9)),
+                child: Icon(
+                  Icons.auto_awesome_rounded,
+                  size: 12,
+                  color: const Color(0xff0ea5e9),
+                ),
               ),
             if (entry.isRunning)
               Padding(
@@ -712,14 +723,19 @@ class TlEntryListRow extends StatelessWidget {
                       width: 6,
                       height: 6,
                       decoration: const BoxDecoration(
-                          color: Color(0xff6366f1), shape: BoxShape.circle),
+                        color: Color(0xff6366f1),
+                        shape: BoxShape.circle,
+                      ),
                     ),
                   ),
                 ),
               ),
             const SizedBox(width: 6),
-            Icon(Icons.chevron_right_rounded,
-                size: 16, color: scheme.onSurfaceVariant),
+            Icon(
+              Icons.chevron_right_rounded,
+              size: 16,
+              color: scheme.onSurfaceVariant,
+            ),
           ],
         ),
       ),
@@ -729,8 +745,14 @@ class TlEntryListRow extends StatelessWidget {
 
 /// 日志视图行：类型徽标 + 时间 + 消息 + 设备名。
 class TlLogRow extends StatelessWidget {
-  const TlLogRow({super.key, required this.typeLabel, required this.typeColor,
-      required this.occurredAt, required this.message, required this.deviceId});
+  const TlLogRow({
+    super.key,
+    required this.typeLabel,
+    required this.typeColor,
+    required this.occurredAt,
+    required this.message,
+    required this.deviceId,
+  });
 
   final String typeLabel;
   final Color typeColor;

@@ -10,7 +10,6 @@ import '../l10n/app_localizations.dart';
 import '../providers/data.dart';
 import '../providers/engines.dart';
 import '../providers/foundation.dart';
-import '../stores/app_store.dart';
 import '../stores/category_store.dart';
 import '../stores/settings_store.dart';
 import '../utils/day_metrics.dart' show formatHm;
@@ -24,16 +23,13 @@ import 'stats_widgets.dart';
 /// 批次 5b 已收口：分类筛选与"排除自动条目"经 compute 参数在仓储切片层
 /// 生效（聚合行/环形图/明细同口径）；页内仅保留明细条目列表的等价过滤。
 class StatsPage extends ConsumerStatefulWidget {
-  const StatsPage({super.key, required this.app});
-
-  final AppStore app;
+  const StatsPage({super.key});
 
   @override
   ConsumerState<StatsPage> createState() => _StatsPageState();
 }
 
 class _StatsPageState extends ConsumerState<StatsPage> {
-  AppStore get app => widget.app;
   AppLocalizations get l10n => AppLocalizations.of(context)!;
 
   int _rangeIndex = 0; // 今天/昨天/本周/上周/自定义
@@ -69,10 +65,7 @@ class _StatsPageState extends ConsumerState<StatsPage> {
       case 0:
         return (today, today.add(const Duration(days: 1)));
       case 1:
-        return (
-          today.subtract(const Duration(days: 1)),
-          today,
-        );
+        return (today.subtract(const Duration(days: 1)), today);
       case 2:
         return (
           today.subtract(Duration(days: weekDay)),
@@ -329,8 +322,10 @@ class _StatsPageState extends ConsumerState<StatsPage> {
             GestureDetector(
               onTap: () => onSelect(i),
               child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 5,
+                ),
                 decoration: BoxDecoration(
                   color: i == selected ? scheme.surface : Colors.transparent,
                   borderRadius: BorderRadius.circular(6),
@@ -339,7 +334,9 @@ class _StatsPageState extends ConsumerState<StatsPage> {
                   options[i],
                   style: TextStyle(
                     fontSize: 12,
-                    fontWeight: i == selected ? FontWeight.w600 : FontWeight.w500,
+                    fontWeight: i == selected
+                        ? FontWeight.w600
+                        : FontWeight.w500,
                     color: i == selected
                         ? scheme.onSurface
                         : scheme.onSurfaceVariant,
@@ -370,7 +367,7 @@ class _StatsPageState extends ConsumerState<StatsPage> {
           _selectedCategories.contains(id)
               ? _selectedCategories.remove(id)
               : _selectedCategories.add(id);
-              }),
+        }),
         onToggleExpand: (id) => setState(() {
           _treeExpanded.contains(id)
               ? _treeExpanded.remove(id)
@@ -378,10 +375,10 @@ class _StatsPageState extends ConsumerState<StatsPage> {
         }),
         onAll: () => setState(() {
           _selectedCategories.addAll(_categories.all.map((c) => c.id));
-              }),
+        }),
         onNone: () => setState(() {
           _selectedCategories.clear();
-              }),
+        }),
       ),
     );
   }
@@ -438,7 +435,7 @@ class _StatsPageState extends ConsumerState<StatsPage> {
                 _ => StatsDimension.primaryCategoryAndDurationBucket,
               };
             });
-                  },
+          },
         ),
         const SizedBox(height: 8),
         // 排除自动条目开关（compute 下沉后聚合行/图表/明细同口径，批次 5b）。
@@ -448,7 +445,7 @@ class _StatsPageState extends ConsumerState<StatsPage> {
               value: _excludeAuto,
               onChanged: (v) {
                 setState(() => _excludeAuto = v);
-                          },
+              },
               label: l10n.stExcludeAuto,
             ),
           ],
@@ -468,14 +465,22 @@ class _StatsPageState extends ConsumerState<StatsPage> {
         ..._buildRows(snapshot, scheme),
         const SizedBox(height: 18),
         // 图表区。
-        _card(scheme, l10n.stDailyChart, StDailyBarChart(
-          days: _byDay.keys.toList()..sort(),
-          values: [
-            for (final d in (_byDay.keys.toList()..sort())) _byDay[d]!,
-          ],
-        )),
+        _card(
+          scheme,
+          l10n.stDailyChart,
+          StDailyBarChart(
+            days: _byDay.keys.toList()..sort(),
+            values: [
+              for (final d in (_byDay.keys.toList()..sort())) _byDay[d]!,
+            ],
+          ),
+        ),
         const SizedBox(height: 14),
-        _card(scheme, l10n.stShareChart, StSharePieChart(slices: _slices(snapshot))),
+        _card(
+          scheme,
+          l10n.stShareChart,
+          StSharePieChart(slices: _slices(snapshot)),
+        ),
         const SizedBox(height: 14),
         _buildDailyDetail(scheme),
       ],
@@ -491,23 +496,25 @@ class _StatsPageState extends ConsumerState<StatsPage> {
     for (final row in rows) {
       final hidden = row.ancestorIds.any(collapsedAncestors.contains);
       if (hidden) continue;
-      out.add(StTreeRow(
-        row: row,
-        totalDuration: snapshot.totalDuration,
-        collapsed: _treeExpanded.contains('row:${row.id}'),
-        onToggle: () => setState(() {
-          final key = 'row:${row.id}';
-          _treeExpanded.contains(key)
-              ? _treeExpanded.remove(key)
-              : _treeExpanded.add(key);
-          collapsedAncestors.clear();
-          for (final r in rows) {
-            if (_treeExpanded.contains('row:${r.id}')) {
-              collapsedAncestors.add(r.id);
+      out.add(
+        StTreeRow(
+          row: row,
+          totalDuration: snapshot.totalDuration,
+          collapsed: _treeExpanded.contains('row:${row.id}'),
+          onToggle: () => setState(() {
+            final key = 'row:${row.id}';
+            _treeExpanded.contains(key)
+                ? _treeExpanded.remove(key)
+                : _treeExpanded.add(key);
+            collapsedAncestors.clear();
+            for (final r in rows) {
+              if (_treeExpanded.contains('row:${r.id}')) {
+                collapsedAncestors.add(r.id);
+              }
             }
-          }
-        }),
-      ));
+          }),
+        ),
+      );
       if (_treeExpanded.contains('row:${row.id}')) {
         collapsedAncestors.add(row.id);
       }
@@ -546,9 +553,10 @@ class _StatsPageState extends ConsumerState<StatsPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title,
-              style:
-                  const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+          Text(
+            title,
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+          ),
           const SizedBox(height: 10),
           child,
         ],
@@ -572,15 +580,15 @@ class _StatsPageState extends ConsumerState<StatsPage> {
                   TnumText(
                     '${d.month}/${d.day}',
                     style: TextStyle(
-                        fontSize: 12, color: scheme.onSurfaceVariant),
+                      fontSize: 12,
+                      color: scheme.onSurfaceVariant,
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: ActivityColorBar2(
                       const Color(0xff4f46e5),
-                      ratio: total == 0
-                          ? 0.0
-                          : _byDay[d]!.inMinutes / total,
+                      ratio: total == 0 ? 0.0 : _byDay[d]!.inMinutes / total,
                     ),
                   ),
                   const SizedBox(width: 10),
