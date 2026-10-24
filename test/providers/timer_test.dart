@@ -53,3 +53,4 @@ void main() {
     expect(container.read(timerSnapshotProvider).entryId, isNotNull);
   });
 }
+

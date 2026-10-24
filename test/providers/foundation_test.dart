@@ -1,4 +1,4 @@
-/// 基础 provider（B1）：时钟 tick/当前日、修订号镜像、撤销状态镜像。
+﻿/// 基础 provider（B1）：时钟 tick/当前日、修订号镜像、撤销状态镜像。
 library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -112,3 +112,4 @@ void main() {
     });
   });
 }
+

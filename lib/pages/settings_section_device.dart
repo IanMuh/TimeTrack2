@@ -1,4 +1,4 @@
-/// 设置分区实现 ④：备份与导出（含清除全部数据危险区）+ 设备互通
+﻿/// 设置分区实现 ④：备份与导出（含清除全部数据危险区）+ 设备互通
 ///（LAN 主机/客户端/文件互通，契约 §4.5）。
 ///
 /// 导出/导入走指令通道（export/import——铁律 7，dispatcher 内处理设备 id
@@ -11,6 +11,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../l10n/app_localizations.dart';
 import '../providers/data.dart';
+import '../providers/bootstrap.dart';
 import '../providers/engines.dart';
 import '../providers/services.dart';
 import '../providers/foundation.dart';
@@ -215,7 +216,7 @@ class _DeviceSectionState extends ConsumerState<DeviceSection> {
     return Consumer(
       builder: (context, ref, _) {
         ref.watch(lanChangeProvider);
-        final lan = ref.read(appStoreInstanceProvider).lan;
+        final lan = ref.read(lanStoreProvider);
         return SettingsSectionCard(
           key: const ValueKey('sec-device'),
           icon: Icons.devices_outlined,
@@ -615,3 +616,6 @@ class _LanClientCard extends StatelessWidget {
     await lan.pairClient(host: hostController.text, code: codeController.text);
   }
 }
+
+
+

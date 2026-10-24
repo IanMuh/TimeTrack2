@@ -1,4 +1,4 @@
-import 'package:flutter_test/flutter_test.dart';
+﻿import 'package:flutter_test/flutter_test.dart';
 import 'package:timetrack2/providers/data.dart';
 import 'package:timetrack2/providers/foundation.dart';
 import 'package:timetrack2/utils/date_time_ext.dart';
@@ -6,7 +6,7 @@ import 'package:timetrack2/utils/date_time_ext.dart';
 import '../support/provider_harness.dart';
 
 void main() {
-  // AppStore 装配 TrayService（批次 6）：MethodChannel 处理器注册需要 Binding。
+  // TestStore 装配 TrayService（批次 6）：MethodChannel 处理器注册需要 Binding。
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('数据查询 provider（Riverpod B2）', () {
@@ -90,3 +90,4 @@ void main() {
     });
   });
 }
+

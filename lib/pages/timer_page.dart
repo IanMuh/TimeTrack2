@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,6 +8,7 @@ import '../components/feedback.dart';
 import '../components/state_views.dart';
 import '../constants/theme_tokens.dart' show ActivityPalette;
 import '../l10n/app_localizations.dart';
+import '../providers/bootstrap.dart';
 import '../providers/data.dart';
 import '../providers/engines.dart';
 import '../providers/foundation.dart';
@@ -427,3 +428,4 @@ class _TimerPageState extends ConsumerState<TimerPage> {
     _switchTo(activity);
   }
 }
+

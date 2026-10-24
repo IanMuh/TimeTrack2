@@ -1,4 +1,4 @@
-/// 设置分区实现 ③：后台记录（平台卡 + 总开关 + 规则列表/表单，契约 §6.2）。
+﻿/// 设置分区实现 ③：后台记录（平台卡 + 总开关 + 规则列表/表单，契约 §6.2）。
 ///
 /// 规则 CRUD 经指令通道（tracking_rule_create/update/delete）——铁律 7；
 /// 总开关写 ProfileSettings（SettingsStore）；平台卡按平台分派：
@@ -18,6 +18,7 @@ import '../api/platform/windows_foreground_detector.dart'
 import '../components/activity_picker/activity_picker.dart';
 import '../l10n/app_localizations.dart';
 import '../providers/data.dart';
+import '../providers/bootstrap.dart';
 import '../providers/engines.dart';
 import '../providers/services.dart';
 import '../stores/tracking_store.dart' show NoopForegroundDetector;
@@ -984,3 +985,4 @@ class _KindRadio extends StatelessWidget {
     );
   }
 }
+

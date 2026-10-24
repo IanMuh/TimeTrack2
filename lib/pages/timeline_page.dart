@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../components/activity_picker/activity_picker.dart';
@@ -7,6 +7,7 @@ import '../components/feedback.dart';
 import '../components/state_views.dart';
 import '../components/tnum_text.dart';
 import '../l10n/app_localizations.dart';
+import '../providers/bootstrap.dart';
 import '../providers/data.dart';
 import '../providers/engines.dart';
 import '../providers/foundation.dart';
@@ -639,3 +640,4 @@ class _TimelinePageState extends ConsumerState<TimelinePage> {
     _ => const Color(0xff71717a),
   };
 }
+

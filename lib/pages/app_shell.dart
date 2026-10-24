@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -12,6 +12,7 @@ import '../api/platform/tray_service.dart';
 import '../providers/data.dart';
 import '../providers/foundation.dart';
 import '../providers/services.dart';
+import '../providers/bootstrap.dart';
 import '../providers/engines.dart';
 import '../stores/reminder_store.dart';
 import '../stores/update_store.dart' show UpdateState;
@@ -1313,7 +1314,7 @@ class _SyncStatusText extends StatelessWidget {
     return Consumer(
       builder: (context, ref, _) {
         ref.watch(syncChangeProvider);
-        final sync = ref.read(appStoreInstanceProvider).sync;
+        final sync = ref.read(syncStoreProvider);
         final l10n = AppLocalizations.of(context)!;
         final String label;
         if (sync.syncing) {
@@ -1347,3 +1348,5 @@ class _SyncStatusText extends StatelessWidget {
     );
   }
 }
+
+

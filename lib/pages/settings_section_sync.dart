@@ -1,10 +1,11 @@
-/// 设置分区实现 ②：云同步（登录/登出/摘要/立即同步）+ AI 配置二期占位。
+﻿/// 设置分区实现 ②：云同步（登录/登出/摘要/立即同步）+ AI 配置二期占位。
 library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../l10n/app_localizations.dart';
+import '../providers/bootstrap.dart';
 import '../providers/engines.dart';
 import '../utils/result.dart';
 import '../viewmodels/commands/command_invocation.dart';
@@ -21,7 +22,7 @@ class SyncSection extends ConsumerWidget {
     return Consumer(
       builder: (context, ref, _) {
         ref.watch(syncChangeProvider);
-        final sync = ref.read(appStoreInstanceProvider).sync;
+        final sync = ref.read(syncStoreProvider);
         return SettingsSectionCard(
           key: const ValueKey('sec-sync'),
           icon: Icons.cloud_outlined,
@@ -526,3 +527,6 @@ class AiSection extends StatelessWidget {
     );
   }
 }
+
+
+

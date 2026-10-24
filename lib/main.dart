@@ -3,37 +3,27 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app.dart';
-import 'providers/app.dart';
-import 'providers/engines.dart';
-import 'stores/app_store.dart';
+import 'providers/bootstrap.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Riverpod 容器是状态层的唯一实例源。启动期先 await 装配完成再 runApp，
-  // 保持“数据库不可用 → 错误页”的既有启动语义（启动期不引入加载屏，
+  // Riverpod 容器是状态层的唯一实例源。启动期先 await 装配/编排完成再
+  // runApp，保持“数据库不可用 → 错误页”的既有启动语义（启动期不引入加载屏，
   // 避免启动顺序与错误兜底行为发生变化）。
-  //
-  // B4a：壳层经 `appStoreInstanceProvider` 订阅物理引擎状态。实例在装配完成前
-  // 不可读（容器内镜像 provider 只在 runApp 后才会被 widget watch），这里用
-  // late 变量做一次性绑定，避免“先有 store 才有容器”的循环装配。
-  late AppStore bootStore;
-  final container = ProviderContainer(
-    overrides: [appStoreInstanceProvider.overrideWith((ref) => bootStore)],
-  );
+  final container = ProviderContainer();
   try {
-    final appStore = await container.read(appStoreProvider.future);
-    bootStore = appStore;
+    await container.read(startupProvider.future);
     // 路由/壳层经 TimeTrack2App 的 container 参数接入同一容器
     // （UncontrolledProviderScope 由根组件内部安装）。
-    runApp(TimeTrack2App(appStore: appStore, container: container));
+    runApp(TimeTrack2App(container: container));
   } catch (e, st) {
     // 启动失败兜底（模块门禁 medium）：数据库损坏/迁移异常不得静默空白窗口
     // ——输出可诊断日志（含堆栈）后渲染错误页。
     // debug 下对非预期 Error（编程缺陷）rethrow 暴露真实 bug；预期的
     // 数据库异常（损坏/迁移）走错误页兜底。
     debugPrint('应用启动失败：$e\n$st');
-    // 失败时释放容器：关闭数据库连接、释放装配过程中已创建的 store。
+    // 失败时释放容器：关闭数据库连接、释放装配过程中已创建的引擎。
     container.dispose();
     if (kDebugMode && e is Error) rethrow;
     runApp(const _StartupErrorApp());

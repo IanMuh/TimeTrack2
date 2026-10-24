@@ -1,10 +1,11 @@
-/// 设置分区实现 ⑤：版本更新（状态机全态卡，契约 §7）+ 关于。
+﻿/// 设置分区实现 ⑤：版本更新（状态机全态卡，契约 §7）+ 关于。
 library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../l10n/app_localizations.dart';
+import '../providers/bootstrap.dart';
 import '../providers/engines.dart';
 import '../providers/services.dart';
 import '../stores/update_store.dart';
@@ -21,7 +22,7 @@ class UpdateSection extends ConsumerWidget {
     return Consumer(
       builder: (context, ref, _) {
         ref.watch(updateChangeProvider);
-        final status = ref.read(appStoreInstanceProvider).update.status;
+        final status = ref.read(updateStoreProvider).status;
         return SettingsSectionCard(
           key: const ValueKey('sec-update'),
           icon: Icons.system_update_alt_outlined,
@@ -458,3 +459,6 @@ class AboutSection extends ConsumerWidget {
     );
   }
 }
+
+
+

@@ -28,8 +28,12 @@ final clockIntervalProvider = Provider<Duration>(
 ///
 /// 存量 store 通过构造注入持有它；新代码改用 [clockTickProvider] /
 /// [currentDayProvider]。
+/// 是否自动启动 1Hz Timer（测试覆盖为 false，避免 fake async 里残留定时器）。
+final clockAutoStartProvider = Provider<bool>((ref) => true);
+
 final clockStoreProvider = Provider<ClockStore>((ref) {
   final clock = ClockStore(
+    autoStart: ref.watch(clockAutoStartProvider),
     interval: ref.watch(clockIntervalProvider),
     now: ref.watch(nowProvider),
   );
@@ -152,4 +156,6 @@ class UndoStateNotifier extends Notifier<UndoState> {
         lastRedoLabel: undo.lastRedoLabel,
       );
 }
+
+
 
