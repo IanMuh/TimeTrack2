@@ -140,8 +140,10 @@ class TimerStore {
   final List<void Function()> _changeListeners = [];
 
   /// 变更监听（PR4-b：去 `ChangeNotifier` 后的最小观察者表）。
-  /// 计时快照与 	imerChangeProvider 各自挂一条，生命周期由 provider 管。
+  /// 计时快照与 timerChangeProvider 各自挂一条，生命周期由 provider 管；
+  /// 同引用重复挂载幂等（单槽天然幂等，观察者表须显式去重）。
   void addChangeListener(void Function() listener) {
+    if (_changeListeners.contains(listener)) return;
     _changeListeners.add(listener);
   }
 

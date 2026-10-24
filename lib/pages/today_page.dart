@@ -65,7 +65,7 @@ class _TodayPageState extends ConsumerState<TodayPage> {
       firstDate: DateTime.now().subtract(const Duration(days: 365 * 3)),
       lastDate: DateTime.now().add(const Duration(days: 365)),
     );
-    if (picked != null) _changeDay(picked);
+    if (picked != null && mounted) _changeDay(picked);
   }
 
   // ---------------------------------------------------------------------------

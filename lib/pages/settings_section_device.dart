@@ -160,7 +160,18 @@ class BackupSection extends ConsumerWidget {
 
   Future<void> _wipe(BuildContext context, WidgetRef ref) async {
     final l10n = AppLocalizations.of(context)!;
-    final result = await ref.read(dataWipeServiceProvider).wipeAll();
+    // ref.read 全部收在首个 await 之前（审查 low 加固）：await 之后只用已
+    // 捕获的句柄，卸载竞态下不会抛 "ref after disposed"、也不会中断重载链。
+    final wipeService = ref.read(dataWipeServiceProvider);
+    final activityRepository = ref.read(activityRepositoryProvider);
+    final categoryStore = ref.read(categoryStoreProvider);
+    final settingsStore = ref.read(settingsStoreProvider);
+    final timerStore = ref.read(timerStoreProvider);
+    final trackingStore = ref.read(trackingStoreProvider);
+    final lanStore = ref.read(lanStoreProvider);
+    final revision = ref.read(dataRevisionProvider.notifier);
+    final undoStore = ref.read(undoStoreProvider);
+    final result = await wipeService.wipeAll();
     if (!context.mounted) return;
     final messenger = ScaffoldMessenger.of(context)..hideCurrentSnackBar();
     if (result case AppFailure<int> _) {
@@ -168,16 +179,16 @@ class BackupSection extends ConsumerWidget {
       return;
     }
     // 全量重载：数据已空，各 store 缓存必须失效（含 seed 默认活动重建）。
-    await ref.read(activityRepositoryProvider).seedActivities();
-    await ref.read(categoryStoreProvider).reload();
-    await ref.read(settingsStoreProvider).reload();
-    await ref.read(timerStoreProvider).refresh();
-    await ref.read(trackingStoreProvider).reloadRules();
-    await ref.read(lanStoreProvider).reloadPeer(); // sync_peers 已清空，内存配对态同步失效
+    await activityRepository.seedActivities();
+    await categoryStore.reload();
+    await settingsStore.reload();
+    await timerStore.refresh();
+    await trackingStore.reloadRules();
+    await lanStore.reloadPeer(); // sync_peers 已清空，内存配对态同步失效
     // 时间线/统计页监听 dataRevision 自动失效缓存（bump 即全页一致）。
-    ref.read(dataRevisionProvider.notifier).bump();
+    revision.bump();
     // 撤销/重做历史指向已物理删除的数据——清空防"可撤销"语义失真。
-    ref.read(undoStoreProvider).clear();
+    undoStore.clear();
     if (!context.mounted) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()

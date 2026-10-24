@@ -194,7 +194,7 @@ class _TimelinePageState extends ConsumerState<TimelinePage> {
         // showDialog 返回前先让用户选完：这里简化为直接打开选择器并
         // await 完成后关闭编辑器重新打开（数据流简单可靠）。
         final picked = await _pickActivity();
-        if (picked != null) {
+        if (picked != null && mounted) {
           setState(() => selected = picked);
         }
       },

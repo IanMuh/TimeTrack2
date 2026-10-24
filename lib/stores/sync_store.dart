@@ -218,6 +218,12 @@ class SyncStore implements SyncNowProvider {
     DateTime? cursorOverride,
     String? userId,
   }) async {
+    // dispose 后拒入（审查 low 修复）：启动失败路径容器先行 dispose 关库，
+    // 在途/测试 teardown 竞态下不应再查 _cleanupDue（防访问已关闭数据库；
+    // 与 _onAuthChanged 首行守卫、UpdateStore._closed 模式一致）。
+    if (_disposed) {
+      return const AppFailure('同步服务已关闭');
+    }
     // 抢占互斥（await 前同步置位）：防 _cleanupDue 查询期间另一路调用
     //（同步成功 fire-and-forget 与 AppStore 启动清理并发）同时通过检查
     // 重复进入清理（TOCTOU——模块门禁 medium）。统一 try/finally 释放。
