@@ -4,8 +4,10 @@ import 'package:go_router/go_router.dart';
 
 import '../components/controls.dart' show AppToggle;
 import '../components/feedback.dart';
+import '../components/page_frame.dart';
 import '../components/state_views.dart';
 import '../components/tnum_text.dart';
+import '../constants/layout.dart';
 import '../l10n/app_localizations.dart';
 import '../providers/data.dart';
 import '../providers/engines.dart';
@@ -188,7 +190,7 @@ class _StatsPageState extends ConsumerState<StatsPage> {
                 ),
       ],
     );
-    return body;
+    return PageFrame(maxWidth: AppContentWidth.stats, child: body);
   }
 
   Widget _buildToolbar(ColorScheme scheme) {

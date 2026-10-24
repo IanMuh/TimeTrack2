@@ -317,6 +317,13 @@ slicesForRange/computeDayMetrics）+ 自然语言→指令解析。
   启用披露数据出境 + Ollama 本地选项）——设计输入见 `docs/AI总结数据需求与模板.md`
 - 实现前先报要点，确认后开工
 
+## UI 重建（进行中，2026-10-24 起）
+
+方案见 `docs/UI重建方案.md`（已确认：计时页紧凑分组列表、设置路由化主从、设置 10 项扁平导航）。
+
+- **PR-A（feat/ui-rebuild-foundation）**：新增布局令牌 `lib/constants/layout.dart`（断点 600/840/1280、内容宽 timer 1440·today 1120·stats 1440·settings 1280·form 760）、`lib/components/page_frame.dart`；壳层去掉全壳统一 1024 限宽，内容宽度由各页面声明；计时/今日/统计/设置页包 `PageFrame`；Windows 窗口最小尺寸 960×640（`WM_GETMINMAXINFO`）；`test/components/page_frame_test.dart` 3 例。验收：analyze 0 / 全部测试绿。
+- 后续：PR-B 计时页（焦点区压缩 + 分组列表 + 自适应列）、PR-C 统计页（两栏 + 响应式图表 + 分类树表）、PR-D 设置路由化主从 + 撤销/重做改版。
+
 ## 关键约定（实现勿破坏）
 
 - 三通道（云/LAN/文件）统一行级 LWW：`updated_at` 比较，删除=软删行推进 updated_at 传播（无独立删除列表）

@@ -187,6 +187,17 @@ Win32Window::MessageHandler(HWND hwnd,
       }
       return 0;
 
+    case WM_GETMINMAXINFO: {
+      // 最小窗口尺寸 960x640（逻辑像素，按 DPI 缩放）：低于该尺寸时
+      // 多列布局与设置主从布局都无法保持可用宽度（见 docs/UI重建方案.md）。
+      auto* info = reinterpret_cast<MINMAXINFO*>(lparam);
+      const double scale_factor =
+          FlutterDesktopGetDpiForHWND(hwnd) / 96.0;
+      info->ptMinTrackSize.x = Scale(960, scale_factor);
+      info->ptMinTrackSize.y = Scale(640, scale_factor);
+      return 0;
+    }
+
     case WM_DPICHANGED: {
       auto newRectSize = reinterpret_cast<RECT*>(lparam);
       LONG newWidth = newRectSize->right - newRectSize->left;

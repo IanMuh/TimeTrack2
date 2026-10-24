@@ -5,8 +5,10 @@ import 'package:intl/intl.dart';
 
 import '../components/activity_color_dot.dart';
 import '../components/controls.dart' show AppChip;
+import '../components/page_frame.dart';
 import '../components/state_views.dart';
 import '../components/tnum_text.dart';
+import '../constants/layout.dart';
 import '../l10n/app_localizations.dart';
 import '../providers/data.dart';
 import '../providers/engines.dart';
@@ -211,31 +213,34 @@ class _TodayPageState extends ConsumerState<TodayPage> {
     final previousEntries = previousAsync.value;
 
     if (entries.isEmpty) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _TodayHeader(
-            l10n: l10n,
-            day: day,
-            isToday: isToday,
-            onPrev: () => _changeDay(day.subtract(const Duration(days: 1))),
-            onNext: () => _changeDay(day.add(const Duration(days: 1))),
-            onPick: _pickDate,
-            onToday: _backToToday,
-          ),
-          Expanded(
-            child: EmptyStateView(
-              icon: Icons.event_available_outlined,
-              title: isToday ? l10n.emptyDayEntries : l10n.todayEmptyDay,
-              message: l10n.startRecordingHint,
-              actionLabel: isToday ? l10n.todayStartRecording : null,
-              onAction: isToday ? () => context.go('/timer') : null,
+      return PageFrame(
+        maxWidth: AppContentWidth.today,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _TodayHeader(
+              l10n: l10n,
+              day: day,
+              isToday: isToday,
+              onPrev: () => _changeDay(day.subtract(const Duration(days: 1))),
+              onNext: () => _changeDay(day.add(const Duration(days: 1))),
+              onPick: _pickDate,
+              onToday: _backToToday,
             ),
-          ),
-        ],
+            Expanded(
+              child: EmptyStateView(
+                icon: Icons.event_available_outlined,
+                title: isToday ? l10n.emptyDayEntries : l10n.todayEmptyDay,
+                message: l10n.startRecordingHint,
+                actionLabel: isToday ? l10n.todayStartRecording : null,
+                onAction: isToday ? () => context.go('/timer') : null,
+              ),
+            ),
+          ],
+        ),
       );
     }
-    final wide = MediaQuery.sizeOf(context).width >= 840;
+    final wide = MediaQuery.sizeOf(context).width >= AppBreakpoints.expanded;
     final metrics = _metrics(entries, now, unassignedId);
     final prevMetrics = previousEntries == null
         ? null
@@ -274,25 +279,30 @@ class _TodayPageState extends ConsumerState<TodayPage> {
       ],
     );
 
-    if (!wide) return content;
+    if (!wide) {
+      return PageFrame(maxWidth: AppContentWidth.today, child: content);
+    }
 
     final previewEntries = entries.where(_filterPass).toList()
       ..sort((a, b) => a.startAt.compareTo(b.startAt));
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(child: content),
-        const SizedBox(width: 20),
-        SizedBox(
-          width: 320,
-          child: _TimelinePreview(
-            l10n: l10n,
-            entries: previewEntries,
-            use24: _settings.current?.use24HourFormat ?? true,
-            entryCount: previewEntries.length,
+    return PageFrame(
+      maxWidth: AppContentWidth.today,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(child: content),
+          const SizedBox(width: 20),
+          SizedBox(
+            width: 320,
+            child: _TimelinePreview(
+              l10n: l10n,
+              entries: previewEntries,
+              use24: _settings.current?.use24HourFormat ?? true,
+              entryCount: previewEntries.length,
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 

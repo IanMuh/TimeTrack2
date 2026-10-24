@@ -7,6 +7,8 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../components/page_frame.dart';
+import '../constants/layout.dart';
 import '../l10n/app_localizations.dart';
 import 'settings_section_background.dart';
 import 'settings_section_device.dart';
@@ -38,34 +40,37 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final wide = MediaQuery.sizeOf(context).width >= 840;
+    final wide = MediaQuery.sizeOf(context).width >= AppBreakpoints.expanded;
     final sections = _sections;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(24, 20, 24, 4),
-          child: Text(
-            l10n.navSettings,
-            style: Theme.of(context).textTheme.headlineSmall,
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
-          child: Text(
-            l10n.settingsInstantHint,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
+    return PageFrame(
+      maxWidth: AppContentWidth.settings,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 20, 24, 4),
+            child: Text(
+              l10n.navSettings,
+              style: Theme.of(context).textTheme.headlineSmall,
             ),
           ),
-        ),
-        const SizedBox(height: 12),
-        Expanded(
-          child: wide
-              ? _WideLayout(sections: sections)
-              : _CompactLayout(sections: sections),
-        ),
-      ],
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Text(
+              l10n.settingsInstantHint,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Expanded(
+            child: wide
+                ? _WideLayout(sections: sections)
+                : _CompactLayout(sections: sections),
+          ),
+        ],
+      ),
     );
   }
 }

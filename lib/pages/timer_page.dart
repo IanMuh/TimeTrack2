@@ -5,7 +5,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../components/activity_picker/activity_picker.dart';
 import '../components/feedback.dart';
+import '../components/page_frame.dart';
 import '../components/state_views.dart';
+import '../constants/layout.dart';
 import '../constants/theme_tokens.dart' show ActivityPalette;
 import '../l10n/app_localizations.dart';
 import '../providers/bootstrap.dart';
@@ -354,7 +356,7 @@ class _TimerPageState extends ConsumerState<TimerPage> {
         quick,
       ],
     );
-    return content;
+    return PageFrame(maxWidth: AppContentWidth.timer, child: content);
   }
 
   String? _pathOfActivity(String? activityId) {
@@ -428,4 +430,3 @@ class _TimerPageState extends ConsumerState<TimerPage> {
     _switchTo(activity);
   }
 }
-
