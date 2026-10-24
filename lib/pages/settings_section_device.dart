@@ -1,4 +1,4 @@
-﻿/// 设置分区实现 ④：备份与导出（含清除全部数据危险区）+ 设备互通
+/// 设置分区实现 ④：备份与导出（含清除全部数据危险区）+ 设备互通
 ///（LAN 主机/客户端/文件互通，契约 §4.5）。
 ///
 /// 导出/导入走指令通道（export/import——铁律 7，dispatcher 内处理设备 id
@@ -12,6 +12,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../l10n/app_localizations.dart';
 import '../providers/data.dart';
 import '../providers/engines.dart';
+import '../providers/services.dart';
 import '../providers/foundation.dart';
 import '../stores/app_store.dart';
 import '../stores/lan_store.dart';
@@ -66,7 +67,8 @@ class BackupSection extends ConsumerWidget {
 
   Future<void> _export(BuildContext context, WidgetRef ref) async {
     final l10n = AppLocalizations.of(context)!;
-    final result = await ref.read(commandDispatcherProvider)
+    final result = await ref
+        .read(commandDispatcherProvider)
         .dispatch(CommandInvocation(name: 'export'));
     if (!context.mounted) return;
     final messenger = ScaffoldMessenger.of(context)..hideCurrentSnackBar();
@@ -74,8 +76,7 @@ class BackupSection extends ConsumerWidget {
       case CommandSuccess success:
         messenger.showSnackBar(
           SnackBar(
-            content:
-                Text(l10n.settingsExportDone(success.message ?? '')),
+            content: Text(l10n.settingsExportDone(success.message ?? '')),
           ),
         );
       case CommandFailure failure:
@@ -90,14 +91,17 @@ class BackupSection extends ConsumerWidget {
 
   Future<void> _import(BuildContext context, WidgetRef ref) async {
     final l10n = AppLocalizations.of(context)!;
-    final result = await ref.read(commandDispatcherProvider)
+    final result = await ref
+        .read(commandDispatcherProvider)
         .dispatch(CommandInvocation(name: 'import'));
     if (!context.mounted) return;
     final messenger = ScaffoldMessenger.of(context)..hideCurrentSnackBar();
     switch (result) {
       case CommandSuccess success:
-        final count = int.tryParse(
-                RegExp(r'\d+').stringMatch(success.message ?? '') ?? '') ??
+        final count =
+            int.tryParse(
+              RegExp(r'\d+').stringMatch(success.message ?? '') ?? '',
+            ) ??
             0;
         messenger.showSnackBar(
           SnackBar(content: Text(l10n.settingsImportDone(count))),
@@ -118,8 +122,10 @@ class BackupSection extends ConsumerWidget {
       context: context,
       builder: (dialogContext) => AlertDialog(
         key: const ValueKey('wipe-dialog'),
-        icon: Icon(Icons.warning_amber_rounded,
-            color: Theme.of(context).colorScheme.error),
+        icon: Icon(
+          Icons.warning_amber_rounded,
+          color: Theme.of(context).colorScheme.error,
+        ),
         title: Text(l10n.settingsWipeDialogTitle),
         content: Text(l10n.settingsWipeDialogBody),
         actions: [
@@ -156,13 +162,11 @@ class BackupSection extends ConsumerWidget {
 
   Future<void> _wipe(BuildContext context, WidgetRef ref) async {
     final l10n = AppLocalizations.of(context)!;
-    final result = await app.wipe.wipeAll();
+    final result = await ref.read(dataWipeServiceProvider).wipeAll();
     if (!context.mounted) return;
     final messenger = ScaffoldMessenger.of(context)..hideCurrentSnackBar();
     if (result case AppFailure<int> _) {
-      messenger.showSnackBar(
-        SnackBar(content: Text(l10n.settingsWipeFailed)),
-      );
+      messenger.showSnackBar(SnackBar(content: Text(l10n.settingsWipeFailed)));
       return;
     }
     // 全量重载：数据已空，各 store 缓存必须失效（含 seed 默认活动重建）。
@@ -173,7 +177,7 @@ class BackupSection extends ConsumerWidget {
     await ref.read(trackingStoreProvider).reloadRules();
     await ref.read(lanStoreProvider).reloadPeer(); // sync_peers 已清空，内存配对态同步失效
     // 时间线/统计页监听 dataRevision 自动失效缓存（bump 即全页一致）。
-    app.dataRevision.bump();
+    ref.read(dataRevisionProvider.notifier).bump();
     // 撤销/重做历史指向已物理删除的数据——清空防"可撤销"语义失真。
     ref.read(undoStoreProvider).clear();
     if (!context.mounted) return;
@@ -239,15 +243,16 @@ class _DeviceSectionState extends ConsumerState<DeviceSection> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(l10n.settingsLanFileInterop,
-                          style: Theme.of(context).textTheme.bodyMedium),
+                      Text(
+                        l10n.settingsLanFileInterop,
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
                       const SizedBox(height: 2),
                       Text(
                         l10n.settingsLanFileInteropHint,
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color:
-                                  Theme.of(context).colorScheme.onSurfaceVariant,
-                            ),
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
                       ),
                     ],
                   ),
@@ -268,17 +273,18 @@ class _DeviceSectionState extends ConsumerState<DeviceSection> {
             const SizedBox(height: 12),
             Row(
               children: [
-                Icon(Icons.info_outline,
-                    size: 14,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant),
+                Icon(
+                  Icons.info_outline,
+                  size: 14,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
                     l10n.settingsLanManualOnly,
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color:
-                              Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 ),
               ],
@@ -301,26 +307,33 @@ class _DeviceSectionState extends ConsumerState<DeviceSection> {
 
   Future<void> _export(BuildContext context, WidgetRef ref) async {
     final l10n = AppLocalizations.of(context)!;
-    final result = await ref.read(commandDispatcherProvider)
+    final result = await ref
+        .read(commandDispatcherProvider)
         .dispatch(CommandInvocation(name: 'export'));
     if (!context.mounted) return;
     if (result case CommandSuccess success) {
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(
-          SnackBar(content: Text(l10n.settingsExportDone(success.message ?? ''))),
+          SnackBar(
+            content: Text(l10n.settingsExportDone(success.message ?? '')),
+          ),
         );
     }
   }
 
   Future<void> _import(BuildContext context, WidgetRef ref) async {
     final l10n = AppLocalizations.of(context)!;
-    final result = await ref.read(commandDispatcherProvider)
+    final result = await ref
+        .read(commandDispatcherProvider)
         .dispatch(CommandInvocation(name: 'import'));
     if (!context.mounted) return;
     if (result case CommandSuccess success) {
       final count =
-          int.tryParse(RegExp(r'\d+').stringMatch(success.message ?? '') ?? '') ?? 0;
+          int.tryParse(
+            RegExp(r'\d+').stringMatch(success.message ?? '') ?? '',
+          ) ??
+          0;
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(SnackBar(content: Text(l10n.settingsImportDone(count))));
@@ -357,32 +370,35 @@ class _LanHostCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(8),
                   color: scheme.primary.withValues(alpha: 0.1),
                 ),
-                child: Icon(Icons.dns_outlined,
-                    size: 16, color: scheme.primary),
+                child: Icon(
+                  Icons.dns_outlined,
+                  size: 16,
+                  color: scheme.primary,
+                ),
               ),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(l10n.settingsLanHost,
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodyMedium
-                            ?.copyWith(fontWeight: FontWeight.w600)),
+                    Text(
+                      l10n.settingsLanHost,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                     const SizedBox(height: 2),
                     Text(
                       l10n.settingsLanHostHint,
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: scheme.onSurfaceVariant,
-                          ),
+                        color: scheme.onSurfaceVariant,
+                      ),
                     ),
                   ],
                 ),
               ),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(999),
                   color: running
@@ -392,11 +408,11 @@ class _LanHostCard extends StatelessWidget {
                 child: Text(
                   running ? l10n.settingsLanRunning : l10n.settingsLanStopped,
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: running
-                            ? const Color(0xFF059669)
-                            : scheme.onSurfaceVariant,
-                        fontWeight: FontWeight.w600,
-                      ),
+                    color: running
+                        ? const Color(0xFF059669)
+                        : scheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
             ],
@@ -412,8 +428,7 @@ class _LanHostCard extends StatelessWidget {
                       ? const SizedBox(
                           width: 14,
                           height: 14,
-                          child:
-                              CircularProgressIndicator(strokeWidth: 2),
+                          child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Icon(Icons.play_arrow, size: 16),
                   label: Text(l10n.settingsLanStart),
@@ -446,8 +461,11 @@ class _LanHostCard extends StatelessWidget {
                       const SizedBox(width: 6),
                       Text('${l10n.settingsLanPort} ${lan.hostPort}'),
                       const SizedBox(width: 16),
-                      Icon(Icons.key_outlined,
-                          size: 14, color: Colors.amber.shade700),
+                      Icon(
+                        Icons.key_outlined,
+                        size: 14,
+                        color: Colors.amber.shade700,
+                      ),
                       const SizedBox(width: 6),
                       Text(
                         lan.pairingCode ?? '—',
@@ -463,8 +481,8 @@ class _LanHostCard extends StatelessWidget {
                   Text(
                     l10n.settingsLanCodeOnce,
                     style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: scheme.onSurfaceVariant,
-                        ),
+                      color: scheme.onSurfaceVariant,
+                    ),
                   ),
                 ],
               ),
@@ -511,27 +529,31 @@ class _LanClientCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(8),
                   color: scheme.primary.withValues(alpha: 0.1),
                 ),
-                child: Icon(Icons.smartphone_outlined,
-                    size: 16, color: scheme.primary),
+                child: Icon(
+                  Icons.smartphone_outlined,
+                  size: 16,
+                  color: scheme.primary,
+                ),
               ),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(l10n.settingsLanClient,
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodyMedium
-                            ?.copyWith(fontWeight: FontWeight.w600)),
+                    Text(
+                      l10n.settingsLanClient,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                     const SizedBox(height: 2),
                     Text(
                       peer != null
                           ? l10n.settingsLanPairedAs(peer.displayName)
                           : l10n.settingsLanClientHint,
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: scheme.onSurfaceVariant,
-                          ),
+                        color: scheme.onSurfaceVariant,
+                      ),
                     ),
                   ],
                 ),
@@ -598,11 +620,3 @@ class _LanClientCard extends StatelessWidget {
     await lan.pairClient(host: hostController.text, code: codeController.text);
   }
 }
-
-
-
-
-
-
-
-

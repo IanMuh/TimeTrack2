@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,9 +8,11 @@ import '../api/platform/android_tracking.dart' show AndroidTrackingBridge;
 import '../components/global_timer_bar.dart';
 import '../constants/storage_keys.dart';
 import '../l10n/app_localizations.dart';
+import '../api/platform/tray_service.dart';
 import '../providers/data.dart';
-import '../providers/engines.dart';
 import '../providers/foundation.dart';
+import '../providers/services.dart';
+import '../providers/engines.dart';
 import '../stores/app_store.dart';
 import '../stores/reminder_store.dart';
 import '../stores/update_store.dart' show UpdateState;
@@ -43,11 +45,7 @@ import '../viewmodels/profile_settings.dart' show ReminderMethod;
 ///   禁用时给中性提示（不可用原因语义批次 5 补全——含冲突校验原因与移动端
 ///   收纳菜单；快捷键 Ctrl+Z/Y 与输入框让位同属批次 5）。
 class AppShell extends ConsumerStatefulWidget {
-  const AppShell({
-    super.key,
-    required this.app,
-    required this.navigationShell,
-  });
+  const AppShell({super.key, required this.app, required this.navigationShell});
 
   final AppStore app;
   final StatefulNavigationShell navigationShell;
@@ -78,6 +76,8 @@ class _AppShellState extends ConsumerState<AppShell>
   /// 惰性 `= clock.now()`，首次访问发生在 timer 触发检查时，彼时本会话内
   /// 新切换的运行条目已存在，会被误判为"早于会话启动"而误弹对话框。
   late final DateTime _sessionStart;
+  late final TrayService _tray;
+  late final AndroidTrackingBridge _androidBridge;
   bool _suspiciousChecked = false;
 
   /// 已弹过对话框的提醒请求 id（对话框模态，防重复弹）。
@@ -102,7 +102,9 @@ class _AppShellState extends ConsumerState<AppShell>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _sessionStart = widget.app.clock.now();
+    _tray = ref.read(trayServiceProvider);
+    _androidBridge = ref.read(androidTrackingBridgeProvider);
+    _sessionStart = ref.read(clockStoreProvider).now();
     _wireTray();
     _wireAndroidTracking();
     // 可疑条目启动检测：AppStore.init 已 await timer.refresh()，postFrame
@@ -117,9 +119,9 @@ class _AppShellState extends ConsumerState<AppShell>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     // 托盘回调指向本 State：dispose 后必须摘除（服务随 AppStore 存活）。
-    widget.app.tray.onCommand = null;
-    widget.app.tray.onCloseToTray = null;
-    widget.app.androidTracking.onPauseRequested = null;
+    _tray.onCommand = null;
+    _tray.onCloseToTray = null;
+    _androidBridge.onPauseRequested = null;
     super.dispose();
   }
 
@@ -127,7 +129,7 @@ class _AppShellState extends ConsumerState<AppShell>
   /// 总开关/授权/命中活动变化 → 服务启停与常驻通知文案同步。
   void _wireAndroidTracking() {
     if (!AndroidTrackingBridge.isSupported) return;
-    final bridge = widget.app.androidTracking;
+    final bridge = _androidBridge;
     bridge.onPauseRequested = () {
       // 经指令通道（铁律 7）：通知动作与托盘同入口。
       unawaited(_dispatch(CommandInvocation(name: 'tracking_pause')));
@@ -144,15 +146,15 @@ class _AppShellState extends ConsumerState<AppShell>
   /// 平台通道 + DB 查询 + startForegroundService 通知重建。
   Future<void> _syncAndroidService() async {
     if (!AndroidTrackingBridge.isSupported || !mounted) return;
-    final app = widget.app;
     final enabled =
-        ref.read(settingsStoreProvider).current?.backgroundTrackingEnabled ?? false;
-    final granted = await app.androidTracking.isUsageGranted();
+        ref.read(settingsStoreProvider).current?.backgroundTrackingEnabled ??
+        false;
+    final granted = await _androidBridge.isUsageGranted();
     if (!mounted) return;
     if (!(enabled && granted)) {
       if (_lastAndroidSync != _kStopped) {
         _lastAndroidSync = _kStopped;
-        await app.androidTracking.stopTrackingService();
+        await _androidBridge.stopTrackingService();
       }
       return;
     }
@@ -160,13 +162,15 @@ class _AppShellState extends ConsumerState<AppShell>
     String content = '';
     final matchedId = ref.read(trackingStoreProvider).lastMatchedActivityId;
     if (matchedId != null) {
-      final activity = await ref.read(activityRepositoryProvider).activityById(matchedId);
+      final activity = await ref
+          .read(activityRepositoryProvider)
+          .activityById(matchedId);
       if (!mounted) return;
       content = activity?.name ?? '';
     }
     if (content.isEmpty) {
       // 状态可见性（用户反馈）：区分"检测在工作但无匹配规则"与"检测中…"。
-      final detected = app.foregroundDetector.processName;
+      final detected = ref.read(foregroundDetectorProvider).processName;
       if (detected != null && detected.isNotEmpty) {
         content = l10n.bgNotifyForeground(detected);
       }
@@ -176,7 +180,7 @@ class _AppShellState extends ConsumerState<AppShell>
         'on|$paused|$content|${l10n.bgNotifyTitleRecording}|$l10n.localeName';
     if (signature == _lastAndroidSync) return;
     _lastAndroidSync = signature;
-    await app.androidTracking.startTrackingService(
+    await _androidBridge.startTrackingService(
       paused: paused,
       // 铁律 6：通知可见文案 ARB 本地化后随 intent 下发，原生不硬编码。
       title: paused ? l10n.bgNotifyTitlePaused : l10n.bgNotifyTitleRecording,
@@ -188,7 +192,7 @@ class _AppShellState extends ConsumerState<AppShell>
 
   /// 托盘事件接线（批次 6）：命令路由 + 关窗模式加载。
   void _wireTray() {
-    final tray = widget.app.tray;
+    final tray = _tray;
     tray.onCommand = (command) {
       switch (command) {
         case 'togglePause':
@@ -235,10 +239,11 @@ class _AppShellState extends ConsumerState<AppShell>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) return;
-    final bridge = widget.app.androidTracking;
+    final bridge = _androidBridge;
     if (!AndroidTrackingBridge.isSupported) return;
     final enabled =
-        ref.read(settingsStoreProvider).current?.backgroundTrackingEnabled ?? false;
+        ref.read(settingsStoreProvider).current?.backgroundTrackingEnabled ??
+        false;
     if (!bridge.notificationPermissionAsked && enabled) {
       unawaited(bridge.requestNotificationPermission());
     }
@@ -256,8 +261,9 @@ class _AppShellState extends ConsumerState<AppShell>
       builder: (dialogContext) => StatefulBuilder(
         builder: (dialogContext, setDialogState) => AlertDialog(
           backgroundColor: Theme.of(dialogContext).colorScheme.surface,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
           title: Text(l10n.closeAppTitle, style: const TextStyle(fontSize: 15)),
           content: Column(
             mainAxisSize: MainAxisSize.min,
@@ -306,7 +312,9 @@ class _AppShellState extends ConsumerState<AppShell>
               onPressed: () async {
                 Navigator.of(dialogContext).pop();
                 if (remember) {
-                  await ref.read(settingsStoreProvider).setTrayCloseMode(selected);
+                  await ref
+                      .read(settingsStoreProvider)
+                      .setTrayCloseMode(selected);
                 }
                 if (!mounted) return;
                 setState(() => _trayCloseMode = selected);
@@ -314,9 +322,9 @@ class _AppShellState extends ConsumerState<AppShell>
                 // native WM_CLOSE 不再自行隐藏（ask 模式）——动作经通道落点：
                 // 最小化 → hideToTray；退出 → exitApp（正常销毁路径清理托盘）。
                 if (selected == TrayCloseMode.exit) {
-                  unawaited(widget.app.tray.exitApp());
+                  unawaited(_tray.exitApp());
                 } else {
-                  await widget.app.tray.hideToTray();
+                  await _tray.hideToTray();
                 }
               },
               child: Text(l10n.ok),
@@ -334,20 +342,22 @@ class _AppShellState extends ConsumerState<AppShell>
     final recording = snap.isRunning && !_entryIsUnassigned;
     final activity = recording ? (snap.activityName ?? '') : '';
     final l10n = AppLocalizations.of(context);
-    unawaited(widget.app.tray.configure(
-      mode: _trayCloseMode,
-      recording: recording,
-      paused: ref.read(trackingStoreProvider).sessionPaused,
-      activity: activity,
-      // 铁律 6：托盘可见文案 ARB 本地化后下发，原生不硬编码。
-      tipRecording: l10n?.trayTipRecordingPrefix ?? 'Recording: ',
-      tipPaused: l10n?.trayTipPaused ?? 'Auto tracking paused',
-      tipIdle: l10n?.trayTipIdle ?? 'Not recording',
-      menuShow: l10n?.trayMenuShow ?? 'Show main window',
-      menuPause: l10n?.trayMenuPause ?? 'Pause tracking',
-      menuResume: l10n?.trayMenuResume ?? 'Resume tracking',
-      menuExit: l10n?.trayMenuExit ?? 'Exit',
-    ));
+    unawaited(
+      _tray.configure(
+        mode: _trayCloseMode,
+        recording: recording,
+        paused: ref.read(trackingStoreProvider).sessionPaused,
+        activity: activity,
+        // 铁律 6：托盘可见文案 ARB 本地化后下发，原生不硬编码。
+        tipRecording: l10n?.trayTipRecordingPrefix ?? 'Recording: ',
+        tipPaused: l10n?.trayTipPaused ?? 'Auto tracking paused',
+        tipIdle: l10n?.trayTipIdle ?? 'Not recording',
+        menuShow: l10n?.trayMenuShow ?? 'Show main window',
+        menuPause: l10n?.trayMenuPause ?? 'Pause tracking',
+        menuResume: l10n?.trayMenuResume ?? 'Resume tracking',
+        menuExit: l10n?.trayMenuExit ?? 'Exit',
+      ),
+    );
   }
 
   void _onReminderChanged() {
@@ -393,7 +403,9 @@ class _AppShellState extends ConsumerState<AppShell>
     if (!running.isRunning) return; // 无运行条目：无需检测
     if (!running.startAt!.isBefore(_sessionStart)) return; // 本会话内开始
     _suspiciousChecked = true;
-    if (await ref.read(activityRepositoryProvider).activityIdIsUnassigned(running.activityId!)) {
+    if (await ref
+        .read(activityRepositoryProvider)
+        .activityIdIsUnassigned(running.activityId!)) {
       return;
     }
     if (!mounted) return;
@@ -404,31 +416,43 @@ class _AppShellState extends ConsumerState<AppShell>
         final l10n = AppLocalizations.of(dialogContext)!;
         return AlertDialog(
           backgroundColor: Theme.of(dialogContext).colorScheme.surface,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Row(children: [
-            CircleAvatar(
-              radius: 18,
-              backgroundColor: const Color(0x14f59e0b),
-              child: const Icon(Icons.error_outline,
-                  size: 20, color: Color(0xffd97706)),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(l10n.suspiciousTitle,
-                      style: const TextStyle(fontSize: 15)),
-                  Text(l10n.suspiciousSubtitle,
-                      style: TextStyle(
-                          fontSize: 12,
-                          color: Theme.of(dialogContext)
-                              .colorScheme
-                              .onSurfaceVariant)),
-                ],
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: Row(
+            children: [
+              CircleAvatar(
+                radius: 18,
+                backgroundColor: const Color(0x14f59e0b),
+                child: const Icon(
+                  Icons.error_outline,
+                  size: 20,
+                  color: Color(0xffd97706),
+                ),
               ),
-            ),
-          ]),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      l10n.suspiciousTitle,
+                      style: const TextStyle(fontSize: 15),
+                    ),
+                    Text(
+                      l10n.suspiciousSubtitle,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Theme.of(
+                          dialogContext,
+                        ).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
           content: Text(l10n.suspiciousEntryContent(_hm(running.startAt!))),
           actions: [
             TextButton(
@@ -440,11 +464,15 @@ class _AppShellState extends ConsumerState<AppShell>
                 Navigator.of(dialogContext).pop();
                 // --end=now 绝对语义：跨天遗留条目精确结束在当前时刻
                 //（HH:MM 会按条目所在日还原，≥2 天前的条目会算错）。
-                unawaited(_dispatch(CommandInvocation(
-                  name: 'entry_update',
-                  args: [running.entryId!],
-                  options: const {'end': 'now'},
-                )));
+                unawaited(
+                  _dispatch(
+                    CommandInvocation(
+                      name: 'entry_update',
+                      args: [running.entryId!],
+                      options: const {'end': 'now'},
+                    ),
+                  ),
+                );
               },
               child: Text(l10n.endToNow),
             ),
@@ -476,35 +504,48 @@ class _AppShellState extends ConsumerState<AppShell>
           final l10n = AppLocalizations.of(dialogContext)!;
           return AlertDialog(
             backgroundColor: Theme.of(dialogContext).colorScheme.surface,
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            title: Row(children: [
-              CircleAvatar(
-                radius: 18,
-                backgroundColor: const Color(0x14eef2ff),
-                child: const Icon(Icons.timer_outlined,
-                    size: 20, color: Color(0xff4f46e5)),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(l10n.stillDoingThis,
-                        style: const TextStyle(fontSize: 15)),
-                    Text(l10n.remOngoingSubtitle,
-                        style: TextStyle(
-                            fontSize: 12,
-                            color: Theme.of(dialogContext)
-                                .colorScheme
-                                .onSurfaceVariant)),
-                  ],
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            title: Row(
+              children: [
+                CircleAvatar(
+                  radius: 18,
+                  backgroundColor: const Color(0x14eef2ff),
+                  child: const Icon(
+                    Icons.timer_outlined,
+                    size: 20,
+                    color: Color(0xff4f46e5),
+                  ),
                 ),
-              ),
-            ]),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        l10n.stillDoingThis,
+                        style: const TextStyle(fontSize: 15),
+                      ),
+                      Text(
+                        l10n.remOngoingSubtitle,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Theme.of(
+                            dialogContext,
+                          ).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
             content: Text(
-              l10n.remOngoingBody(request.activityName,
-                  _formatElapsed(request.elapsed)),
+              l10n.remOngoingBody(
+                request.activityName,
+                _formatElapsed(request.elapsed),
+              ),
             ),
             actions: [
               TextButton(
@@ -516,7 +557,8 @@ class _AppShellState extends ConsumerState<AppShell>
               ),
               TextButton(
                 style: TextButton.styleFrom(
-                    foregroundColor: Theme.of(dialogContext).colorScheme.error),
+                  foregroundColor: Theme.of(dialogContext).colorScheme.error,
+                ),
                 onPressed: () {
                   Navigator.of(dialogContext).pop();
                   unawaited(store.stopOngoing());
@@ -544,21 +586,29 @@ class _AppShellState extends ConsumerState<AppShell>
           final l10n = AppLocalizations.of(dialogContext)!;
           return AlertDialog(
             backgroundColor: Theme.of(dialogContext).colorScheme.surface,
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            title: Row(children: [
-              CircleAvatar(
-                radius: 18,
-                backgroundColor: const Color(0x14eef2ff),
-                child: const Icon(Icons.notifications_active_outlined,
-                    size: 20, color: Color(0xff4f46e5)),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(l10n.remQuickTitle,
-                    style: const TextStyle(fontSize: 15)),
-              ),
-            ]),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            title: Row(
+              children: [
+                CircleAvatar(
+                  radius: 18,
+                  backgroundColor: const Color(0x14eef2ff),
+                  child: const Icon(
+                    Icons.notifications_active_outlined,
+                    size: 20,
+                    color: Color(0xff4f46e5),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    l10n.remQuickTitle,
+                    style: const TextStyle(fontSize: 15),
+                  ),
+                ),
+              ],
+            ),
             content: Text(l10n.remQuickBody),
             actions: [
               TextButton(
@@ -593,49 +643,63 @@ class _AppShellState extends ConsumerState<AppShell>
         duration: const Duration(seconds: 10),
         backgroundColor: const Color(0xff18181b),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        content: Row(children: [
-          Container(
-            width: 32,
-            height: 32,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(8),
-              color: const Color(0x33818cf8),
+        content: Row(
+          children: [
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(8),
+                color: const Color(0x33818cf8),
+              ),
+              child: const Icon(
+                Icons.download_outlined,
+                size: 16,
+                color: Color(0xffa5b4fc),
+              ),
             ),
-            child: const Icon(Icons.download_outlined,
-                size: 16, color: Color(0xffa5b4fc)),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(l10n.updateAvailablePrompt(version),
-                    style:
-                        const TextStyle(color: Colors.white, fontSize: 13)),
-                Text(l10n.updateAvailableSubtle,
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    l10n.updateAvailablePrompt(version),
+                    style: const TextStyle(color: Colors.white, fontSize: 13),
+                  ),
+                  Text(
+                    l10n.updateAvailableSubtle,
                     style: const TextStyle(
-                        color: Color(0xffa1a1aa), fontSize: 11)),
-              ],
+                      color: Color(0xffa1a1aa),
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-          TextButton(
-            onPressed: () {
-              messenger.hideCurrentSnackBar();
-              widget.navigationShell.goBranch(4, initialLocation: true);
-            },
-            child: Text(l10n.viewInSettings,
-                style: const TextStyle(color: Color(0xffa5b4fc))),
-          ),
-          TextButton(
-            onPressed: () {
-              messenger.hideCurrentSnackBar();
-              unawaited(ref.read(updateStoreProvider).ignoreCurrentVersion());
-            },
-            child: Text(l10n.updateIgnoreAction,
-                style: const TextStyle(color: Color(0xffa1a1aa))),
-          ),
-        ]),
+            TextButton(
+              onPressed: () {
+                messenger.hideCurrentSnackBar();
+                widget.navigationShell.goBranch(4, initialLocation: true);
+              },
+              child: Text(
+                l10n.viewInSettings,
+                style: const TextStyle(color: Color(0xffa5b4fc)),
+              ),
+            ),
+            TextButton(
+              onPressed: () {
+                messenger.hideCurrentSnackBar();
+                unawaited(ref.read(updateStoreProvider).ignoreCurrentVersion());
+              },
+              child: Text(
+                l10n.updateIgnoreAction,
+                style: const TextStyle(color: Color(0xffa1a1aa)),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -652,31 +716,47 @@ class _AppShellState extends ConsumerState<AppShell>
         canPop: false,
         child: AlertDialog(
           backgroundColor: Theme.of(dialogContext).colorScheme.surface,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Row(children: [
-            CircleAvatar(
-              radius: 18,
-              backgroundColor: const Color(0x14ef4444),
-              child: const Icon(Icons.lock_outline,
-                  size: 20, color: Color(0xffdc2626)),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(l10n.forcedUpdateTitle,
-                      style: const TextStyle(fontSize: 15)),
-                  Text(l10n.forcedUpdateSubtitle,
-                      style: const TextStyle(
-                          fontSize: 12, color: Color(0xffef4444))),
-                ],
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: Row(
+            children: [
+              CircleAvatar(
+                radius: 18,
+                backgroundColor: const Color(0x14ef4444),
+                child: const Icon(
+                  Icons.lock_outline,
+                  size: 20,
+                  color: Color(0xffdc2626),
+                ),
               ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      l10n.forcedUpdateTitle,
+                      style: const TextStyle(fontSize: 15),
+                    ),
+                    Text(
+                      l10n.forcedUpdateSubtitle,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Color(0xffef4444),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          content: Text(
+            l10n.forcedUpdateBody(
+              ref.read(currentVersionProvider),
+              update.status.latestVersion,
             ),
-          ]),
-          content: Text(l10n.forcedUpdateBody(
-              widget.app.currentVersion, update.status.latestVersion)),
+          ),
           actions: [
             SizedBox(
               width: double.infinity,
@@ -703,7 +783,10 @@ class _AppShellState extends ConsumerState<AppShell>
     ref.listen(reminderSnapshotProvider, (_, _) => _onReminderChanged());
     ref.listen(updateSnapshotProvider, (_, _) => _onUpdateChanged());
     // B4c：设置变更 → Android 前台服务同步（原 settings.addListener 白名单）。
-    ref.listen(settingsChangeProvider, (_, _) => unawaited(_syncAndroidService()));
+    ref.listen(
+      settingsChangeProvider,
+      (_, _) => unawaited(_syncAndroidService()),
+    );
     final shell = widget.navigationShell;
     final isWide = MediaQuery.sizeOf(context).width >= AppShell.wideBreakpoint;
     final content = Expanded(child: shell);
@@ -769,33 +852,35 @@ class _AppShellState extends ConsumerState<AppShell>
     final store = ref.read(reminderStoreProvider);
     final dark = Theme.of(context).brightness == Brightness.dark;
     final bg = dark ? const Color(0x1af59e0b) : const Color(0xfffffbeb);
-    final titleColor =
-        dark ? const Color(0xfffef3c7) : const Color(0xff78350f);
-    final subColor =
-        dark ? const Color(0xbffcd34d) : const Color(0xffb45309);
+    final titleColor = dark ? const Color(0xfffef3c7) : const Color(0xff78350f);
+    final subColor = dark ? const Color(0xbffcd34d) : const Color(0xffb45309);
 
     String title;
-  String? subtitle;
-  List<Widget> actions;
+    String? subtitle;
+    List<Widget> actions;
     if (active is OngoingReminder) {
       // 横幅常驻期间时长实时计算（触发时刻快照仅在该条目已不运行时兜底）；
       // 对话框载体无重绘时机，保持触发时刻快照。
       final running = ref.read(timerSnapshotProvider);
       final elapsed = running.entryId == active.entryId
-          ? widget.app.clock.now().difference(running.startAt!)
+          ? ref.read(clockStoreProvider).now().difference(running.startAt!)
           : active.elapsed;
       title = l10n.bannerOngoingTitle(_formatElapsed(elapsed));
       subtitle = l10n.bannerOngoingSub(active.activityName);
       actions = [
         TextButton(
           onPressed: store.acknowledgeOngoing,
-          child: Text(l10n.remindLater,
-              style: TextStyle(fontSize: 12, color: titleColor)),
+          child: Text(
+            l10n.remindLater,
+            style: TextStyle(fontSize: 12, color: titleColor),
+          ),
         ),
         TextButton(
           onPressed: store.acknowledgeOngoing,
-          child: Text(l10n.close,
-              style: TextStyle(fontSize: 12, color: titleColor)),
+          child: Text(
+            l10n.close,
+            style: TextStyle(fontSize: 12, color: titleColor),
+          ),
         ),
       ];
     } else {
@@ -806,13 +891,17 @@ class _AppShellState extends ConsumerState<AppShell>
             store.dismissQuick();
             widget.navigationShell.goBranch(0, initialLocation: true);
           },
-          child: Text(l10n.timerStartRecording,
-              style: TextStyle(fontSize: 12, color: titleColor)),
+          child: Text(
+            l10n.timerStartRecording,
+            style: TextStyle(fontSize: 12, color: titleColor),
+          ),
         ),
         TextButton(
           onPressed: store.dismissQuick,
-          child: Text(l10n.close,
-              style: TextStyle(fontSize: 12, color: titleColor)),
+          child: Text(
+            l10n.close,
+            style: TextStyle(fontSize: 12, color: titleColor),
+          ),
         ),
       ];
     }
@@ -826,28 +915,38 @@ class _AppShellState extends ConsumerState<AppShell>
           left: BorderSide(color: const Color(0xfff59e0b), width: 4),
         ),
       ),
-      child: Row(children: [
-        const Icon(Icons.warning_amber_outlined,
-            size: 16, color: Color(0xffd97706)),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(title,
-                  style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: titleColor)),
-              if (subtitle != null)
-                Text(subtitle,
-                    style: TextStyle(fontSize: 11, color: subColor)),
-            ],
+      child: Row(
+        children: [
+          const Icon(
+            Icons.warning_amber_outlined,
+            size: 16,
+            color: Color(0xffd97706),
           ),
-        ),
-        ...actions,
-      ]),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: titleColor,
+                  ),
+                ),
+                if (subtitle != null)
+                  Text(
+                    subtitle,
+                    style: TextStyle(fontSize: 11, color: subColor),
+                  ),
+              ],
+            ),
+          ),
+          ...actions,
+        ],
+      ),
     );
   }
 
@@ -904,8 +1003,9 @@ class _AppShellState extends ConsumerState<AppShell>
     _checkedActivityId = activityId;
     _entryIsUnassigned = false;
     Future.microtask(() async {
-      final isUnassigned =
-          await ref.read(activityRepositoryProvider).activityIdIsUnassigned(activityId);
+      final isUnassigned = await ref
+          .read(activityRepositoryProvider)
+          .activityIdIsUnassigned(activityId);
       if (!mounted || _checkedActivityId != activityId) return;
       setState(() => _entryIsUnassigned = isUnassigned);
     });
@@ -917,7 +1017,9 @@ class _AppShellState extends ConsumerState<AppShell>
 
   Future<void> _dispatch(CommandInvocation invocation) async {
     final messenger = ScaffoldMessenger.of(context);
-    final result = await ref.read(commandDispatcherProvider).dispatch(invocation);
+    final result = await ref
+        .read(commandDispatcherProvider)
+        .dispatch(invocation);
     if (!mounted) return;
     final l10n = AppLocalizations.of(context)!;
     messenger.hideCurrentSnackBar();
@@ -941,10 +1043,8 @@ class _AppShellState extends ConsumerState<AppShell>
     final l10n = AppLocalizations.of(context)!;
     return NavigationBar(
       selectedIndex: shell.currentIndex,
-      onDestinationSelected: (index) => shell.goBranch(
-        index,
-        initialLocation: index == shell.currentIndex,
-      ),
+      onDestinationSelected: (index) =>
+          shell.goBranch(index, initialLocation: index == shell.currentIndex),
       destinations: [
         for (final spec in _navSpecs(l10n))
           NavigationDestination(
@@ -971,31 +1071,31 @@ List<_NavSpec> _navSpecs(AppLocalizations l10n) {
       path: '/timer',
       label: l10n.navTimer,
       icon: Icons.timer_outlined,
-      selectedIcon: Icons.timer
+      selectedIcon: Icons.timer,
     ),
     (
       path: '/today',
       label: l10n.navToday,
       icon: Icons.calendar_today_outlined,
-      selectedIcon: Icons.calendar_today
+      selectedIcon: Icons.calendar_today,
     ),
     (
       path: '/timeline',
       label: l10n.navTimeline,
       icon: Icons.view_timeline_outlined,
-      selectedIcon: Icons.view_timeline
+      selectedIcon: Icons.view_timeline,
     ),
     (
       path: '/stats',
       label: l10n.navStats,
       icon: Icons.pie_chart_outline,
-      selectedIcon: Icons.pie_chart
+      selectedIcon: Icons.pie_chart,
     ),
     (
       path: '/settings',
       label: l10n.navSettings,
       icon: Icons.settings_outlined,
-      selectedIcon: Icons.settings
+      selectedIcon: Icons.settings,
     ),
   ];
 }
@@ -1134,10 +1234,7 @@ class _SideNavItem extends StatelessWidget {
 /// 撤销/重做按钮组（桌面常驻，契约 §3.4）：状态来自 [undoStateProvider]；
 /// 点击经指令通道分发，反馈 Snackbar 由壳层统一弹。
 class _UndoRedoGroup extends ConsumerWidget {
-  const _UndoRedoGroup({
-    required this.onUndo,
-    required this.onRedo,
-  });
+  const _UndoRedoGroup({required this.onUndo, required this.onRedo});
 
   final VoidCallback onUndo;
   final VoidCallback onRedo;
@@ -1203,8 +1300,9 @@ class _UndoRedoButton extends StatelessWidget {
       // 禁用时保留 tooltip（Tooltip 自带手势，不依赖按钮状态；不可用原因
       // 语义批次 5 补全）。
       style: IconButton.styleFrom(
-        disabledForegroundColor:
-            Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.38),
+        disabledForegroundColor: Theme.of(
+          context,
+        ).colorScheme.onSurface.withValues(alpha: 0.38),
         minimumSize: const Size(36, 36),
       ),
     );
@@ -1258,6 +1356,3 @@ class _SyncStatusText extends StatelessWidget {
     );
   }
 }
-
-
-

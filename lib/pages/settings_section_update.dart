@@ -1,10 +1,12 @@
-﻿/// 设置分区实现 ⑤：版本更新（状态机全态卡，契约 §7）+ 关于。
+/// 设置分区实现 ⑤：版本更新（状态机全态卡，契约 §7）+ 关于。
 library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../l10n/app_localizations.dart';import '../providers/engines.dart';
+import '../l10n/app_localizations.dart';
+import '../providers/engines.dart';
+import '../providers/services.dart';
 import '../stores/app_store.dart';
 import '../stores/update_store.dart';
 import '../viewmodels/commands/command_invocation.dart';
@@ -36,7 +38,7 @@ class UpdateSection extends ConsumerWidget {
                 Expanded(
                   child: _VersionCell(
                     label: l10n.settingsUpdateCurrent,
-                    value: 'v${app.currentVersion}',
+                    value: 'v${ref.read(currentVersionProvider)}',
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -111,10 +113,9 @@ class _VersionCell extends StatelessWidget {
         children: [
           Text(
             label,
-            style: Theme.of(context)
-                .textTheme
-                .labelSmall
-                ?.copyWith(color: scheme.onSurfaceVariant),
+            style: Theme.of(
+              context,
+            ).textTheme.labelSmall?.copyWith(color: scheme.onSurfaceVariant),
             overflow: TextOverflow.ellipsis,
           ),
           const SizedBox(height: 2),
@@ -124,9 +125,9 @@ class _VersionCell extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  fontWeight: FontWeight.w600,
-                  color: accent ? scheme.primary : null,
-                ),
+              fontWeight: FontWeight.w600,
+              color: accent ? scheme.primary : null,
+            ),
           ),
         ],
       ),
@@ -151,8 +152,7 @@ class _UpdateStateCard extends ConsumerWidget {
       UpdateState.checking ||
       UpdateState.downloading ||
       UpdateState.verifying ||
-      UpdateState.installing =>
-        true,
+      UpdateState.installing => true,
       _ => false,
     };
     return Container(
@@ -169,107 +169,108 @@ class _UpdateStateCard extends ConsumerWidget {
             UpdateState.idle ||
             UpdateState.upToDate ||
             UpdateState.failed ||
-            UpdateState.available =>
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  OutlinedButton.icon(
-                    key: const ValueKey('update-check'),
-                    onPressed: busy ? null : () => _check(ref),
-                    icon: const Icon(Icons.refresh, size: 16),
-                    label: Text(l10n.settingsUpdateCheck),
+            UpdateState.available => Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                OutlinedButton.icon(
+                  key: const ValueKey('update-check'),
+                  onPressed: busy ? null : () => _check(ref),
+                  icon: const Icon(Icons.refresh, size: 16),
+                  label: Text(l10n.settingsUpdateCheck),
+                ),
+                if (status.state == UpdateState.available) ...[
+                  FilledButton.icon(
+                    key: const ValueKey('update-download'),
+                    onPressed: () => _download(ref),
+                    icon: const Icon(Icons.download, size: 16),
+                    label: Text(l10n.settingsUpdateDownload),
                   ),
-                  if (status.state == UpdateState.available) ...[
-                    FilledButton.icon(
-                      key: const ValueKey('update-download'),
-                      onPressed: () => _download(ref),
-                      icon: const Icon(Icons.download, size: 16),
-                      label: Text(l10n.settingsUpdateDownload),
-                    ),
-                    OutlinedButton(
-                      onPressed: () => _ignoreVersion(context, ref),
-                      child: Text(l10n.settingsUpdateIgnoreVersion),
-                    ),
-                    OutlinedButton(
-                      onPressed: () {},
-                      child: Text(l10n.settingsUpdateLater),
-                    ),
-                  ],
-                  if (status.state == UpdateState.failed)
-                    Text(
-                      status.errorMessage ?? '',
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodySmall
-                          ?.copyWith(color: scheme.error),
-                    ),
+                  OutlinedButton(
+                    onPressed: () => _ignoreVersion(context, ref),
+                    child: Text(l10n.settingsUpdateIgnoreVersion),
+                  ),
+                  OutlinedButton(
+                    onPressed: () {},
+                    child: Text(l10n.settingsUpdateLater),
+                  ),
                 ],
-              ),
+                if (status.state == UpdateState.failed)
+                  Text(
+                    status.errorMessage ?? '',
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodySmall?.copyWith(color: scheme.error),
+                  ),
+              ],
+            ),
             UpdateState.checking => Row(
-                children: [
-                  const SizedBox(
-                    width: 14,
-                    height: 14,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                  const SizedBox(width: 10),
-                  Text(l10n.settingsUpdateChecking),
-                ],
-              ),
+              children: [
+                const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                const SizedBox(width: 10),
+                Text(l10n.settingsUpdateChecking),
+              ],
+            ),
             UpdateState.downloading => _ProgressBlock(status: status),
             UpdateState.paused => _ProgressBlock(status: status),
             UpdateState.verifying => Row(
-                children: [
-                  const SizedBox(
-                    width: 14,
-                    height: 14,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                  const SizedBox(width: 10),
-                  Text(l10n.settingsUpdateVerifying),
-                ],
-              ),
+              children: [
+                const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                const SizedBox(width: 10),
+                Text(l10n.settingsUpdateVerifying),
+              ],
+            ),
             UpdateState.installing => Row(
-                children: [
-                  const SizedBox(
-                    width: 14,
-                    height: 14,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                  const SizedBox(width: 10),
-                  Text(l10n.settingsUpdateInstalling),
-                ],
-              ),
+              children: [
+                const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                const SizedBox(width: 10),
+                Text(l10n.settingsUpdateInstalling),
+              ],
+            ),
             UpdateState.restartRequired => Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(Icons.restart_alt,
-                          size: 16, color: Colors.amber.shade700),
-                      const SizedBox(width: 8),
-                      Text(l10n.settingsUpdateRestartRequired),
-                    ],
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.restart_alt,
+                      size: 16,
+                      color: Colors.amber.shade700,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(l10n.settingsUpdateRestartRequired),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  l10n.settingsUpdateRestartBody,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    l10n.settingsUpdateRestartBody,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: scheme.onSurfaceVariant,
-                        ),
-                  ),
-                ],
-              ),
+                ),
+              ],
+            ),
           },
           if (status.state == UpdateState.downloading ||
               status.state == UpdateState.paused) ...[
             const SizedBox(height: 6),
             Text(
               l10n.settingsUpdateVerifyNote,
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.labelSmall?.copyWith(color: scheme.onSurfaceVariant),
             ),
           ],
         ],
@@ -280,13 +281,15 @@ class _UpdateStateCard extends ConsumerWidget {
   /// 经指令通道（铁律 7）：'update_check' 指令已注册——与深链/AI/壳层
   /// 同入口；结果经 update store 监听驱动 UI，无需在此处理。
   Future<void> _check(WidgetRef ref) async {
-    await ref.read(commandDispatcherProvider)
+    await ref
+        .read(commandDispatcherProvider)
         .dispatch(CommandInvocation(name: 'update_check'));
   }
 
   /// 下载 + 内联校验（verifying → install 可用）。无同名注册指令，暂直调
   ///（挂账：update_download 指令化——连同 signOut/ignoreVersion 收口）。
-  Future<void> _download(WidgetRef ref) async => ref.read(updateStoreProvider).download();
+  Future<void> _download(WidgetRef ref) async =>
+      ref.read(updateStoreProvider).download();
 
   Future<void> _ignoreVersion(BuildContext context, WidgetRef ref) async {
     final l10n = AppLocalizations.of(context)!;
@@ -323,26 +326,25 @@ class _ProgressBlock extends StatelessWidget {
               status.latestVersion.isEmpty
                   ? l10n.settingsUpdateDownloading
                   : 'v${status.latestVersion}',
-              style: Theme.of(context)
-                  .textTheme
-                  .bodyMedium
-                  ?.copyWith(fontWeight: FontWeight.w600),
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
             ),
             if (total != null)
               Text(
                 '${mb(received)} / ${mb(total)}',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                      fontFeatures: const [FontFeature.tabularFigures()],
-                    ),
+                  color: scheme.onSurfaceVariant,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
               )
             else
               Text(
                 mb(received),
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                      fontFeatures: const [FontFeature.tabularFigures()],
-                    ),
+                  color: scheme.onSurfaceVariant,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
               ),
           ],
         ),
@@ -388,42 +390,45 @@ class AboutSection extends ConsumerWidget {
                   borderRadius: BorderRadius.circular(14),
                   color: scheme.primary,
                 ),
-                child: const Icon(Icons.schedule_outlined,
-                    color: Colors.white, size: 26),
+                child: const Icon(
+                  Icons.schedule_outlined,
+                  color: Colors.white,
+                  size: 26,
+                ),
               ),
               const SizedBox(width: 14),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('TimeTrack',
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleSmall
-                            ?.copyWith(fontWeight: FontWeight.w700)),
+                    Text(
+                      'TimeTrack',
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                     const SizedBox(height: 2),
                     Text(
                       l10n.settingsAboutTagline,
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: scheme.onSurfaceVariant,
-                          ),
+                        color: scheme.onSurfaceVariant,
+                      ),
                     ),
                   ],
                 ),
               ),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(999),
                   color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
                 ),
                 child: Text(
-                  'v${app.currentVersion}',
+                  'v${ref.read(currentVersionProvider)}',
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        fontFeatures: const [FontFeature.tabularFigures()],
-                        fontWeight: FontWeight.w600,
-                      ),
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
             ],
@@ -431,11 +436,12 @@ class AboutSection extends ConsumerWidget {
         ),
         SettingsRow(
           title: l10n.settingsAboutVersion,
-          subtitle: 'v${app.currentVersion}',
+          subtitle: 'v${ref.read(currentVersionProvider)}',
           trailing: OutlinedButton(
             onPressed: () {
               // 跳更新卡（滚动锚点由设置页骨架处理）；检查经指令通道。
-              ref.read(commandDispatcherProvider)
+              ref
+                  .read(commandDispatcherProvider)
                   .dispatch(CommandInvocation(name: 'update_check'));
             },
             child: Text(l10n.settingsAboutCheckUpdate),
@@ -444,8 +450,11 @@ class AboutSection extends ConsumerWidget {
         SettingsRow(
           title: l10n.settingsAboutOpenSource,
           subtitle: l10n.settingsAboutOpenSourceHint,
-          trailing: const Icon(Icons.open_in_new,
-              size: 16, color: Color(0xFF6366F1)),
+          trailing: const Icon(
+            Icons.open_in_new,
+            size: 16,
+            color: Color(0xFF6366F1),
+          ),
         ),
         SettingsRow(
           title: l10n.settingsAboutLicense,
@@ -456,10 +465,3 @@ class AboutSection extends ConsumerWidget {
     );
   }
 }
-
-
-
-
-
-
-

@@ -16,8 +16,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api/platform/windows_foreground_detector.dart'
     show WindowsForegroundDetector;
 import '../components/activity_picker/activity_picker.dart';
-import '../l10n/app_localizations.dart';import '../providers/data.dart';
+import '../l10n/app_localizations.dart';
+import '../providers/data.dart';
 import '../providers/engines.dart';
+import '../providers/services.dart';
 import '../stores/app_store.dart';
 import '../stores/tracking_store.dart' show NoopForegroundDetector;
 import '../utils/result.dart';
@@ -51,7 +53,9 @@ class _BackgroundSectionState extends ConsumerState<BackgroundSection> {
   }
 
   Future<void> _load() async {
-    final result = await ref.read(activityRepositoryProvider).activities(includeDeleted: false);
+    final result = await ref
+        .read(activityRepositoryProvider)
+        .activities(includeDeleted: false);
     await ref.read(trackingStoreProvider).reloadRules();
     if (!mounted) return;
     if (result.isSuccess) {
@@ -64,7 +68,9 @@ class _BackgroundSectionState extends ConsumerState<BackgroundSection> {
   /// 查询「使用情况访问」授权态（非 Android 短路为 null）。
   Future<void> _refreshUsageGranted() async {
     if (!Platform.isAndroid) return;
-    final granted = await widget.app.androidTracking.isUsageGranted();
+    final granted = await ref
+        .read(androidTrackingBridgeProvider)
+        .isUsageGranted();
     if (!mounted) return;
     setState(() => _usageGranted = granted);
   }
@@ -72,25 +78,28 @@ class _BackgroundSectionState extends ConsumerState<BackgroundSection> {
   /// §6.3 引导触发：进分区时未授权且本会话未纠缠过 → 全屏引导。
   Future<void> _maybeShowGuide() async {
     if (!mounted || !Platform.isAndroid) return;
-    if (widget.app.androidTracking.guideDismissedThisSession) return;
+    if (ref.read(androidTrackingBridgeProvider).guideDismissedThisSession) {
+      return;
+    }
     if (_usageGranted == true) {
       // 已授权：标记会话内不再引导。
-      widget.app.androidTracking.guideDismissedThisSession = true;
+      ref.read(androidTrackingBridgeProvider).guideDismissedThisSession = true;
       return;
     }
     await Navigator.of(context, rootNavigator: true).push(
       MaterialPageRoute<void>(
         fullscreenDialog: true,
-        builder: (_) => TrackingGuidePage(bridge: widget.app.androidTracking),
+        builder: (_) =>
+            TrackingGuidePage(bridge: ref.read(androidTrackingBridgeProvider)),
       ),
     );
     // 从系统设置返回后复查授权态。
-    widget.app.androidTracking.guideDismissedThisSession = true;
+    ref.read(androidTrackingBridgeProvider).guideDismissedThisSession = true;
     await _refreshUsageGranted();
   }
 
   Future<void> _openUsageSettings() async {
-    await widget.app.androidTracking.openUsageAccessSettings();
+    await ref.read(androidTrackingBridgeProvider).openUsageAccessSettings();
     await _refreshUsageGranted();
   }
 
@@ -124,9 +133,12 @@ class _BackgroundSectionState extends ConsumerState<BackgroundSection> {
           children: [
             _PlatformCard(
               app: app,
-              usageGranted: Platform.isAndroid ? (_usageGranted ?? false) : null,
-              onOpenUsageSettings:
-                  Platform.isAndroid ? _openUsageSettings : null,
+              usageGranted: Platform.isAndroid
+                  ? (_usageGranted ?? false)
+                  : null,
+              onOpenUsageSettings: Platform.isAndroid
+                  ? _openUsageSettings
+                  : null,
             ),
             // 手动会话保持可见化（批次 6b 用户反馈）：手动点过活动卡后自动
             // 切换挂起——给出状态与一键恢复，防"功能坏了"的误判。
@@ -135,14 +147,20 @@ class _BackgroundSectionState extends ConsumerState<BackgroundSection> {
               SettingsInfoBanner(
                 child: Row(
                   children: [
-                    Icon(Icons.pause_circle_outline,
-                        size: 16, color: SettingsSky.dark),
+                    Icon(
+                      Icons.pause_circle_outline,
+                      size: 16,
+                      color: SettingsSky.dark,
+                    ),
                     const SizedBox(width: 8),
                     Expanded(child: Text(l10n.bgManualHoldBanner)),
                     TextButton(
                       // 经指令通道（铁律 7）：manual_hold_clear 指令化落点。
-                      onPressed: () => ref.read(commandDispatcherProvider)
-                          .dispatch(CommandInvocation(name: 'manual_hold_clear')),
+                      onPressed: () => ref
+                          .read(commandDispatcherProvider)
+                          .dispatch(
+                            CommandInvocation(name: 'manual_hold_clear'),
+                          ),
                       child: Text(l10n.bgManualHoldResume),
                     ),
                   ],
@@ -156,10 +174,9 @@ class _BackgroundSectionState extends ConsumerState<BackgroundSection> {
               decoration: BoxDecoration(
                 border: Border(
                   top: BorderSide(
-                    color: Theme.of(context)
-                        .colorScheme
-                        .outlineVariant
-                        .withValues(alpha: 0.4),
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.outlineVariant.withValues(alpha: 0.4),
                   ),
                 ),
               ),
@@ -171,7 +188,9 @@ class _BackgroundSectionState extends ConsumerState<BackgroundSection> {
                 value: androidNeedsPermission
                     ? false
                     : settings?.backgroundTrackingEnabled ?? false,
-                onChanged: androidNeedsPermission ? null : (v) => _saveMaster(v),
+                onChanged: androidNeedsPermission
+                    ? null
+                    : (v) => _saveMaster(v),
               ),
             ),
             const SizedBox(height: 14),
@@ -181,14 +200,16 @@ class _BackgroundSectionState extends ConsumerState<BackgroundSection> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(l10n.settingsBgRules,
-                          style: Theme.of(context).textTheme.bodyMedium),
+                      Text(
+                        l10n.settingsBgRules,
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
                       const SizedBox(height: 2),
                       Text(
                         l10n.settingsBgRulesCount(rules.length),
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: Theme.of(context).colorScheme.onSurfaceVariant,
-                            ),
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
                       ),
                     ],
                   ),
@@ -208,10 +229,9 @@ class _BackgroundSectionState extends ConsumerState<BackgroundSection> {
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: Theme.of(context)
-                        .colorScheme
-                        .outlineVariant
-                        .withValues(alpha: 0.6),
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.outlineVariant.withValues(alpha: 0.6),
                   ),
                 ),
                 clipBehavior: Clip.antiAlias,
@@ -221,10 +241,9 @@ class _BackgroundSectionState extends ConsumerState<BackgroundSection> {
                       if (i > 0)
                         Divider(
                           height: 1,
-                          color: Theme.of(context)
-                              .colorScheme
-                              .outlineVariant
-                              .withValues(alpha: 0.25),
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.outlineVariant.withValues(alpha: 0.25),
                         ),
                       _RuleRow(
                         rule: rules[i],
@@ -256,12 +275,17 @@ class _BackgroundSectionState extends ConsumerState<BackgroundSection> {
     if (current == null) return;
     // Android 开启时先补通知权限请求（API 33+；前台服务常驻通知可见性）。
     // 引导页跳系统设置期间弹窗无法展示，故在用户主动开启的时机补问。
-    if (value && Platform.isAndroid &&
-        !widget.app.androidTracking.notificationPermissionAsked) {
-      await widget.app.androidTracking.requestNotificationPermission();
+    if (value &&
+        Platform.isAndroid &&
+        !ref.read(androidTrackingBridgeProvider).notificationPermissionAsked) {
+      await ref
+          .read(androidTrackingBridgeProvider)
+          .requestNotificationPermission();
       if (!mounted) return;
     }
-    final result = await store.save(current.copyWith(backgroundTrackingEnabled: value));
+    final result = await store.save(
+      current.copyWith(backgroundTrackingEnabled: value),
+    );
     // 保存失败必须可见（与通用分区 _save 的失败反馈一致——开关渲染由
     // store 通知回滚，无反馈会呈现"点了没反应"）。
     if (!mounted) return;
@@ -272,16 +296,29 @@ class _BackgroundSectionState extends ConsumerState<BackgroundSection> {
     }
   }
 
-  Future<void> _updateRule(TrackingRule rule, {Map<String, String> options = const {}}) async {
-    await ref.read(commandDispatcherProvider)
-        .dispatch(CommandInvocation(name: 'tracking_rule_update', args: [rule.id], options: options));
+  Future<void> _updateRule(
+    TrackingRule rule, {
+    Map<String, String> options = const {},
+  }) async {
+    await ref
+        .read(commandDispatcherProvider)
+        .dispatch(
+          CommandInvocation(
+            name: 'tracking_rule_update',
+            args: [rule.id],
+            options: options,
+          ),
+        );
     if (mounted) setState(() {});
   }
 
   Future<void> _deleteRule(TrackingRule rule) async {
     final l10n = AppLocalizations.of(context)!;
-    await ref.read(commandDispatcherProvider).dispatch(
-        CommandInvocation(name: 'tracking_rule_delete', args: [rule.id]));
+    await ref
+        .read(commandDispatcherProvider)
+        .dispatch(
+          CommandInvocation(name: 'tracking_rule_delete', args: [rule.id]),
+        );
     if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
@@ -351,15 +388,13 @@ class _PlatformCard extends ConsumerWidget {
               const SizedBox(width: 8),
               Text(
                 l10n.usageAccess,
-                style: Theme.of(context)
-                    .textTheme
-                    .bodySmall
-                    ?.copyWith(fontWeight: FontWeight.w600),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
               ),
               const Spacer(),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(999),
                   color: granted
@@ -367,7 +402,9 @@ class _PlatformCard extends ConsumerWidget {
                       : scheme.error.withValues(alpha: 0.08),
                 ),
                 child: Text(
-                  granted ? l10n.usageAccessGranted : l10n.usageAccessNotGranted,
+                  granted
+                      ? l10n.usageAccessGranted
+                      : l10n.usageAccessNotGranted,
                   style: TextStyle(
                     fontSize: 11,
                     color: granted ? scheme.primary : scheme.error,
@@ -377,9 +414,13 @@ class _PlatformCard extends ConsumerWidget {
             ],
           ),
           const SizedBox(height: 4),
-          Text(l10n.settingsBgDetectorState(granted
-              ? l10n.settingsBgDetectorRunning
-              : l10n.usageAccessNotGranted)),
+          Text(
+            l10n.settingsBgDetectorState(
+              granted
+                  ? l10n.settingsBgDetectorRunning
+                  : l10n.usageAccessNotGranted,
+            ),
+          ),
           if (!granted) ...[
             const SizedBox(height: 8),
             FilledButton.tonalIcon(
@@ -397,7 +438,8 @@ class _PlatformCard extends ConsumerWidget {
   Widget _windowsCard(BuildContext context, WidgetRef ref) {
     final l10n = AppLocalizations.of(context)!;
     final scheme = Theme.of(context).colorScheme;
-    final detectorReady = ref.read(trackingStoreProvider).detector is! NoopForegroundDetector;
+    final detectorReady =
+        ref.read(trackingStoreProvider).detector is! NoopForegroundDetector;
     final lastNote = ref.read(trackingStoreProvider).lastMatchNote;
     return SettingsInfoBanner(
       child: Column(
@@ -405,15 +447,17 @@ class _PlatformCard extends ConsumerWidget {
         children: [
           Row(
             children: [
-              Icon(Icons.monitor_heart_outlined,
-                  size: 16, color: SettingsSky.dark),
+              Icon(
+                Icons.monitor_heart_outlined,
+                size: 16,
+                color: SettingsSky.dark,
+              ),
               const SizedBox(width: 8),
               Text(
                 l10n.settingsBgWindowsTitle,
-                style: Theme.of(context)
-                    .textTheme
-                    .bodySmall
-                    ?.copyWith(fontWeight: FontWeight.w600),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
               ),
             ],
           ),
@@ -421,9 +465,11 @@ class _PlatformCard extends ConsumerWidget {
           Text(l10n.settingsBgWindowsBody),
           const SizedBox(height: 6),
           Text(
-            l10n.settingsBgDetectorState(detectorReady
-                ? l10n.settingsBgDetectorRunning
-                : l10n.settingsBgDetectorPending),
+            l10n.settingsBgDetectorState(
+              detectorReady
+                  ? l10n.settingsBgDetectorRunning
+                  : l10n.settingsBgDetectorPending,
+            ),
           ),
           if (lastNote != null) ...[
             const SizedBox(height: 2),
@@ -460,10 +506,9 @@ class _RuleRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final scheme = Theme.of(context).colorScheme;
-    final kindLabel =
-        rule.matchKind == TrackingRuleMatchKind.title
-            ? l10n.settingsBgKindTitle
-            : l10n.settingsBgKindProcess;
+    final kindLabel = rule.matchKind == TrackingRuleMatchKind.title
+        ? l10n.settingsBgKindTitle
+        : l10n.settingsBgKindProcess;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       child: Wrap(
@@ -480,9 +525,9 @@ class _RuleRow extends StatelessWidget {
             child: Text(
               rule.pattern,
               style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    fontFamily: 'monospace',
-                    fontFeatures: const [FontFeature.tabularFigures()],
-                  ),
+                fontFamily: 'monospace',
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
             ),
           ),
           Container(
@@ -493,9 +538,9 @@ class _RuleRow extends StatelessWidget {
             ),
             child: Text(
               kindLabel,
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: SettingsSky.dark,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.labelSmall?.copyWith(color: SettingsSky.dark),
             ),
           ),
           Row(
@@ -538,8 +583,7 @@ class _RuleRow extends StatelessWidget {
               ),
               IconButton(
                 tooltip: l10n.settingsBgDelete,
-                icon: Icon(Icons.delete_outline,
-                    size: 14, color: scheme.error),
+                icon: Icon(Icons.delete_outline, size: 14, color: scheme.error),
                 onPressed: onDelete,
                 visualDensity: VisualDensity.compact,
               ),
@@ -588,8 +632,8 @@ class _MiniToggle extends StatelessWidget {
             Text(
               label,
               style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: value ? scheme.primary : scheme.onSurfaceVariant,
-                  ),
+                color: value ? scheme.primary : scheme.onSurfaceVariant,
+              ),
             ),
           ],
         ),
@@ -640,7 +684,7 @@ class _RuleFormDialogState extends ConsumerState<RuleFormDialog> {
   /// 捕获当前前台（批次 6b）：进程名/包名或窗口标题填入模式框，并联动
   /// 匹配类型。检测器不可用/无前台时提示。
   void _captureForeground({required bool isTitle}) {
-    final detector = widget.app.foregroundDetector;
+    final detector = ref.read(foregroundDetectorProvider);
     String value;
     if (detector is WindowsForegroundDetector) {
       // 捕获瞬间本应用必然在前台——读"最近非本应用"快照（跟踪轮询
@@ -660,7 +704,9 @@ class _RuleFormDialogState extends ConsumerState<RuleFormDialog> {
     }
     setState(() {
       _pattern.text = value;
-      _kind = isTitle ? TrackingRuleMatchKind.title : TrackingRuleMatchKind.process;
+      _kind = isTitle
+          ? TrackingRuleMatchKind.title
+          : TrackingRuleMatchKind.process;
     });
   }
 
@@ -686,8 +732,7 @@ class _RuleFormDialogState extends ConsumerState<RuleFormDialog> {
       categoryIdsByActivity: all,
     );
     final events = ActivityPickerEvents(
-      onSelectActivity: (activity) =>
-          setState(() => _activityId = activity.id),
+      onSelectActivity: (activity) => setState(() => _activityId = activity.id),
     );
     // 契约 §5.1：移动（<600）= 底部抽屉形态——桌面双栏弹窗左栏固定 232px，
     // 紧凑视口下活动列表只剩几十像素（与计时页同款分支）。
@@ -723,26 +768,30 @@ class _RuleFormDialogState extends ConsumerState<RuleFormDialog> {
     if (activity == null) return;
     final dispatcher = ref.read(commandDispatcherProvider);
     if (widget.existing == null) {
-      await dispatcher.dispatch(CommandInvocation(
-        name: 'tracking_rule_create',
-        args: [pattern],
-        options: {
-          'kind': _kind == TrackingRuleMatchKind.title ? 'title' : 'process',
-          'activity': activity.name,
-          'sync': _sync ? 'true' : 'false',
-        },
-      ));
+      await dispatcher.dispatch(
+        CommandInvocation(
+          name: 'tracking_rule_create',
+          args: [pattern],
+          options: {
+            'kind': _kind == TrackingRuleMatchKind.title ? 'title' : 'process',
+            'activity': activity.name,
+            'sync': _sync ? 'true' : 'false',
+          },
+        ),
+      );
     } else {
-      await dispatcher.dispatch(CommandInvocation(
-        name: 'tracking_rule_update',
-        args: [widget.existing!.id],
-        options: {
-          'pattern': pattern,
-          'kind': _kind == TrackingRuleMatchKind.title ? 'title' : 'process',
-          'activity': activity.name,
-          'sync': _sync ? 'true' : 'false',
-        },
-      ));
+      await dispatcher.dispatch(
+        CommandInvocation(
+          name: 'tracking_rule_update',
+          args: [widget.existing!.id],
+          options: {
+            'pattern': pattern,
+            'kind': _kind == TrackingRuleMatchKind.title ? 'title' : 'process',
+            'activity': activity.name,
+            'sync': _sync ? 'true' : 'false',
+          },
+        ),
+      );
     }
     if (mounted) Navigator.of(context).pop(true);
   }
@@ -755,9 +804,11 @@ class _RuleFormDialogState extends ConsumerState<RuleFormDialog> {
         .where((a) => a.id == _activityId)
         .firstOrNull;
     return AlertDialog(
-      title: Text(widget.existing == null
-          ? l10n.settingsBgRuleFormTitleNew
-          : l10n.settingsBgRuleFormTitleEdit),
+      title: Text(
+        widget.existing == null
+            ? l10n.settingsBgRuleFormTitleNew
+            : l10n.settingsBgRuleFormTitleEdit,
+      ),
       content: SizedBox(
         width: 420,
         child: Column(
@@ -801,8 +852,10 @@ class _RuleFormDialogState extends ConsumerState<RuleFormDialog> {
               ],
             ),
             const SizedBox(height: 16),
-            Text(l10n.settingsBgMatchKind,
-                style: Theme.of(context).textTheme.labelMedium),
+            Text(
+              l10n.settingsBgMatchKind,
+              style: Theme.of(context).textTheme.labelMedium,
+            ),
             const SizedBox(height: 6),
             Row(
               children: [
@@ -822,20 +875,25 @@ class _RuleFormDialogState extends ConsumerState<RuleFormDialog> {
               ],
             ),
             const SizedBox(height: 16),
-            Text(l10n.settingsBgTargetActivity,
-                style: Theme.of(context).textTheme.labelMedium),
+            Text(
+              l10n.settingsBgTargetActivity,
+              style: Theme.of(context).textTheme.labelMedium,
+            ),
             const SizedBox(height: 6),
             InkWell(
               key: const ValueKey('rule-activity'),
               onTap: _pickActivity,
               borderRadius: BorderRadius.circular(8),
               child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(
-                      color: scheme.outlineVariant.withValues(alpha: 0.6)),
+                    color: scheme.outlineVariant.withValues(alpha: 0.6),
+                  ),
                 ),
                 child: Row(
                   children: [
@@ -851,10 +909,15 @@ class _RuleFormDialogState extends ConsumerState<RuleFormDialog> {
                       const SizedBox(width: 8),
                     ],
                     Expanded(
-                      child: Text(activity?.name ?? l10n.settingsBgPickActivity),
+                      child: Text(
+                        activity?.name ?? l10n.settingsBgPickActivity,
+                      ),
                     ),
-                    Icon(Icons.expand_more,
-                        size: 16, color: scheme.onSurfaceVariant),
+                    Icon(
+                      Icons.expand_more,
+                      size: 16,
+                      color: scheme.onSurfaceVariant,
+                    ),
                   ],
                 ),
               ),
@@ -942,11 +1005,4 @@ class _KindRadio extends StatelessWidget {
     );
   }
 }
-
-
-
-
-
-
-
 
