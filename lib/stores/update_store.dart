@@ -96,8 +96,6 @@ class UpdateStatus {
 
 /// 更新 store（状态机编排）。
 class UpdateStore implements UpdateActions {
-  /// 状态变更回调（唯一订阅槽，迁移期由 provider 挂载，替代 ChangeNotifier）。
-  void Function()? onChanged;
   UpdateStore({
     required this.manifestService,
     required this.verifier,
@@ -125,6 +123,28 @@ class UpdateStore implements UpdateActions {
 
   UpdateStatus get status => _status;
   UpdateState get state => _status.state;
+
+  /// 状态变更监听表（PR4-b 形状：观察者表而非单槽——壳层快照镜像与设置
+  /// 分区计数镜像各挂一条，单槽会让后挂者覆盖先挂者、壳层强制更新对话框
+  /// 静默失效）。挂载方负责对称摘除；同引用重复挂载幂等。
+  final List<void Function()> _changeListeners = [];
+
+  /// 注册状态变更监听（重复注册同一引用只生效一次）。
+  void addChangeListener(void Function() listener) {
+    if (_changeListeners.contains(listener)) return;
+    _changeListeners.add(listener);
+  }
+
+  /// 摘除监听（未注册时静默）。
+  void removeChangeListener(void Function() listener) {
+    _changeListeners.remove(listener);
+  }
+
+  void _notifyChanged() {
+    for (final listener in List<void Function()>.of(_changeListeners)) {
+      listener();
+    }
+  }
 
   // ---------------------------------------------------------------------------
   // 显式迁移表（合法迁移声明；非法迁移 fail-fast）
@@ -159,7 +179,7 @@ class UpdateStore implements UpdateActions {
     // 旧值），须统一覆盖 state，防"迁移后状态停留旧值"（copyWith 不自动
     // 设 state 的陷阱）。
     _status = (withStatus ?? _status).copyWith(state: next);
-    if (!_closed) onChanged?.call(); // dispose 后不通知（进度回调异步驱动）
+    if (!_closed) _notifyChanged(); // dispose 后不通知（进度回调异步驱动）
   }
 
   // ---------------------------------------------------------------------------
@@ -254,7 +274,7 @@ class UpdateStore implements UpdateActions {
               receivedBytes: received,
               totalBytes: total,
             );
-            if (!_closed) onChanged?.call(); // dispose 后不通知
+            if (!_closed) _notifyChanged(); // dispose 后不通知
           }
         },
       );
@@ -271,7 +291,7 @@ class UpdateStore implements UpdateActions {
         receivedBytes: 0,
         clearTotalBytes: true,
       );
-      if (!_closed) onChanged?.call(); // dispose 后不通知（async 驱动路径）
+      if (!_closed) _notifyChanged(); // dispose 后不通知（async 驱动路径）
       return failure;
     }
     final verified = result.requireValue();
@@ -349,7 +369,7 @@ class UpdateStore implements UpdateActions {
       receivedBytes: 0,
       clearTotalBytes: true,
     );
-    if (!_closed) onChanged?.call(); // dispose 后不通知
+    if (!_closed) _notifyChanged(); // dispose 后不通知
     return AppFailure(message);
   }
 
@@ -420,6 +440,7 @@ class UpdateStore implements UpdateActions {
 
   void dispose() {
     _closed = true;
+    _changeListeners.clear();
   }
 }
 
