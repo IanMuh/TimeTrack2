@@ -1072,6 +1072,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get searchActivities => '搜索活动与分类…';
 
   @override
+  String get timerNoMatch => '没有匹配的活动';
+
+  @override
   String get activityNameRequired => '名称不能为空';
 
   @override

@@ -19,6 +19,7 @@ import '../utils/day_metrics.dart';
 import '../viewmodels/activity.dart';
 import '../viewmodels/commands/command_invocation.dart';
 import '../viewmodels/time_entry.dart';
+import 'timer_quick_section.dart';
 import 'timer_widgets.dart';
 
 /// 计时页（契约 §4.1）——默认着陆页，会话焦点 + 快捷活动区。
@@ -333,7 +334,7 @@ class _TimerPageState extends ConsumerState<TimerPage> {
       onNewActivity: _openPicker,
     );
     final content = ListView(
-      padding: const EdgeInsets.fromLTRB(24, 8, 24, 40),
+      padding: const EdgeInsets.fromLTRB(24, 4, 24, 24),
       children: [
         TimerFocusSection(
           l10n: l10n,
@@ -352,7 +353,7 @@ class _TimerPageState extends ConsumerState<TimerPage> {
           onSwitch: _openPicker,
           onStart: recording ? null : _openPicker,
         ),
-        const SizedBox(height: 48),
+        const SizedBox(height: 24),
         quick,
       ],
     );
