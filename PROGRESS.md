@@ -158,6 +158,31 @@ Reminder（`d6a7f78`）、Undo（`cbea01e`，`undoStateProvider` 挂 `onChanged`
   `stores/` 定位为无 UI 依赖的服务层）；PROGRESS 本节与 `docs/Riverpod迁移B4执行计划.md`
   `/docs/Riverpod迁移B4全替代方案.md` 记录完成状态与遗留项。
 
+**迁移分支累积 diff 审查（2026-10-24，e212dd3..main，fix/riverpod-audit）**：
+子智能体按六个重点只读审查（通知丢失/生命周期、1Hz 订阅/ref.mounted、
+dataRevision/失效粒度），逐条证据核证后处置：
+- **已修（迁移引入回归）**：① `UpdateStore.onChanged` 单槽被
+  `updateSnapshotProvider`（壳层）与 `updateChangeProvider`（设置页）先后
+  覆盖——用户打开设置页后壳层镜像永久断更，强制更新对话框（不变式 12）
+  不再弹出；改 `addChangeListener` 监听表（TimerStore 同款）+ 双挂并存
+  回归测试。② stats 页按 tick 传 `StatsQuery.effectiveNow` 使 family 键每秒
+  变化：每秒 SQL 重查 + 新键无旧值整页 loading 闪烁 + 保活 offstage 分支
+  空转（迁移前 StatsStore 为事件驱动，无此三项）；改不传 effectiveNow，
+  仓储执行时取当刻，恢复事件驱动语义。
+- **已修（low 加固）**：`SyncStore.runCleanupIfDue` 补 `_disposed` 入口守卫；
+  `TimerStore.addChangeListener` 同引用去重；stats/today/timeline/background/
+  device 5 处 await 后补 `mounted` 守卫（`_wipe` 改为 await 前捕获全部句柄）；
+  data.dart 两处注释对齐实现；删除误提交的 `analyze_test.txt`。
+- **存量缺陷（迁移前后行为等价，非本次回归，记待办）**：云同步拉取设置后
+  `SettingsStore._current`/主题不刷新到重启；LAN 主机侧合并落库不 bump
+  dataRevision（host 端页面不刷新）；保留期清理删除不 bump。详见收尾清单。
+- **核实无回归**：dataRevision bump 点迁移前后 15→15 逐点对应；失效粒度
+  等价或更优（设置保存双信号：bump + settingsChangeProvider）；1Hz 订阅
+  全部条件化（空闲零秒级重建，较迁移前更优）；startupProvider await 后
+  `ref.watch` 合法（riverpod 3.4.3 源码：仅 `!mounted` 抛错）；容器释放链
+  完整（ClockStore/Sync/Tracking/Reminder/Lan/Update/DB 均有 dispose 接线，
+  `stores_test` 验证释放不抛）。
+
 
 ## 阶段 5 收尾清单（待办）
 
@@ -168,6 +193,19 @@ Reminder（`d6a7f78`）、Undo（`cbea01e`，`undoStateProvider` 挂 `onChanged`
 - [ ] 更新流程人工冒烟（检查→下载→校验→Windows staging 重启生效 / Android 兜底浏览器）
 
 **代码挂账（延续阶段 2e/3/4）**：
+- [ ] 云同步拉取设置后刷新 `SettingsStore._current`（迁移审查 M：设备 A 改
+      主题 → 设备 B 同步拉取直写库绕过 store 缓存 → 主题/设置分区陈旧到
+      重启；迁移前后等价的存量缺陷。方向：同步成功后编排 reload，需考虑
+      与本地保存竞态）
+- [ ] LAN 主机侧合并落库后 bump dataRevision（迁移审查 M：host 收到客户端
+      推送 mergeBundle 后本端页面不刷新；api 层无 DataRevision 引用，需
+      LanSyncServer 合并成功回调上抛 LanStore）
+- [ ] 保留期清理删除数据后补 bump（迁移审查 L：覆盖清理区间的统计视图
+      陈旧至下次任意 bump；fire-and-forget，需与 syncNow 的 bump 合并语义）
+- [ ] 正常退出不释放 ProviderContainer（迁移审查 L 挂起：进程退出 OS 回收
+      + SQLite journal 兜底，迁移前后等价；引入优雅退出属新特性）
+- [ ] UpdateStore.dispose 不中止在途下载（迁移审查 L 挂起：通知已 `_closed`
+      守卫，下载完成落盘无害；中止属增强）
 - [ ] Windows 安装器真实目录注入（main 装配，现为 Directory.current 占位）+
       待安装标记消费（applyStaging 重启闭环）——更新系统最后一段
 - [ ] Android 自动安装接线（tryInstallApk 平台守卫 + REQUEST_INSTALL_PACKAGES +
