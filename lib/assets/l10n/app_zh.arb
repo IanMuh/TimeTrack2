@@ -349,6 +349,7 @@
   "secondaryCategories": "副分类",
   "rootCategory": "根分类",
   "searchActivities": "搜索活动与分类…",
+  "timerNoMatch": "没有匹配的活动",
   "activityNameRequired": "名称不能为空",
   "categoryEmptyActivities": "此分类暂无活动",
   "categoryCreated": "分类已创建",

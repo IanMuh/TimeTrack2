@@ -1087,6 +1087,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get searchActivities => 'Search activities and categories…';
 
   @override
+  String get timerNoMatch => 'No matching activities';
+
+  @override
   String get activityNameRequired => 'Name is required';
 
   @override
