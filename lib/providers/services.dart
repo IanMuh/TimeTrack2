@@ -1,4 +1,4 @@
-﻿import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../api/platform/android_tracking.dart';
 import '../api/platform/windows_foreground_detector.dart';
@@ -31,9 +31,9 @@ final foregroundDetectorProvider = Provider<ForegroundDetector>((ref) {
       bridge: ref.watch(androidTrackingBridgeProvider),
     );
     final clock = ref.watch(clockStoreProvider);
-    clock.addListener(detector.maybeRefresh);
+    clock.addChangeListener(detector.maybeRefresh);
     ref.onDispose(() {
-      clock.removeListener(detector.maybeRefresh);
+      clock.removeChangeListener(detector.maybeRefresh);
       detector.dispose();
     });
     return detector;

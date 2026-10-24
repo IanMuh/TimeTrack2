@@ -127,7 +127,7 @@ class CategoryStore {
     // 订阅 dataRevision：其他 store（Timer/Settings）与未来同步导入/undo
     // 恢复 bump 时统一重建树缓存（不变式 9——防"分类改完统计/选择器不刷新"
     // 的历史问题）。_reloadSeq 序号守卫天然去重并发 reload。
-    dataRevision.addListener(_reloadOnDataChange);
+    dataRevision.addChangeListener(_reloadOnDataChange);
   }
 
   final CategoryRepository categories;
@@ -136,8 +136,7 @@ class CategoryStore {
 
   final CategoryChangeApplier _applier;
 
-  /// 树缓存重建/加载失败后的通知（由 `categoryChangeProvider` 挂载，
-  /// PR4-b）。ChangeNotifier 移除后，UI 通知走 provider。
+  /// 树缓存重建/加载失败后的通知（由 `categoryChangeProvider` 挂载）。
   void Function()? onChanged;
 
   bool _disposed = false;
@@ -484,10 +483,10 @@ class CategoryStore {
     dataRevision.bump();
   }
 
-  /// 容器释放时标记（不继承 ChangeNotifier）。
+  /// 容器释放时标记（dispose 只置位，无 ChangeNotifier 生命周期）。
   void dispose() {
     _disposed = true;
-    dataRevision.removeListener(_reloadOnDataChange);
+    dataRevision.removeChangeListener(_reloadOnDataChange);
   }
 }
 

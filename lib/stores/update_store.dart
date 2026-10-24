@@ -1,4 +1,4 @@
-﻿/// 更新 store（模块 3c②）：检查/下载/校验/安装的有限状态机编排。
+/// 更新 store（模块 3c②）：检查/下载/校验/安装的有限状态机编排。
 ///
 /// 设计（阶段 3 框架结论）：
 /// - **显式迁移表**（非散落 switch）：`Map<UpdateState, Set<UpdateState>>`
@@ -43,7 +43,7 @@ enum UpdateState {
 
 /// 更新编排状态（状态 + 数据字段）。
 class UpdateStatus {
-  /// 状态变更回调（唯一订阅槽，迁移期由 provider 挂载，替代 ChangeNotifier）。
+  /// 状态变更回调（唯一订阅槽，由 provider 挂载）。
   const UpdateStatus({
     required this.state,
     this.receivedBytes = 0,

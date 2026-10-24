@@ -79,7 +79,7 @@ class ReminderStore {
     required this.dispatch,
     DateTime Function()? now,
   }) : _now = now ?? DateTime.now {
-    clock.addListener(_onClockTick);
+    clock.addChangeListener(_onClockTick);
   }
 
   final ClockStore clock;
@@ -87,12 +87,12 @@ class ReminderStore {
   final TimerStore timer;
 
   /// 指令通道入口（铁律 7）：「停止」等数据写操作经 CommandDispatcher
-  /// 分发（与计时条同一入口/反馈语义）。AppStore 注入 `dispatcher.dispatch`，
+  /// 分发（与计时条同一入口/反馈语义）。容器注入 `dispatcher.dispatch`，
   /// 测试注入记录型闭包。
   final Future<CommandResult> Function(CommandInvocation invocation) dispatch;
 
   /// 运行条目"未分配活动"判定（ActivityRepository.activityIdIsUnassigned，
-  /// AppStore 装配注入——本 store 不直接依赖活动仓储）。
+  /// 容器装配注入——本 store 不直接依赖活动仓储）。
   final Future<bool> Function(String activityId) isUnassignedActivity;
 
   final DateTime Function() _now;
@@ -126,10 +126,10 @@ class ReminderStore {
   /// 快速提醒已触发的当日（dayStart 粒度；null = 今日未触发）。
   DateTime? _quickFiredDay;
 
-  /// 容器释放时标记（不继承 ChangeNotifier）。
+  /// 容器释放时标记（dispose 只置位，无 ChangeNotifier 生命周期）。
   void dispose() {
     _disposed = true;
-    clock.removeListener(_onClockTick);
+    clock.removeChangeListener(_onClockTick);
   }
 
   /// 时钟 tick 入口（异步判定收敛为 fire-and-forget，异常不逃逸出

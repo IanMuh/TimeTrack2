@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -105,7 +105,7 @@ class _AppShellState extends ConsumerState<AppShell>
     _sessionStart = ref.read(clockStoreProvider).now();
     _wireTray();
     _wireAndroidTracking();
-    // 可疑条目启动检测：AppStore.init 已 await timer.refresh()，postFrame
+    // 可疑条目启动检测：启动编排已 await timer.refresh()，postFrame
     // 时 runningEntry 缓存可用；timer 监听兜底晚到场景（幂等，标志位去重）。
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_checkSuspiciousEntry());
@@ -116,7 +116,7 @@ class _AppShellState extends ConsumerState<AppShell>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    // 托盘回调指向本 State：dispose 后必须摘除（服务随 AppStore 存活）。
+    // 托盘回调指向本 State：dispose 后必须摘除（服务随容器存活）。
     _tray.onCommand = null;
     _tray.onCloseToTray = null;
     _androidBridge.onPauseRequested = null;
@@ -774,13 +774,13 @@ class _AppShellState extends ConsumerState<AppShell>
 
   @override
   Widget build(BuildContext context) {
-    // B4a：引擎状态经 provider 值快照订阅（替代 initState 里的 addListener）。
+    // 引擎状态经 provider 值快照订阅（替代旧 initState 里的 addListener）。
     // handler 体不变、仍读物理引擎；快照只在状态值真正变化时通知，避免
     // TimerStore 内部无关字段变更引起壳层重建。
     ref.listen(timerSnapshotProvider, (_, _) => _onTimerForSuspicious());
     ref.listen(reminderSnapshotProvider, (_, _) => _onReminderChanged());
     ref.listen(updateSnapshotProvider, (_, _) => _onUpdateChanged());
-    // B4c：设置变更 → Android 前台服务同步（原 settings.addListener 白名单）。
+    // 设置变更 → Android 前台服务同步（取代原 settings.addListener 白名单）。
     ref.listen(
       settingsChangeProvider,
       (_, _) => unawaited(_syncAndroidService()),

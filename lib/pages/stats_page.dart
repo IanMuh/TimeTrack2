@@ -48,7 +48,7 @@ class _StatsPageState extends ConsumerState<StatsPage> {
     return DateTime(n.year, n.month, n.day);
   }
 
-  /// 迁移期桥接：分类树/设置仍由 ChangeNotifier store 持有（B4 换 Notifier），
+  /// 变更桥接：分类树/设置是普通服务对象，由 provider 变更计数驱动重建，
   /// build 里 watch 变更计数保证重建，方法体经 read 取当前快照。
   CategoryStore get _categories => ref.read(categoryStoreProvider);
   SettingsStore get _settings => ref.read(settingsStoreProvider);
@@ -83,7 +83,7 @@ class _StatsPageState extends ConsumerState<StatsPage> {
     }
   }
 
-  // 迁移期：范围条目/统计聚合由 provider 提供（StatsStore 缓存已删）；
+  // 范围条目/统计聚合由 provider 提供（无 store 缓存）；
   // 范围/维度/过滤参数变化 = family 换键；写操作 bump 修订号失效。
   // 分类关联过滤仍读 CategoryStore（B3 设置批次随分区迁移）。
 
@@ -122,7 +122,7 @@ class _StatsPageState extends ConsumerState<StatsPage> {
 
   @override
   Widget build(BuildContext context) {
-    // 迁移期桥接：分类树/设置仍由 ChangeNotifier store 持有（B4 换 Notifier），
+    // 变更桥接：分类树/设置是普通服务对象，变更计数驱动重建
     // 变更计数驱动重建（筛选树/周起始日随库刷新）。
     ref.watch(categoryChangeProvider);
     ref.watch(settingsChangeProvider);

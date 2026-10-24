@@ -17,7 +17,7 @@ void main() {
     test('bump 触发监听；ValueNotifier == 语义不重复通知同值', () {
       final revision = DataRevision();
       var notified = 0;
-      revision.addListener(() => notified++);
+      revision.addChangeListener(() => notified++);
       revision.bump(); // 0 → 1
       expect(notified, 1);
       // 手动置为同值：ValueNotifier 按 == 判定，不重复通知。
@@ -31,7 +31,7 @@ void main() {
     test('修订号禁止回退（debug 断言暴露编程错误；前进有效）', () {
       final revision = DataRevision();
       var notified = 0;
-      revision.addListener(() => notified++);
+      revision.addChangeListener(() => notified++);
       revision.bump(); // 0 → 1
       // debug 下回退触发 AssertionError（防 UI 缓存按顺序比较漏失效）。
       expect(() => revision.value = 0, throwsAssertionError);

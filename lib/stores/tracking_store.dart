@@ -1,4 +1,4 @@
-﻿/// 后台自动记录 store（模块 3c③，2c' 新功能落位）。
+/// 后台自动记录 store（模块 3c③，2c' 新功能落位）。
 ///
 /// 职责：
 /// - **规则 CRUD**：saveRule/deleteRule（syncEnabled 语义沿用——false 仅
@@ -34,7 +34,7 @@ export '../viewmodels/foreground_detector.dart' show ForegroundDetector;
 
 /// 后台自动记录 store。
 class TrackingStore {
-  /// 状态变更回调（唯一订阅槽，迁移期由 provider 挂载，替代 ChangeNotifier）。
+  /// 状态变更回调（唯一订阅槽，由 provider 挂载）。
   void Function()? onChanged;
   TrackingStore({
     required this.rules,
@@ -47,7 +47,7 @@ class TrackingStore {
     this.trackingEnabled,
   })  : detector = detector ?? NoopForegroundDetector(),
         _now = now ?? DateTime.now {
-    clock.addListener(_onTick);
+    clock.addChangeListener(_onTick);
   }
 
   final TrackingRuleRepository rules;
@@ -244,14 +244,14 @@ class TrackingStore {
 
   void dispose() {
     _disposed = true;
-    clock.removeListener(_onTick);
+    clock.removeChangeListener(_onTick);
   }
 }
 
 /// 无平台实现时的空检测器（阶段 4 前自动记录不动作；公开类供 UI 判定
 /// "检测器是否已接平台层"——批次 6 FFI 接入后装配真实实现）。
 class NoopForegroundDetector implements ForegroundDetector {
-  /// 状态变更回调（唯一订阅槽，迁移期由 provider 挂载，替代 ChangeNotifier）。
+  /// 状态变更回调（唯一订阅槽，由 provider 挂载）。
   @override
   String? get processName => null;
   @override

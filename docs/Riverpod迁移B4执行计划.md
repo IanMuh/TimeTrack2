@@ -5,6 +5,8 @@
 > `lib/providers/foundation.dart`。本阶段目标：把**剩余 store 与引擎**迁到 Notifier，
 > 删除 `AppStore`，让 `stores/` 只保留撤销执行器与命令分发器。
 
+> **状态（2026-10-24）：已完成**，保留为分刀执行记录；验收结果见 `PROGRESS.md`。
+
 ## 不变式（每一刀都必须满足）
 
 1. 行为等价：既有 801 测试全绿，`flutter analyze` 0 issues；每刀独立 commit。

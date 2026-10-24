@@ -1,4 +1,4 @@
-﻿import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../stores/category_store.dart';
 import '../stores/reminder_store.dart';
@@ -226,7 +226,7 @@ class UpdateSnapshotNotifier extends Notifier<UpdateSnapshot> {
   }
 }
 
-/// 迁移期（B4c）设置/分类引擎的**实例访问器**。
+/// 设置/分类服务的**实例访问器**。
 ///
 /// 这两个 provider 只负责“拿到当前实例”，本身不触发重建；页面/分区在 build
 /// 里 `ref.watch(settingsChangeProvider)`（或分类对应 change provider）拿到

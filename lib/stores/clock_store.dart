@@ -15,11 +15,14 @@ import 'package:flutter/foundation.dart';
 /// - **绝对时间重算**：tick 回调不维护自增累计状态，[now] 每次从注入源取
 ///   真实当前时刻（Timer 间隔只是近似，累加会漂移；跨日滚转/边界计算依赖
 ///   精确时刻）。注入源默认 [DateTime.now]。
-/// - **生命周期**：owner（领域 store / AppStore）负责 [dispose] 取消 Timer——
+/// - **生命周期**：owner（`providers/` 容器）负责 [dispose] 取消 Timer——
 ///   Timer 必须持有引用并 cancel，否则泄漏（Flutter 官方 + 社区共识）。
+/// - **订阅**：[addChangeListener] / [removeChangeListener] 显式配对；由
+///   `providers/foundation.dart` 映射为 Riverpod 状态（`clockTickProvider`），
+///   UI 不直接订阅本服务。
 /// - [now] / [interval] 可注入：测试固定时刻序列 + 短间隔 + fake_async 做
 ///   确定性验证。
-class ClockStore extends ChangeNotifier {
+class ClockStore {
   ClockStore({
     this.interval = const Duration(seconds: 1),
     DateTime Function()? now,
@@ -38,36 +41,32 @@ class ClockStore extends ChangeNotifier {
 
   final DateTime Function() _now;
 
+  final List<void Function()> _listeners = [];
+
   Timer? _timer;
 
-  /// 已 dispose：防 dispose 后误 start() 重建 Timer（永不取消的资源泄漏 +
-  /// 对已销毁 ChangeNotifier 触发 notifyListeners 的调试断言难定位）。
+  /// 已 dispose：防 dispose 后误 start() 重建 Timer（永不取消的资源泄漏）。
   bool _disposed = false;
 
   /// 是否正在运行。
   bool get isRunning => _timer != null;
+
+  /// 注册 tick 监听（幂等：同一引用重复注册只保留一次）。
+  void addChangeListener(void Function() listener) {
+    if (!_listeners.contains(listener)) _listeners.add(listener);
+  }
+
+  /// 移除 tick 监听。
+  void removeChangeListener(void Function() listener) {
+    _listeners.remove(listener);
+  }
 
   /// 启动时钟；幂等（已在运行则不重启）。dispose 后调用无效（静默忽略）。
   void start() {
     if (_disposed || _timer != null) return;
     _timer = Timer.periodic(interval, (_) {
       // 绝对时间重算：不依赖 tick 累计，防漂移（见文件头）。
-      // **异常隔离（r 修复）**：任一 listener 抛异常都会沿回调向外传播——
-      // 按 Dart 语义，Timer.periodic 回调抛错会导致该周期 Timer 被取消，
-      // 全局时钟静默停止、其余订阅者不再收到任何 tick。捕获并上报而非
-      // 让异常冒泡取消定时器。
-      try {
-        notifyListeners();
-      } catch (e, st) {
-        FlutterError.reportError(
-          FlutterErrorDetails(
-            exception: e,
-            stack: st,
-            library: 'clock_store',
-            context: ErrorDescription('ClockStore tick 通知'),
-          ),
-        );
-      }
+      _notify();
     });
   }
 
@@ -80,10 +79,34 @@ class ClockStore extends ChangeNotifier {
   /// 当前时刻（来自注入源，默认真实时钟）。
   DateTime now() => _now();
 
-  @override
+  /// 逐监听者异常隔离：任一订阅者抛异常不得取消周期 Timer（Dart 语义下
+  /// Timer.periodic 回调抛错会取消该 Timer，全局时钟静默停止）。
+  void _notify() {
+    // 快照迭代：允许监听者在自身回调中增删监听。
+    for (final listener in List<void Function()>.of(_listeners)) {
+      try {
+        listener();
+      } catch (e, st) {
+        FlutterError.reportError(
+          FlutterErrorDetails(
+            exception: e,
+            stack: st,
+            library: 'clock_store',
+            context: ErrorDescription('ClockStore tick 通知'),
+          ),
+        );
+      }
+    }
+  }
+
+  /// 测试专用：手动触发一次 tick（不依赖真实 1Hz Timer）。
+  @visibleForTesting
+  void emitTick() => _notify();
+
+  /// 释放：取消 Timer 并清空监听。
   void dispose() {
     _disposed = true;
     stop();
-    super.dispose();
+    _listeners.clear();
   }
 }

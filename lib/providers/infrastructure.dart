@@ -26,7 +26,7 @@ final appVersionProvider = Provider<String>((ref) => '0.1.0');
 
 /// 云同步后端。未配置 Supabase 时保持 Noop（完全离线）。
 ///
-/// 真实后端接线属于阶段 5 云同步收口；此处先保留注入点，B4 编排迁移时
+/// 真实后端接线属于阶段 5 云同步收口；此处先保留注入点、启动编排接线时
 /// 按配置切换。
 final syncBackendProvider = Provider<SyncBackend>((ref) => NoopSyncBackend());
 

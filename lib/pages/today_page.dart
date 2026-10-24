@@ -91,7 +91,7 @@ class _TodayPageState extends ConsumerState<TodayPage> {
     unassignedActivityId: unassignedActivityId,
   );
 
-  /// 迁移期桥接：分类树/设置仍由 ChangeNotifier store 持有（B4 换 Notifier），
+  /// 变更桥接：分类树/设置是普通服务对象，由 provider 变更计数驱动重建，
   /// build 里 watch 变更计数保证重建，方法体经 read 取当前快照。
   CategoryStore get _categories => ref.read(categoryStoreProvider);
   SettingsStore get _settings => ref.read(settingsStoreProvider);
@@ -185,7 +185,7 @@ class _TodayPageState extends ConsumerState<TodayPage> {
   @override
   Widget build(BuildContext context) {
     final day = _day;
-    // 迁移期桥接：分类树/设置变更（B4 换 Notifier 后由 state 直接驱动）。
+    // 变更桥接：分类树/设置变更经 provider 计数触发重建。
     ref.watch(categoryChangeProvider);
     ref.watch(settingsChangeProvider);
     final isToday = day == _today;
