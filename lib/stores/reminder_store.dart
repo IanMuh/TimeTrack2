@@ -21,8 +21,7 @@ library;
 
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
-
+import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
 import '../utils/date_time_ext.dart';
 import '../viewmodels/commands/command_invocation.dart';
 import '../viewmodels/profile_settings.dart' show ReminderMethod;
@@ -71,7 +70,7 @@ class QuickStartReminder extends ReminderRequest {
 }
 
 /// 提醒 store。
-class ReminderStore extends ChangeNotifier {
+class ReminderStore {
   ReminderStore({
     required this.clock,
     required this.settings,
@@ -97,6 +96,9 @@ class ReminderStore extends ChangeNotifier {
   final Future<bool> Function(String activityId) isUnassignedActivity;
 
   final DateTime Function() _now;
+
+  /// 提醒状态变更通知（由 `reminderSnapshotProvider` 挂载，PR4-b）。
+  void Function()? onChanged;
 
   bool _disposed = false;
 
@@ -124,11 +126,10 @@ class ReminderStore extends ChangeNotifier {
   /// 快速提醒已触发的当日（dayStart 粒度；null = 今日未触发）。
   DateTime? _quickFiredDay;
 
-  @override
+  /// 容器释放时标记（不继承 ChangeNotifier）。
   void dispose() {
     _disposed = true;
     clock.removeListener(_onClockTick);
-    super.dispose();
   }
 
   /// 时钟 tick 入口（异步判定收敛为 fire-and-forget，异常不逃逸出
@@ -179,7 +180,7 @@ class ReminderStore extends ChangeNotifier {
               method: method,
               id: 'ongoing:${running.id}:${now.millisecondsSinceEpoch}',
             );
-            notifyListeners();
+            onChanged?.call();
             return;
           }
         }
@@ -198,7 +199,7 @@ class ReminderStore extends ChangeNotifier {
           if (method != ReminderMethod.silent) {
             _active = QuickStartReminder(
                 method: method, id: 'quick:${dayStart.toIso8601String()}');
-            notifyListeners();
+            onChanged?.call();
           }
         }
       }
@@ -226,7 +227,7 @@ class ReminderStore extends ChangeNotifier {
         minutes: settings.current?.reminderIntervalMinutes ?? 10);
     _thresholdNextAt = _now().add(interval);
     _active = null;
-    notifyListeners();
+    onChanged?.call();
   }
 
   /// 「停止」：经指令通道结束当前运行（铁律 7，与计时条「停止」同一
@@ -241,7 +242,7 @@ class ReminderStore extends ChangeNotifier {
     _active = null;
     _thresholdEntryId = null;
     _thresholdNextAt = null;
-    notifyListeners();
+    onChanged?.call();
     try {
       await dispatch(CommandInvocation(name: 'stop'));
     } finally {
@@ -253,6 +254,9 @@ class ReminderStore extends ChangeNotifier {
   void dismissQuick() {
     if (_active is! QuickStartReminder) return;
     _active = null;
-    notifyListeners();
+    onChanged?.call();
   }
 }
+
+
+

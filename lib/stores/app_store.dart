@@ -1,4 +1,4 @@
-/// 应用级聚合 store（模块 3d②）：组装全部 store + 启动编排。
+﻿/// 应用级聚合 store（模块 3d②）：组装全部 store + 启动编排。
 ///
 /// 设计：
 /// - **只编排不转发通知**（防 rebuild 风暴——框架调研结论）：AppStore 持有
@@ -74,6 +74,7 @@ class AppStore {
     required this.dispatcher,
     required this.fileInterop,
     required this.ownsFoundation,
+    required this.ownsDomain,
   });
 
   /// 基础服务（clock/dataRevision/undo）是否由本对象创建并负责释放。
@@ -82,6 +83,12 @@ class AppStore {
   /// 双重 dispose（ChangeNotifier 二次 dispose 会触发断言）。仅供迁移期
   /// 装配层使用，不属于业务 API。
   final bool ownsFoundation;
+
+  /// 领域 store（timer/category/activity/settings）是否由本对象创建并释放。
+  ///
+  /// PR4-a 起由 `providers/stores.dart` 创建并注入，本对象不再释放；存量
+  /// 测试直接 `create` 时仍自建自释放。仅迁移期装配层使用。
+  final bool ownsDomain;
 
   final AppDatabase database;
 
@@ -145,6 +152,10 @@ class AppStore {
     ClockStore? clockOverride,
     DataRevision? dataRevisionOverride,
     UndoStore? undoOverride,
+    TimerStore? timerOverride,
+    CategoryStore? categoryOverride,
+    ActivityStore? activityOverride,
+    SettingsStore? settingsOverride,
   }) async {
     // ---- 仓储层 ----
     final activities = ActivityRepository(database: database);
@@ -184,28 +195,47 @@ class AppStore {
     final revision = dataRevisionOverride ?? DataRevision();
     final clock = clockOverride ?? ClockStore();
 
+    // ---- 领域 store 装配归属（PR4-a）----
+    // Notifier 实例只能由 NotifierProvider 创建；迁移期先把“创建/释放”搬到
+    // providers/stores.dart，AppStore 只接收唯一实例。四者必须同时注入或
+    // 同时省略（省略 = 存量测试自建自释放）。
+    final ownsDomain = timerOverride == null;
+    if (ownsDomain &&
+        (categoryOverride != null ||
+            activityOverride != null ||
+            settingsOverride != null)) {
+      throw ArgumentError(
+        'timerOverride/categoryOverride/activityOverride/settingsOverride '
+        '必须同时注入或同时省略',
+      );
+    }
+
     // ---- 领域 store ----
-    final timer = TimerStore(
-      entries: entries,
-      undo: undo,
-      clock: clock,
-      dataRevision: revision,
-    );
-    final category = CategoryStore(
-      categories: categories,
-      undo: undo,
-      dataRevision: revision,
-    );
-    final activity = ActivityStore(
-      activities: activities,
-      undo: undo,
-      dataRevision: revision,
-    );
-    final settings = SettingsStore(
-      settings: settingsRepo,
-      undo: undo,
-      dataRevision: revision,
-    );
+    final timer = timerOverride ??
+        TimerStore(
+          entries: entries,
+          undo: undo,
+          clock: clock,
+          dataRevision: revision,
+        );
+    final category = categoryOverride ??
+        CategoryStore(
+          categories: categories,
+          undo: undo,
+          dataRevision: revision,
+        );
+    final activity = activityOverride ??
+        ActivityStore(
+          activities: activities,
+          undo: undo,
+          dataRevision: revision,
+        );
+    final settings = settingsOverride ??
+        SettingsStore(
+          settings: settingsRepo,
+          undo: undo,
+          dataRevision: revision,
+        );
 
     // ---- 编排 store ----
     final sync = SyncStore(
@@ -311,6 +341,7 @@ class AppStore {
       dispatcher: dispatcher,
       fileInterop: fileInterop,
       ownsFoundation: ownsFoundation,
+      ownsDomain: ownsDomain,
     );
     await store.init(runStartupChecks: runStartupChecks);
     return store;
@@ -380,15 +411,16 @@ class AppStore {
     }
     update.dispose();
     sync.dispose();
-    settings.dispose();
     reminder.dispose();
-    category.dispose();
-    activity.dispose();
-    timer.dispose();
+    if (ownsDomain) {
+      settings.dispose();
+      category.dispose();
+      timer.dispose();
+    }
     if (ownsFoundation) {
       clock.dispose();
       dataRevision.dispose();
-      undo.dispose();
     }
   }
 }
+

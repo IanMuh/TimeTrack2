@@ -1,4 +1,4 @@
-/// 计时核心 store（模块 3b）：时间条目全部写路径的单一入口。
+﻿/// 计时核心 store（模块 3b）：时间条目全部写路径的单一入口。
 ///
 /// 职责：
 /// - **统一写路径**：switch/stop/add/split/merge/delete 全部经仓储执行；
@@ -30,8 +30,6 @@
 /// 新运行条目现状；跨条目的完整时间线重放不在本地 undo 语义内（冲突校验
 /// 会让时序不一致的恢复被拒）。
 library;
-
-import 'package:flutter/foundation.dart';
 
 import '../data/repositories/time_entry_repository.dart';
 import '../utils/result.dart';
@@ -107,7 +105,7 @@ class TimerChangeApplier implements UndoApplier {
 }
 
 /// 计时 store。
-class TimerStore extends ChangeNotifier {
+class TimerStore {
   TimerStore({
     required this.entries,
     required this.undo,
@@ -139,10 +137,28 @@ class TimerStore extends ChangeNotifier {
 
   final TimerChangeApplier _applier;
 
+  final List<void Function()> _changeListeners = [];
+
+  /// 变更监听（PR4-b：去 `ChangeNotifier` 后的最小观察者表）。
+  /// 计时快照与 	imerChangeProvider 各自挂一条，生命周期由 provider 管。
+  void addChangeListener(void Function() listener) {
+    _changeListeners.add(listener);
+  }
+
+  void removeChangeListener(void Function() listener) {
+    _changeListeners.remove(listener);
+  }
+
+  void _notifyChanged() {
+    for (final listener in List<void Function()>.of(_changeListeners)) {
+      listener();
+    }
+  }
+
   /// 时钟 tick：仅运行中通知——空闲时无需秒级重建计时条（B3 性能收敛）。
   void _onClockTick() {
     if (_disposed || _runningEntry == null) return;
-    notifyListeners();
+    _notifyChanged();
   }
 
   /// 已 dispose：恢复写库回调（async refresh）可能在 dispose 后才恢复执行，
@@ -179,7 +195,7 @@ class TimerStore extends ChangeNotifier {
   void clearManualSessionHold() {
     if (!_manualHold) return;
     _manualHold = false;
-    notifyListeners();
+    _notifyChanged();
   }
 
   // ---------------------------------------------------------------------------
@@ -192,7 +208,7 @@ class TimerStore extends ChangeNotifier {
     final running = await entries.runningEntry();
     if (_disposed) return; // await 期间可能已 dispose
     _runningEntry = running;
-    notifyListeners();
+    _notifyChanged();
   }
 
   // ---------------------------------------------------------------------------
@@ -590,13 +606,14 @@ class TimerStore extends ChangeNotifier {
   void _afterWrite() {
     dataRevision.bump();
     if (_disposed) return; // await 写路径后可能已 dispose：跳过通知
-    notifyListeners();
+    _notifyChanged();
   }
 
-  @override
+  /// 容器释放时标记（不继承 ChangeNotifier）。
   void dispose() {
     _disposed = true;
     clock.removeListener(_onClockTick);
-    super.dispose();
+    _changeListeners.clear();
   }
 }
+

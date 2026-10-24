@@ -1,4 +1,4 @@
-# 开发进度记录
+﻿# 开发进度记录
 
 > 供中断后快速恢复。权威细节以 `TimeTrack2 从零重建执行计划（完整最终版）.md` 为准；
 > 开发纪律见 `AGENTS.md`（逐模块确认、审查循环至清零、无用户指示不 push）。
@@ -102,11 +102,35 @@ utils 不动；分 2 个 PR（PR1 = B0 地基 + B1 基础状态，PR2 = 其余�
 验收：`lib/pages` 中 `ListenableBuilder` 与 `addListener` 均为 0；analyze 0；
 803 测试全绿。PR3 可合并。
 
+**PR4-a（feat/riverpod-migration-4）**：领域 store 装配归属先行——新建
+`lib/providers/stores.dart`（`DomainStores` + `domainStoresProvider`，容器构造并
+按注册逆序释放 timer/settings/category/activity）；`AppStore.create` 新增
+`timerOverride/categoryOverride/activityOverride/settingsOverride`（四者必须同时
+注入或同时省略）与 `ownsDomain` 字段，注入时不再创建/释放这四个 store；
+`appStoreProvider` 传入领域实例；`settingsStoreProvider`/`categoryStoreProvider`
+改为读 `domainStoresProvider`（解除对 `appStoreInstanceProvider` 的依赖）；
+`TimeTrack2App` 的测试作用域补 `domainStoresProvider.overrideWithValue(...)`
+——否则设置/分类页读到的容器自建实例与 `AppStore` 分叉，主题/时制写库后页面
+不刷新（3 个 UI 用例曾失败）。新增 `test/providers/stores_test.dart` 2 例
+（同一实例 + 容器释放后领域 store 已 dispose）。验收：analyze 0；全量
+**803 passed**。
+
+**PR4-b 第一步（活动）**：`ActivityStore` 去掉 `ChangeNotifier`（保留
+`createActivity` 写路径、undo applier 与 `dataRevision.bump()`），新增
+`activityProvider`（`Notifier<int>`）承接通知：`ActivityStore.onChanged` 由
+notifier build 时挂载，写成功与撤销恢复都推进；`ActivityStore` 不再有
+`dispose`。Dispatcher 暂时仍持 `ActivityStore`（PR4-g 统一读面）。新增
+`test/providers/activity_test.dart` 2 例（指令写路径递增、undo 恢复递增）。
+验收：analyze 0；全量 **807 passed**。
+
 **剩余（PR4/PR5）**：见下。
 
-**剩余（PR4）**：Settings → Activity → Category → Timer → Reminder → Undo →
-CommandDispatcher 依次改 Notifier（按 A 方案），页面/测试切 provider，删对应
-store 与 store 测试（迁移为容器测试）。
+**剩余（PR4）**：Activity 已完成 → Settings → Category → Timer → Reminder →
+Undo → CommandDispatcher 依次改 Notifier（按 A 方案），页面/测试切 provider，
+删对应 store 与 store 测试（迁移为容器测试）。
+顺序修订原因见 `docs/Riverpod迁移B4全替代方案.md` §8：Notifier 实例只能由
+`NotifierProvider` 创建，而领域 store 目前在 `AppStore.create` 内 new 出来并交给
+Dispatcher，跳过 PR4-a 会产生双实例或容器反向依赖 AppStore 的坏形状。
 
 **剩余（PR5）**：Sync/Update/Tracking/LAN 改 Notifier；托盘/安装器/Android 桥
 变纯服务 provider；`appStartupProvider` 接管 seed/rollover/清理；删除
@@ -226,3 +250,10 @@ slicesForRange/computeDayMetrics）+ 自然语言→指令解析。
 
 - 每模块一个 Conventional Commit；合并到 main 走 feature 分支 + PR（用户审批）；未经用户明确指示不 push 除 feature 分支以外的任何分支
 - ocr 审查：日常 `--commit` 增量、模块门禁 `--from main --to` 分支 diff、全仓库 `ocr scan`；属实缺陷清零 + 误报硬证据排除；停循环=连续 2 轮无新增属实 high/medium
+
+
+
+
+
+
+

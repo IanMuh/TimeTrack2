@@ -1,4 +1,4 @@
-/// 设置 store（模块 3b）：配置文件读写（本地单例 id=1）。
+﻿/// 设置 store（模块 3b）：配置文件读写（本地单例 id=1）。
 ///
 /// 职责：
 /// - 读取 [ProfileSettings]（默认值回退）；
@@ -6,8 +6,6 @@
 ///   决胜负，copyWith 不自动推进——不推进会被远端版本覆盖而丢失）；
 /// - undo 包装：恢复旧配置；dataRevision bump。
 library;
-
-import 'package:flutter/foundation.dart';
 
 import '../data/repositories/settings_repository.dart';
 import '../utils/result.dart';
@@ -56,7 +54,7 @@ class SettingsChangeApplier implements UndoApplier {
 }
 
 /// 设置 store。
-class SettingsStore extends ChangeNotifier {
+class SettingsStore {
   SettingsStore({
     required this.settings,
     required this.undo,
@@ -66,7 +64,7 @@ class SettingsStore extends ChangeNotifier {
       if (_disposed) return;
       _current = saved; // 恢复写库后同步内存配置（与库一致）
       dataRevision.bump();
-      notifyListeners();
+      onChanged?.call();
     };
   }
 
@@ -75,6 +73,10 @@ class SettingsStore extends ChangeNotifier {
   final DataRevision dataRevision;
 
   final SettingsChangeApplier _applier;
+
+  /// 写成功/恢复成功后的通知（由 `settingsChangeProvider` 挂载，PR4-b）。
+  /// ChangeNotifier 移除后，通知走 provider；`dispose` 仅置标记。
+  void Function()? onChanged;
 
   bool _disposed = false;
   bool _saving = false; // save 防重入（并发保存以同一基准入栈冲突）
@@ -95,7 +97,7 @@ class SettingsStore extends ChangeNotifier {
     }
     if (_disposed || seq != _reloadSeq) return; // await 期间 dispose/更新的 reload
     _current = result.requireValue();
-    notifyListeners();
+    onChanged?.call();
   }
 
   /// 保存配置（updatedAt 显式推进到 now——LWW 不丢修改）。
@@ -136,7 +138,7 @@ class SettingsStore extends ChangeNotifier {
         );
       }
       dataRevision.bump();
-      notifyListeners();
+      onChanged?.call();
       return result;
     } finally {
       _saving = false;
@@ -172,9 +174,9 @@ class SettingsStore extends ChangeNotifier {
         a.timezone == b.timezone;
   }
 
-  @override
+  /// 容器释放时标记（不继承 ChangeNotifier：调用方不再有 addListener）。
   void dispose() {
     _disposed = true;
-    super.dispose();
   }
 }
+

@@ -1,4 +1,4 @@
-/// 基础状态 provider（Riverpod 迁移 B1 地基）：时钟、修订号、撤销栈。
+﻿/// 基础状态 provider（Riverpod 迁移 B1 地基）：时钟、修订号、撤销栈。
 ///
 /// 迁移策略（strangler，见 AGENTS.md 迁移期约束）：
 /// - 存量 `ClockStore` / `DataRevision` / `UndoStore` 仍是可变服务对象，被
@@ -92,11 +92,7 @@ class DataRevisionNotifier extends Notifier<int> {
 }
 
 /// 撤销栈服务（唯一实例；被领域 store 记录快照）。
-final undoStoreProvider = Provider<UndoStore>((ref) {
-  final undo = UndoStore();
-  ref.onDispose(undo.dispose);
-  return undo;
-});
+final undoStoreProvider = Provider<UndoStore>((ref) => UndoStore());
 
 /// 撤销栈的只读状态快照（UI 订阅这个，而不是 `ListenableBuilder`）。
 final undoStateProvider = NotifierProvider<UndoStateNotifier, UndoState>(
@@ -136,8 +132,10 @@ class UndoStateNotifier extends Notifier<UndoState> {
   UndoState build() {
     final undo = ref.watch(undoStoreProvider);
     void onChange() => state = _snapshot(undo);
-    undo.addListener(onChange);
-    ref.onDispose(() => undo.removeListener(onChange));
+    undo.onChanged = onChange;
+    ref.onDispose(() {
+      if (identical(undo.onChanged, onChange)) undo.onChanged = null;
+    });
     return _snapshot(undo);
   }
 
@@ -154,3 +152,4 @@ class UndoStateNotifier extends Notifier<UndoState> {
         lastRedoLabel: undo.lastRedoLabel,
       );
 }
+

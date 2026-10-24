@@ -10,8 +10,6 @@
 /// 拒绝恢复已被并发改动的状态。
 library;
 
-import 'package:flutter/foundation.dart';
-
 import '../data/repositories/activity_repository.dart';
 import '../utils/result.dart';
 import '../viewmodels/activity.dart';
@@ -78,8 +76,13 @@ class ActivityChangeApplier implements UndoApplier {
   void Function()? onApplied;
 }
 
-/// 活动 store。
-class ActivityStore extends ChangeNotifier {
+/// 活动写路径（`activity_create` 指令落点）。
+///
+/// 迁移说明（PR4-b 第一步）：本类已去 `ChangeNotifier`——它只有在新建/恢复
+/// 成功后发通知这一种用途，而所有派生数据靠 `DataRevision.bump()` 失效；
+/// 通知改由 `providers/stores.dart` 的 `activityProvider`（`Notifier<int>`）
+/// 承接：构造时注入 [onChanged]，状态变化走 provider 的 `state++`。
+class ActivityStore {
   ActivityStore({
     required this.activities,
     required this.undo,
@@ -87,10 +90,9 @@ class ActivityStore extends ChangeNotifier {
   }) : _applier = ActivityChangeApplier(activities) {
     _applier.onApplied = () {
       // 恢复也是数据变更来源：bump 使 picker/统计等派生缓存失效
-      //（不变式 9）。dispose 后仍须 bump（DB 实际变更），仅跳过通知。
+      //（不变式 9）。
       dataRevision.bump();
-      if (_disposed) return;
-      notifyListeners();
+      onChanged?.call();
     };
   }
 
@@ -100,7 +102,8 @@ class ActivityStore extends ChangeNotifier {
 
   final ActivityChangeApplier _applier;
 
-  bool _disposed = false;
+  /// 写成功后的通知钩子（provider 装配时注入；未接入时仅 bump 修订号）。
+  void Function()? onChanged;
 
   /// 新建活动（`activity_create` 指令落点）：undo=软删 / redo=复活。
   ///
@@ -138,13 +141,6 @@ class ActivityStore extends ChangeNotifier {
 
   void _afterWrite() {
     dataRevision.bump();
-    if (_disposed) return; // await 写路径后可能已 dispose：跳过通知
-    notifyListeners();
-  }
-
-  @override
-  void dispose() {
-    _disposed = true;
-    super.dispose();
+    onChanged?.call();
   }
 }

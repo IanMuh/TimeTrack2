@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../stores/app_store.dart';
 import 'foundation.dart';
 import 'infrastructure.dart';
+import 'stores.dart';
 
 /// 应用聚合 store（异步装配：打开库 → seed → 各 store 首次加载 → 启动编排）。
 ///
@@ -18,6 +19,7 @@ import 'infrastructure.dart';
 ///   从不 dispose”的泄漏；
 /// - B0 的 main 仍 `await` 它完成后再 `runApp`，启动顺序与错误页行为不变。
 final appStoreProvider = FutureProvider<AppStore>((ref) async {
+  final domain = ref.watch(domainStoresProvider);
   final store = await AppStore.create(
     database: ref.watch(appDatabaseProvider),
     backend: ref.watch(syncBackendProvider),
@@ -31,6 +33,11 @@ final appStoreProvider = FutureProvider<AppStore>((ref) async {
     clockOverride: ref.watch(clockStoreProvider),
     dataRevisionOverride: ref.watch(dataRevisionStoreProvider),
     undoOverride: ref.watch(undoStoreProvider),
+    // 领域 store（PR4-a）：同样由容器持有，AppStore 只接收实例。
+    timerOverride: domain.timer,
+    categoryOverride: domain.category,
+    activityOverride: domain.activity,
+    settingsOverride: domain.settings,
   );
   ref.onDispose(store.dispose);
   return store;

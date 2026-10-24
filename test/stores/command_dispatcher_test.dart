@@ -1,4 +1,4 @@
-import 'package:drift/native.dart';
+﻿import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timetrack2/constants/commands/command_definitions.dart';
 import 'package:timetrack2/data/database/app_database.dart' hide ProfileSettings;
@@ -108,12 +108,10 @@ class _TestHarness {
 
   Future<void> close() async {
     tracking.dispose();
-    activity.dispose();
     category.dispose();
     timer.dispose();
     clock.dispose();
     revision.dispose();
-    undo.dispose();
     await db.close();
   }
 }
@@ -515,3 +513,4 @@ void main() {
     });
   });
 }
+

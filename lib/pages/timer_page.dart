@@ -89,7 +89,7 @@ class _TimerPageState extends ConsumerState<TimerPage> {
 
   Future<void> _dispatch(CommandInvocation invocation) async {
     final messenger = ScaffoldMessenger.of(context);
-    final result = await app.dispatcher.dispatch(invocation);
+    final result = await ref.read(commandDispatcherProvider).dispatch(invocation);
     if (!mounted) return;
     messenger.hideCurrentSnackBar();
     messenger.showSnackBar(
@@ -174,7 +174,7 @@ class _TimerPageState extends ConsumerState<TimerPage> {
   Future<bool> _createActivity(ActivityDraft draft) async {
     // 经指令通道新建（activity_create，单条撤销记录）；从结果载荷取回
     // 新活动实体以继续分类关联。
-    final result = await app.dispatcher.dispatch(CommandInvocation(
+    final result = await ref.read(commandDispatcherProvider).dispatch(CommandInvocation(
       name: 'activity_create',
       args: [draft.name],
       options: {
@@ -230,7 +230,7 @@ class _TimerPageState extends ConsumerState<TimerPage> {
       activity = existing;
     } else {
       // 创建同样经 activity_create 指令通道（单条撤销记录，批次 5a）。
-      final result = await app.dispatcher.dispatch(CommandInvocation(
+      final result = await ref.read(commandDispatcherProvider).dispatch(CommandInvocation(
         name: 'activity_create',
         args: [name],
         options: {
@@ -409,3 +409,4 @@ class _TimerPageState extends ConsumerState<TimerPage> {
     _switchTo(activity);
   }
 }
+

@@ -1,12 +1,14 @@
-import 'package:flutter/foundation.dart';
+﻿import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../stores/app_store.dart';
+import '../stores/command_dispatcher.dart';
 import '../stores/category_store.dart';
 import '../stores/reminder_store.dart';
 import '../stores/settings_store.dart';
 import '../stores/timer_store.dart';
 import '../stores/update_store.dart';
+import 'stores.dart';
 
 /// 迁移期（B4a）AppStore 实例接入点。
 ///
@@ -191,8 +193,8 @@ class TimerSnapshotNotifier extends Notifier<TimerSnapshot> {
       state = TimerSnapshot.from(store);
     }
 
-    store.addListener(onChange);
-    ref.onDispose(() => store.removeListener(onChange));
+    store.addChangeListener(onChange);
+    ref.onDispose(() => store.removeChangeListener(onChange));
     return TimerSnapshot.from(store);
   }
 }
@@ -212,8 +214,10 @@ class ReminderSnapshotNotifier extends Notifier<ReminderSnapshot> {
       state = ReminderSnapshot.from(store);
     }
 
-    store.addListener(onChange);
-    ref.onDispose(() => store.removeListener(onChange));
+    store.onChanged = onChange;
+    ref.onDispose(() {
+      if (identical(store.onChanged, onChange)) store.onChanged = null;
+    });
     return ReminderSnapshot.from(store);
   }
 }
@@ -246,11 +250,11 @@ class UpdateSnapshotNotifier extends Notifier<UpdateSnapshot> {
 /// 变更信号，再用 `ref.read(...StoreProvider)` 读最新值——等价于旧
 /// `ListenableBuilder(listenable: store)` 的语义，但订阅面收在 provider 层。
 final settingsStoreProvider = Provider<SettingsStore>(
-  (ref) => ref.watch(appStoreInstanceProvider).settings,
+  (ref) => ref.watch(domainStoresProvider).settings,
 );
 
 final categoryStoreProvider = Provider<CategoryStore>(
-  (ref) => ref.watch(appStoreInstanceProvider).category,
+  (ref) => ref.watch(domainStoresProvider).category,
 );
 
 /// 设置变更计数：每次 `SettingsStore` 通知 +1，作为 build 的失效信号。
@@ -269,8 +273,10 @@ class SettingsChangeNotifier extends Notifier<int> {
       state = state + 1;
     }
 
-    store.addListener(onChange);
-    ref.onDispose(() => store.removeListener(onChange));
+    store.onChanged = onChange;
+    ref.onDispose(() {
+      if (identical(store.onChanged, onChange)) store.onChanged = null;
+    });
     return 0;
   }
 }
@@ -288,8 +294,10 @@ class CategoryChangeNotifier extends Notifier<int> {
       state = state + 1;
     }
 
-    store.addListener(onChange);
-    ref.onDispose(() => store.removeListener(onChange));
+    store.onChanged = onChange;
+    ref.onDispose(() {
+      if (identical(store.onChanged, onChange)) store.onChanged = null;
+    });
     return 0;
   }
 }
@@ -318,9 +326,24 @@ class _EngineChangeNotifier extends Notifier<int> {
   }
 }
 
-final timerChangeProvider = NotifierProvider<_EngineChangeNotifier, int>(
-  () => _EngineChangeNotifier((store) => store.timer),
-);
+final timerChangeProvider =
+    NotifierProvider<TimerChangeNotifier, int>(TimerChangeNotifier.new);
+
+/// 计时变更计数（手动会话保持/运行条目/写路径成功 → +1）。
+class TimerChangeNotifier extends Notifier<int> {
+  @override
+  int build() {
+    final store = ref.watch(appStoreInstanceProvider).timer;
+    void onChange() {
+      if (!ref.mounted) return;
+      state = state + 1;
+    }
+
+    store.addChangeListener(onChange);
+    ref.onDispose(() => store.removeChangeListener(onChange));
+    return 0;
+  }
+}
 
 final trackingChangeProvider = NotifierProvider<_EngineChangeNotifier, int>(
   () => _EngineChangeNotifier((store) => store.tracking),
@@ -338,4 +361,22 @@ final updateChangeProvider = NotifierProvider<_EngineChangeNotifier, int>(
   () => _EngineChangeNotifier((store) => store.update),
 );
 
+
+
+
+/// 命令分发器（迁移期：仍由 AppStore 装配，PR5 改由 provider 直接构造）。
+final commandDispatcherProvider = Provider<CommandDispatcher>(
+  (ref) => ref.watch(appStoreInstanceProvider).dispatcher,
+);
+
+
+/// 计时引擎实例（迁移期只读入口；写路径仍经命令分发）。
+final timerStoreProvider = Provider<TimerStore>(
+  (ref) => ref.watch(appStoreInstanceProvider).timer,
+);
+
+/// 提醒引擎实例（迁移期只读入口；动作仍经命令分发）。
+final reminderStoreProvider = Provider<ReminderStore>(
+  (ref) => ref.watch(appStoreInstanceProvider).reminder,
+);
 

@@ -353,7 +353,7 @@ class _AppShellState extends ConsumerState<AppShell>
   void _onReminderChanged() {
     if (!mounted) return;
     setState(() {}); // 横幅随 active 增删重建
-    final active = widget.app.reminder.active;
+    final active = ref.read(reminderStoreProvider).active;
     if (active == null || active.method != ReminderMethod.dialog) return;
     if (_shownReminderDialogId == active.id) return;
     _shownReminderDialogId = active.id;
@@ -467,7 +467,7 @@ class _AppShellState extends ConsumerState<AppShell>
   /// §5.2 场景 1/快速提醒：对话框载体（按请求类型装配按钮组）。
   Future<void> _showReminderDialog(ReminderRequest request) async {
     if (!mounted) return;
-    final store = widget.app.reminder;
+    final store = ref.read(reminderStoreProvider);
     if (request is OngoingReminder) {
       await showDialog<void>(
         context: context,
@@ -762,11 +762,11 @@ class _AppShellState extends ConsumerState<AppShell>
   /// §5.2 场景 2 载体 A：常驻横幅（banner 方式的待处置提醒；amber 左边条）。
   /// 无待处置提醒或载体非 banner 时返回 null（不占布局）。
   Widget? _buildReminderBanner() {
-    final active = widget.app.reminder.active;
+    final active = ref.read(reminderStoreProvider).active;
     if (active == null || active.method != ReminderMethod.banner) return null;
     if (!mounted) return null;
     final l10n = AppLocalizations.of(context)!;
-    final store = widget.app.reminder;
+    final store = ref.read(reminderStoreProvider);
     final dark = Theme.of(context).brightness == Brightness.dark;
     final bg = dark ? const Color(0x1af59e0b) : const Color(0xfffffbeb);
     final titleColor =
@@ -917,7 +917,7 @@ class _AppShellState extends ConsumerState<AppShell>
 
   Future<void> _dispatch(CommandInvocation invocation) async {
     final messenger = ScaffoldMessenger.of(context);
-    final result = await widget.app.dispatcher.dispatch(invocation);
+    final result = await ref.read(commandDispatcherProvider).dispatch(invocation);
     if (!mounted) return;
     final l10n = AppLocalizations.of(context)!;
     messenger.hideCurrentSnackBar();
@@ -1258,3 +1258,4 @@ class _SyncStatusText extends StatelessWidget {
     );
   }
 }
+
