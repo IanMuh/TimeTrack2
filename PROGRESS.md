@@ -152,9 +152,10 @@ Reminder（`d6a7f78`）、Undo（`cbea01e`，`undoStateProvider` 挂 `onChanged`
   `test/stores/app_store_test.dart`，新增 `test/providers/bootstrap_test.dart`；
   测试基座 `test/support/app_store_fixture.dart` 的 `TestStore` 以同名 getter
   兼容既有 74 处 `store.xxx` 写法。全量 **806 passed**（删除 app_store 旧测试、
-  其余用例改写为容器读取）。
-- 迁移收尾：`lib/main.dart`、`lib/providers`、`stores/` 注释中 AppStore 引用清理；
-  AGENTS.md 技术栈/目录注释终稿；PROGRESS 本节与 `docs/Riverpod迁移B4执行计划.md`
+  其余用例改写为容器读取）。说明：`lib/` 仍有 19 处**说明性注释**提及
+  `AppStore`（历史沿革，非代码依赖；其中 4–5 处措辞已过时可后续统一改词）。
+- 迁移收尾（`a2d1be5`）：AGENTS.md 技术栈/目录注释终稿（去掉迁移期例外、
+  `stores/` 定位为无 UI 依赖的服务层）；PROGRESS 本节与 `docs/Riverpod迁移B4执行计划.md`
   `/docs/Riverpod迁移B4全替代方案.md` 记录完成状态与遗留项。
 
 
