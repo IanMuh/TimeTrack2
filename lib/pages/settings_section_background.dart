@@ -91,6 +91,8 @@ class _BackgroundSectionState extends ConsumerState<BackgroundSection> {
             TrackingGuidePage(bridge: ref.read(androidTrackingBridgeProvider)),
       ),
     );
+    // 引导页可停留很久：await 后复用 ref 前先判 mounted（卸载竞态防御）。
+    if (!mounted) return;
     // 从系统设置返回后复查授权态。
     ref.read(androidTrackingBridgeProvider).guideDismissedThisSession = true;
     await _refreshUsageGranted();

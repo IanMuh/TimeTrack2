@@ -1,10 +1,11 @@
 /// 数据查询 provider（Riverpod 迁移 B2）。
 ///
 /// 只读查询即 provider：页面 watch 查询结果，不再自持仓储副本。
-/// 失效规则（AGENTS.md 迁移期规则 2）：
-/// - 本地写路径：写入方直接 `ref.invalidate(...)` 精准失效（B3+ 统一）；
-/// - 外部来源（云/LAN/文件导入/undo 恢复）：写路径 bump [dataRevisionProvider]，
-///   本文件所有查询 watch 修订号兜底失效；
+/// 失效规则：
+/// - 一切写路径（本地操作/指令/undo 恢复/云/LAN/文件导入/清库）统一 bump
+///   [dataRevisionProvider]，本文件所有查询 watch 修订号兜底失效——全局
+///   粒度，与迁移前三查询 store 监听修订号的语义一致（B3 设想的精准
+///   `ref.invalidate` 未实施，按修订号全局失效并非退化）；
 /// - 时钟 tick 不驱动查询：运行中条目的"当前时长"由时长叶子 widget watch
 ///   `clockTickProvider` 计算，查询结果本身不随时间变化。
 library;
@@ -156,8 +157,11 @@ DateTime dayStartOf(DateTime anyMoment) => anyMoment.startOfDay;
 
 /// 统计查询键：范围 × 维度 × 过滤参数 × 有效时刻。
 ///
-/// [effectiveNow] 非 null 表示范围内存在运行中条目（快照时间敏感）：调用方
-/// 传当前 tick，键随之每秒变化 → 自动重算；无运行条目时为 null 以稳定缓存。
+/// [effectiveNow] 仅用于测试注入确定性时刻（键稳定可断言）；页面调用方
+/// **不传**——运行中条目的裁剪终点由仓储在执行时取当前时刻（缺省 = now），
+/// 重算时机由修订号/参数变更驱动。曾按 tick 传当前时刻使键每秒变化以
+/// 「自动重算」，代价是每秒 SQL 重查 + 新键无旧值导致整页 loading 闪烁 +
+/// 保活 offstage 分支空转（迁移审查判退化后移除）。
 class StatsQuery {
   StatsQuery({
     required this.start,

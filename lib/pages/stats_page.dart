@@ -9,7 +9,6 @@ import '../components/tnum_text.dart';
 import '../l10n/app_localizations.dart';
 import '../providers/data.dart';
 import '../providers/engines.dart';
-import '../providers/foundation.dart';
 import '../stores/category_store.dart';
 import '../stores/settings_store.dart';
 import '../utils/day_metrics.dart' show formatHm;
@@ -129,17 +128,20 @@ class _StatsPageState extends ConsumerState<StatsPage> {
     ref.watch(settingsChangeProvider);
     // 范围条目 + 统计聚合均由 provider 提供（StatsStore 缓存已删）：
     // 范围/维度/过滤参数变化 = family 换键；写操作 bump 修订号失效。
+    //
+    // 查询不随秒驱动（迁移审查修复）：运行中条目的时长增长由仓储在执行时
+    // 取当前时刻裁剪（effectiveNow 缺省 = now），重算时机仍是修订号/参数
+    // 变更——与迁移前 StatsStore 的事件驱动语义一致。此前按 tick 换
+    // effectiveNow 会让 family 键每秒变化：每秒 SQL 重查 + 新键无旧值导致
+    // 整页 loading 闪烁 + 保活 offstage 分支空转。
     final (start, end) = _range;
     _entries = ref.watch(rangeEntriesProvider((start, end))).value ?? const [];
-    final hasRunning = _entries.any((e) => e.endAt == null);
-    final now = hasRunning ? ref.watch(clockTickProvider) : null;
     final query = StatsQuery(
       start: start,
       end: end,
       dimension: _dimension,
       includeAuto: !_excludeAuto,
       categoryFilterIds: _selectedCategories,
-      effectiveNow: now,
     );
     final async = ref.watch(statsProvider(query));
     final snapshot = async.value;
@@ -282,7 +284,7 @@ class _StatsPageState extends ConsumerState<StatsPage> {
       lastDate: DateTime.now().add(const Duration(days: 365)),
       helpText: l10n.stPickEnd,
     );
-    if (e == null) return;
+    if (e == null || !mounted) return;
     setState(() {
       _customStart = s;
       _customEnd = e;

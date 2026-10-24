@@ -220,10 +220,8 @@ class UpdateSnapshotNotifier extends Notifier<UpdateSnapshot> {
       state = UpdateSnapshot.from(store);
     }
 
-    store.onChanged = onChange;
-    ref.onDispose(() {
-      if (identical(store.onChanged, onChange)) store.onChanged = null;
-    });
+    store.addChangeListener(onChange);
+    ref.onDispose(() => store.removeChangeListener(onChange));
     return UpdateSnapshot.from(store);
   }
 }
@@ -339,10 +337,8 @@ class UpdateChangeNotifier extends Notifier<int> {
       state = state + 1;
     }
 
-    store.onChanged = onChange;
-    ref.onDispose(() {
-      if (identical(store.onChanged, onChange)) store.onChanged = null;
-    });
+    store.addChangeListener(onChange);
+    ref.onDispose(() => store.removeChangeListener(onChange));
     return 0;
   }
 }
