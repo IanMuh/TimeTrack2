@@ -191,6 +191,9 @@ dataRevision/失效粒度），逐条证据核证后处置：
       改动未经编译验证）+ 托盘/关窗/前台检测冒烟
 - [ ] Android 真机：使用情况授权引导、前台服务常驻、锁屏 null、通知暂停动作
 - [ ] 更新流程人工冒烟（检查→下载→校验→Windows staging 重启生效 / Android 兜底浏览器）
+      ——检查段 2026-10-24 实测通过（种子清单 0.1.0 → 已是最新，PR #21；
+      网络前提：raw.githubusercontent 直连被墙，需代理/TUN 环境）；下载/
+      校验/安装段待真实发版产物
 
 **代码挂账（延续阶段 2e/3/4）**：
 - [ ] 云同步拉取设置后刷新 `SettingsStore._current`（迁移审查 M：设备 A 改
@@ -206,6 +209,12 @@ dataRevision/失效粒度），逐条证据核证后处置：
       + SQLite journal 兜底，迁移前后等价；引入优雅退出属新特性）
 - [ ] UpdateStore.dispose 不中止在途下载（迁移审查 L 挂起：通知已 `_closed`
       守卫，下载完成落盘无害；中止属增强）
+- [ ] HTTPS 出网代理支持（2026-10-24 更新检查诊断结论，**之后再扩展**：
+      应用内 http 包/dart:io HttpClient 一律直连，不读系统/环境/本地代理
+      ——受限网络下 raw.githubusercontent 等需全局 TUN 才可达，更新检查
+      可用性依赖用户网络环境。扩展方向：HttpClient.findProxyFromEnvironment
+      读 HTTPS_PROXY（注意 dart:io 无原生 socks，需 http/混合端口）或系统
+      代理发现；受益面：更新检查/下载、云同步、二期 AI 调用的统一出网通道）
 - [ ] Windows 安装器真实目录注入（main 装配，现为 Directory.current 占位）+
       待安装标记消费（applyStaging 重启闭环）——更新系统最后一段
 - [ ] Android 自动安装接线（tryInstallApk 平台守卫 + REQUEST_INSTALL_PACKAGES +
