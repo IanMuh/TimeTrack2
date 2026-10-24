@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../components/activity_picker/activity_picker.dart';
@@ -53,7 +53,7 @@ class _TimelinePageState extends ConsumerState<TimelinePage> {
   double _zoom = 1.0;
   int _segments = 4;
 
-  /// 迁移期：每次 build 从 provider 同步的只读快照（指令送达/对话框里要用
+  /// 每次 build 从 provider 同步的只读快照（指令送达/对话框里要用
   /// 同一份数据；不再是“缓存事实源”，失效由 provider 负责）。
   List<Activity> _activities = const [];
   List<ActionLog> _logs = const [];
@@ -297,7 +297,7 @@ class _TimelinePageState extends ConsumerState<TimelinePage> {
     // initState，午夜后与数据窗口错位）。
     final today = ref.watch(currentDayProvider);
     if (_followToday) _anchor = today;
-    // 迁移期桥接：24 小时制等设置变更需重建时间轴。
+    // 变更桥接：24 小时制等设置变更需重建时间轴。
     ref.watch(settingsChangeProvider);
 
     // 查询即 provider：切日/切跨度只改键，不手工 reload；写操作会 bump

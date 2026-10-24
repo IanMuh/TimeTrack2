@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -65,7 +65,7 @@ class _TimerPageState extends ConsumerState<TimerPage> {
   List<Activity> get _loadedActivities =>
       ref.read(activitiesProvider).value ?? const [];
 
-  /// 迁移期桥接：分类树仍由 ChangeNotifier store 持有（B4 换 Notifier），
+  /// 变更桥接：分类树是普通服务对象，由 provider 变更计数驱动重建，
   /// build 里 watch 变更计数保证重建，这里读当前快照。
   CategoryStore get _categories => ref.read(categoryStoreProvider);
 
@@ -274,7 +274,7 @@ class _TimerPageState extends ConsumerState<TimerPage> {
 
   @override
   Widget build(BuildContext context) {
-    // 迁移期桥：分类树仍由 CategoryStore 持有（B4 换 Notifier），变更计数
+    // 变更桥：分类树仍由 CategoryStore 持有，变更计数
     // 驱动重建让筛选树与运行路径随库刷新。
     ref.watch(categoryChangeProvider);
     // 今日条目/活动列表均由 provider 提供（TodayStore 已删）：写操作/跨日失效。

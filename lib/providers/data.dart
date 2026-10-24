@@ -49,7 +49,7 @@ T requireValue<T>(AppResult<T> result) {
 }
 
 // ---------------------------------------------------------------------------
-// 仓储（供 provider 与迁移期页面共用；B4 删除 AppStore 后仍是唯一入口）
+// 仓储 provider：数据访问的唯一入口（页面与 store 均经此获取）。
 // ---------------------------------------------------------------------------
 
 final activityRepositoryProvider = Provider<ActivityRepository>((ref) {

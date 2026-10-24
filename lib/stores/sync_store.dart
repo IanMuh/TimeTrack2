@@ -1,4 +1,4 @@
-﻿/// 同步编排 store（模块 3c①）：云同步 + 认证 + 清理编排的单一入口。
+/// 同步编排 store（模块 3c①）：云同步 + 认证 + 清理编排的单一入口。
 ///
 /// 职责：
 /// - **认证流**：订阅 [SyncBackend.authStateStream]（broadcast，未配置 →
@@ -32,7 +32,7 @@ import 'data_revision.dart';
 
 /// 同步编排 store。
 class SyncStore implements SyncNowProvider {
-  /// 状态变更回调（唯一订阅槽，迁移期由 provider 挂载，替代 ChangeNotifier）。
+  /// 状态变更回调（唯一订阅槽，由 provider 挂载）。
   void Function()? onChanged;
   SyncStore({
     required this.backend,
@@ -209,7 +209,7 @@ class SyncStore implements SyncNowProvider {
   /// 语义（与文档一致）：
   /// - [cursorOverride] != null（**同步触发**）：受限频——`last_cleanup_at`
   ///   距今 < 24h 时跳过（防每次同步都全表扫描）；到期才清理；
-  /// - [cursorOverride] == null（**手动触发**，阶段 4 设置页按钮/AppStore
+  /// - [cursorOverride] == null（**手动触发**，阶段 4 设置页按钮/启动编排
   ///   启动）：**受限频**——先查 [_cleanupDue] 到期才执行（启动路径防每次
   ///   启动全表扫描+VACUUM）。
   /// [userId] 可选透传：同步编排传启动时捕获的用户（防 await 期间会话切换
@@ -225,7 +225,7 @@ class SyncStore implements SyncNowProvider {
       return const AppFailure('同步服务已关闭');
     }
     // 抢占互斥（await 前同步置位）：防 _cleanupDue 查询期间另一路调用
-    //（同步成功 fire-and-forget 与 AppStore 启动清理并发）同时通过检查
+    //（同步成功 fire-and-forget 与启动清理并发）同时通过检查
     // 重复进入清理（TOCTOU——模块门禁 medium）。统一 try/finally 释放。
     if (_cleanupRunning) {
       return const AppFailure('清理进行中，请稍后再试');

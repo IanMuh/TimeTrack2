@@ -1,4 +1,4 @@
-﻿/// 计时核心 store（模块 3b）：时间条目全部写路径的单一入口。
+/// 计时核心 store（模块 3b）：时间条目全部写路径的单一入口。
 ///
 /// 职责：
 /// - **统一写路径**：switch/stop/add/split/merge/delete 全部经仓储执行；
@@ -127,7 +127,7 @@ class TimerStore {
     };
     // 时钟 tick：仅运行中才需刷新时长展示（无运行条目时每怠秒通知会让
     // 壳层计时条/计时页空转重建——B3 性能收敛）。
-    clock.addListener(_onClockTick);
+    clock.addChangeListener(_onClockTick);
   }
 
   final TimeEntryRepository entries;
@@ -139,7 +139,7 @@ class TimerStore {
 
   final List<void Function()> _changeListeners = [];
 
-  /// 变更监听（PR4-b：去 `ChangeNotifier` 后的最小观察者表）。
+  /// 变更监听（最小观察者表）。
   /// 计时快照与 timerChangeProvider 各自挂一条，生命周期由 provider 管；
   /// 同引用重复挂载幂等（单槽天然幂等，观察者表须显式去重）。
   void addChangeListener(void Function() listener) {
@@ -611,10 +611,10 @@ class TimerStore {
     _notifyChanged();
   }
 
-  /// 容器释放时标记（不继承 ChangeNotifier）。
+  /// 容器释放时标记（dispose 只置位，无 ChangeNotifier 生命周期）。
   void dispose() {
     _disposed = true;
-    clock.removeListener(_onClockTick);
+    clock.removeChangeListener(_onClockTick);
     _changeListeners.clear();
   }
 }

@@ -78,7 +78,7 @@ class ActivityChangeApplier implements UndoApplier {
 
 /// 活动写路径（`activity_create` 指令落点）。
 ///
-/// 迁移说明（PR4-b 第一步）：本类已去 `ChangeNotifier`——它只有在新建/恢复
+/// 说明：本类不继承 `ChangeNotifier`——它只有在新建/恢复
 /// 成功后发通知这一种用途，而所有派生数据靠 `DataRevision.bump()` 失效；
 /// 通知改由 `providers/stores.dart` 的 `activityProvider`（`Notifier<int>`）
 /// 承接：构造时注入 [onChanged]，状态变化走 provider 的 `state++`。

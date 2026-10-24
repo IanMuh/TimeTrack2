@@ -1,4 +1,4 @@
-﻿/// undo/redo 栈（快照 diff 机制，计划决策 3：快照 diff 存内存）。
+/// undo/redo 栈（快照 diff 机制，计划决策 3：快照 diff 存内存）。
 ///
 /// 设计：
 /// - 快照为**字段级 diff**（before/after 实体），由领域 store（模块 3b）在
@@ -84,7 +84,7 @@ class UndoRecord {
   final List<UndoChange> changes;
 }
 
-/// 撤销/重做栈（内存，ChangeNotifier）。
+/// 撤销/重做栈（纯内存服务，通知经 `onChanged`）。
 ///
 /// 治理规则（被多套 production 验证的共识）：
 /// - 新操作 [record] **清空 redo 栈**（undo 后的未来已失效）；

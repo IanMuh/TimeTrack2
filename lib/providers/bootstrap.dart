@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -27,7 +27,7 @@ import 'infrastructure.dart';
 import 'services.dart';
 import 'stores.dart';
 
-/// 后台引擎与服务的装配（PR5：取代 `AppStore.create` 的组装职责）。
+/// 后台引擎与服务的装配（容器持有唯一实例；生产与测试共用同一张图）。
 ///
 /// 依赖方向：本文件读仓储/基础服务/领域 store 的 provider 直接构造引擎，
 /// 释放责任经 `ref.onDispose` 落到容器；页面不再触碰任何装配类。
@@ -179,7 +179,7 @@ final reminderStoreProvider = Provider<ReminderStore>((ref) {
 
 /// 启动编排（seed → 跨日滚转/归一化 → 三 store 加载 → 静默更新/清理）。
 ///
-/// 取代 `AppStore.init`；`main` 等待本 provider 完成后再挂载 UI，失败仍走
+/// 启动编排（seed/rollover/normalize/reload + 静默更新检查）；`main` 等待本 provider 完成后再挂载 UI，失败仍走
 /// 现有启动错误页。`runStartupChecks = false` 时跳过网络/清理（测试）。
 final startupProvider = FutureProvider<void>((ref) async {
   final activities = ref.watch(activityRepositoryProvider);

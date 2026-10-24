@@ -1,4 +1,4 @@
-﻿/// 设置 store（模块 3b）：配置文件读写（本地单例 id=1）。
+/// 设置 store（模块 3b）：配置文件读写（本地单例 id=1）。
 ///
 /// 职责：
 /// - 读取 [ProfileSettings]（默认值回退）；
@@ -75,7 +75,7 @@ class SettingsStore {
   final SettingsChangeApplier _applier;
 
   /// 写成功/恢复成功后的通知（由 `settingsChangeProvider` 挂载，PR4-b）。
-  /// ChangeNotifier 移除后，通知走 provider；`dispose` 仅置标记。
+  /// 通知走 provider；`dispose` 仅置标记。
   void Function()? onChanged;
 
   bool _disposed = false;
@@ -174,7 +174,7 @@ class SettingsStore {
         a.timezone == b.timezone;
   }
 
-  /// 容器释放时标记（不继承 ChangeNotifier：调用方不再有 addListener）。
+  /// 容器释放时标记（dispose 只置位，无 ChangeNotifier 生命周期）。
   void dispose() {
     _disposed = true;
   }

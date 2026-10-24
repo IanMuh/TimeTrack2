@@ -1,13 +1,11 @@
-/// 领域 store 的装配归属（Riverpod 迁移 PR4-a）。
+/// 领域 store 的装配与释放（唯一装配入口）。
 ///
-/// 迁移前这些 store 由 `AppStore.create` 内部 `new` 出来并交给 CommandDispatcher；
-/// Notifier 实例只能由 `NotifierProvider` 创建，故先把“谁创建、谁释放”搬到
-/// provider 层：本文件构造领域 store，`appStoreProvider` 以 override 参数注入
-/// `AppStore.create`（不再内部创建），释放由 `ref.onDispose` 负责。
+/// 领域 store（Timer/Category/Activity/Settings）是可变服务对象：本文件负责
+/// 创建并由 `ref.onDispose` 释放；通知经 `engines.dart` 的变更计数 provider
+/// 映射为 Riverpod 状态，页面只 `ref.watch` 计数、`ref.read` 取服务。
 ///
-/// PR4-b…PR4-f 逐个把这里的 `Provider<XxxStore>` 换成
-/// `NotifierProvider<XxxNotifier, XxxState>` 时，`AppStore` 的字段类型随之下线，
-/// 页面/测试只依赖 provider。
+/// 后台引擎（Sync/Update/Tracking/Lan/Reminder/Dispatcher 等）的装配见
+/// `bootstrap.dart`。
 library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -77,7 +75,7 @@ final activityStoreProvider = Provider<ActivityStore>(
   (ref) => ref.watch(domainStoresProvider).activity,
 );
 
-/// 活动变更状态（PR4-b 第一步）：`ActivityStore` 已去 `ChangeNotifier`，
+/// 活动变更状态：`ActivityStore` 不继承 `ChangeNotifier`，
 /// 写成功/撤销恢复后经 [ActivityStore.onChanged] 推进本状态。
 ///
 /// 页面目前仍依赖 `dataRevision` 刷新（活动列表是查询结果），本 provider 供

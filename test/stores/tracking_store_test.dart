@@ -1,4 +1,4 @@
-﻿import 'package:drift/native.dart';
+import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timetrack2/data/database/app_database.dart' hide ProfileSettings;
 import 'package:timetrack2/data/repositories/activity_repository.dart';
@@ -235,7 +235,7 @@ void main() {
       await h.seedRule(process: 'work.exe', activityId: a.id);
       h.detector.processName = 'work.exe';
       // _lastPoll 初始 epoch → 首次 tick 即达标。
-      h.clock.notifyListeners();
+      h.clock.emitTick();
       await Future<void>.delayed(Duration.zero); // 等异步 poll 完成
       expect((await h.entries.runningEntry())!.activityId, a.id);
 
@@ -246,13 +246,13 @@ void main() {
           .requireValue();
       await h.timer.switchToActivity(b.id, isAuto: true);
       h._fixedNow = h._fixedNow.add(const Duration(seconds: 2));
-      h.clock.notifyListeners();
+      h.clock.emitTick();
       await Future<void>.delayed(Duration.zero);
       expect((await h.entries.runningEntry())!.activityId, b.id); // 限频未轮询
 
       // 间隔达标：轮询切回 A。
       h._fixedNow = h._fixedNow.add(const Duration(seconds: 6));
-      h.clock.notifyListeners();
+      h.clock.emitTick();
       await Future<void>.delayed(Duration.zero);
       expect((await h.entries.runningEntry())!.activityId, a.id);
     });

@@ -8,7 +8,7 @@ void main() {
       fakeAsync((async) {
         var ticks = 0;
         final clock = ClockStore(interval: const Duration(seconds: 1));
-        clock.addListener(() => ticks++);
+        clock.addChangeListener(() => ticks++);
         async.elapse(const Duration(seconds: 3));
         expect(ticks, 3);
         async.elapse(const Duration(seconds: 2));
@@ -38,7 +38,7 @@ void main() {
           autoStart: false,
         );
         expect(clock.isRunning, isFalse);
-        clock.addListener(() => ticks++);
+        clock.addChangeListener(() => ticks++);
         clock.start();
         clock.start(); // 幂等：不重复启动
         expect(clock.isRunning, isTrue);
@@ -61,7 +61,7 @@ void main() {
       fakeAsync((async) {
         var ticks = 0;
         final clock = ClockStore(interval: const Duration(seconds: 1));
-        clock.addListener(() => ticks++);
+        clock.addChangeListener(() => ticks++);
         async.elapse(const Duration(seconds: 2));
         expect(ticks, 2);
         clock.dispose();
@@ -75,7 +75,7 @@ void main() {
       fakeAsync((async) {
         var ticks = 0;
         final clock = ClockStore(interval: const Duration(seconds: 1));
-        clock.addListener(() => ticks++);
+        clock.addChangeListener(() => ticks++);
         clock.dispose();
         clock.start(); // dispose 后 start 必须无效
         expect(clock.isRunning, isFalse);

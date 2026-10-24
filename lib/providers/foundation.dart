@@ -1,13 +1,11 @@
-﻿/// 基础状态 provider（Riverpod 迁移 B1 地基）：时钟、修订号、撤销栈。
+/// 基础状态 provider：时钟、修订号、撤销栈。
 ///
-/// 迁移策略（strangler，见 AGENTS.md 迁移期约束）：
-/// - 存量 `ClockStore` / `DataRevision` / `UndoStore` 仍是可变服务对象，被
-///   `stores/` 内的 ChangeNotifier store 直接持有——B1 不一次性改它们的调用方；
-/// - provider 负责**唯一所有权**（容器释放即 dispose），并向新代码暴露只读
-///   Riverpod 状态（tick 时刻 / 修订号 / 撤销可用性与标签），新 UI 一律
-///   `ref.watch`，不再 `addListener`；
-/// - 服务类本身随其消费 store 在 B2-B4 分批转换后删除，届时这些 provider
-///   改为直接持有不可变状态，接口不变。
+/// 三个服务对象由本文件唯一持有（容器释放即 dispose），并向 UI 暴露只读
+/// Riverpod 状态：`clockTickProvider` / `currentDayProvider`（秒级时刻与
+/// 当前日）、`dataRevisionProvider`（写库失效信号）、`undoStateProvider`
+/// （撤销可用性与标签）。服务类不继承 ChangeNotifier，订阅经
+/// `addChangeListener` / `removeChangeListener` 显式配对，只由 provider 层
+/// 与领域 store 使用；页面一律 `ref.watch`。
 library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -26,7 +24,7 @@ final clockIntervalProvider = Provider<Duration>(
 
 /// 全局时钟服务（唯一实例；容器释放时取消 1Hz Timer）。
 ///
-/// 存量 store 通过构造注入持有它；新代码改用 [clockTickProvider] /
+/// TimerStore/TrackingStore/ReminderStore 与 Android 前台检测器通过构造注入持有它；UI 用 [clockTickProvider] /
 /// [currentDayProvider]。
 /// 是否自动启动 1Hz Timer（测试覆盖为 false，避免 fake async 里残留定时器）。
 final clockAutoStartProvider = Provider<bool>((ref) => true);
@@ -52,8 +50,8 @@ class ClockTickNotifier extends Notifier<DateTime> {
   DateTime build() {
     final clock = ref.watch(clockStoreProvider);
     void tick() => state = clock.now();
-    clock.addListener(tick);
-    ref.onDispose(() => clock.removeListener(tick));
+    clock.addChangeListener(tick);
+    ref.onDispose(() => clock.removeChangeListener(tick));
     return clock.now();
   }
 }
@@ -86,8 +84,8 @@ class DataRevisionNotifier extends Notifier<int> {
   int build() {
     final revision = ref.watch(dataRevisionStoreProvider);
     void onChange() => state = revision.value;
-    revision.addListener(onChange);
-    ref.onDispose(() => revision.removeListener(onChange));
+    revision.addChangeListener(onChange);
+    ref.onDispose(() => revision.removeChangeListener(onChange));
     return revision.value;
   }
 
@@ -98,7 +96,7 @@ class DataRevisionNotifier extends Notifier<int> {
 /// 撤销栈服务（唯一实例；被领域 store 记录快照）。
 final undoStoreProvider = Provider<UndoStore>((ref) => UndoStore());
 
-/// 撤销栈的只读状态快照（UI 订阅这个，而不是 `ListenableBuilder`）。
+/// 撤销栈的只读状态快照（UI 只订阅这个）。
 final undoStateProvider = NotifierProvider<UndoStateNotifier, UndoState>(
   UndoStateNotifier.new,
 );

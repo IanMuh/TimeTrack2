@@ -28,7 +28,7 @@
   每秒服务同步去重、ForegroundDetector 契约下沉 viewmodels（依赖方向）
 - 门禁：`flutter analyze` 0 issues / 全量 820 测试绿
 
-## Riverpod 状态管理迁移（进行中，2026-10-23 起）
+## Riverpod 状态管理迁移（已完成，2026-10-23 ~ 10-24）
 
 **决策**：经用户确认切换为 Riverpod（flutter_riverpod 3.4.3，手写 provider，
 不用 codegen）；范围仅 UI 状态订阅层（stores + 页面订阅），data/api/viewmodels/
@@ -182,6 +182,18 @@ dataRevision/失效粒度），逐条证据核证后处置：
   `ref.watch` 合法（riverpod 3.4.3 源码：仅 `!mounted` 抛错）；容器释放链
   完整（ClockStore/Sync/Tracking/Reminder/Lan/Update/DB 均有 dispose 接线，
   `stores_test` 验证释放不抛）。
+
+
+**严格收尾（`refactor/riverpod-strict-finish`）**：把最后两个基础类去 `ChangeNotifier`——
+`ClockStore`（1Hz 时钟）与 `DataRevision`（修订号）改普通类，订阅统一为
+`addChangeListener` / `removeChangeListener` 显式配对，且逐监听者异常隔离
+（`FlutterError.reportError`：任一订阅者抛错不再取消周期 Timer、也不阻断其他
+派生缓存失效）；`ClockStore` 增 `@visibleForTesting emitTick()` 供 tick 限频用例；
+`providers/foundation.dart` 挂载点与 4 个领域 store 的监听调用同步改名。
+注释与文档清理：`lib/` 不再有 `AppStore`、也不再写“迁移期桥接/仍由
+ChangeNotifier store 持有”等过期说明；历史决策保留在 docs 与本节。
+验收：analyze 0；全量 **807 passed**；`lib/stores/` 已无任何 `ChangeNotifier` /
+`ValueNotifier` 子类，`lib/pages` 无 `addListener` / `ListenableBuilder`。
 
 
 ## 阶段 5 收尾清单（待办）

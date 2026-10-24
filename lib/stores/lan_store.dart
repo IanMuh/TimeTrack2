@@ -1,4 +1,4 @@
-﻿/// LAN 设备互通编排 store（批次 4 设置页设备互通分区）。
+/// LAN 设备互通编排 store（批次 4 设置页设备互通分区）。
 ///
 /// 职责（薄编排——协议/绑定/配对码语义在 api/lan 层）：
 /// - **主机**：手动启动/停止（不变式 10：无任何自动开启路径）+ 绑定端口
@@ -25,7 +25,7 @@ import '../utils/result.dart';
 import 'data_revision.dart';
 
 class LanStore {
-  /// 状态变更回调（唯一订阅槽，迁移期由 provider 挂载，替代 ChangeNotifier）。
+  /// 状态变更回调（唯一订阅槽，由 provider 挂载）。
   void Function()? onChanged;
   LanStore({
     required this.bundleRepository,
