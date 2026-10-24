@@ -13,7 +13,6 @@ import '../providers/data.dart';
 import '../providers/foundation.dart';
 import '../providers/services.dart';
 import '../providers/engines.dart';
-import '../stores/app_store.dart';
 import '../stores/reminder_store.dart';
 import '../stores/update_store.dart' show UpdateState;
 import '../viewmodels/activity.dart';
@@ -45,9 +44,7 @@ import '../viewmodels/profile_settings.dart' show ReminderMethod;
 ///   禁用时给中性提示（不可用原因语义批次 5 补全——含冲突校验原因与移动端
 ///   收纳菜单；快捷键 Ctrl+Z/Y 与输入框让位同属批次 5）。
 class AppShell extends ConsumerStatefulWidget {
-  const AppShell({super.key, required this.app, required this.navigationShell});
-
-  final AppStore app;
+  const AppShell({super.key, required this.navigationShell});
   final StatefulNavigationShell navigationShell;
 
   /// 宽屏断点：Material 逻辑像素 840（design min-[840px]）。
@@ -804,7 +801,6 @@ class _AppShellState extends ConsumerState<AppShell>
           ? Row(
               children: [
                 _SideNav(
-                  app: widget.app,
                   shell: shell,
                   onUndo: () => _dispatch(CommandInvocation(name: 'undo')),
                   onRedo: () => _dispatch(CommandInvocation(name: 'redo')),
@@ -1103,13 +1099,10 @@ List<_NavSpec> _navSpecs(AppLocalizations l10n) {
 /// 侧向导航（≥ 840，固定 232px；品牌 + 导航 + 撤销/重做 + 同步状态）。
 class _SideNav extends StatelessWidget {
   const _SideNav({
-    required this.app,
     required this.shell,
     required this.onUndo,
     required this.onRedo,
   });
-
-  final AppStore app;
   final StatefulNavigationShell shell;
   final VoidCallback onUndo;
   final VoidCallback onRedo;
@@ -1170,7 +1163,7 @@ class _SideNav extends StatelessWidget {
           // 撤销/重做组 + 同步状态（分隔线上方）。
           const Divider(),
           _UndoRedoGroup(onUndo: onUndo, onRedo: onRedo),
-          _SyncStatusText(app: app),
+          _SyncStatusText(),
           const SizedBox(height: 12),
         ],
       ),
@@ -1311,9 +1304,7 @@ class _UndoRedoButton extends StatelessWidget {
 
 /// 底部同步状态小字（design：cloud 图标 + 状态；离线优先的可感知指示）。
 class _SyncStatusText extends StatelessWidget {
-  const _SyncStatusText({required this.app});
-
-  final AppStore app;
+  const _SyncStatusText();
 
   @override
   Widget build(BuildContext context) {

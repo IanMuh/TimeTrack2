@@ -11,7 +11,6 @@ import '../l10n/app_localizations.dart';
 import '../providers/data.dart';
 import '../providers/engines.dart';
 import '../providers/foundation.dart';
-import '../stores/app_store.dart';
 import '../stores/category_store.dart';
 import '../stores/settings_store.dart';
 import '../utils/time_format.dart';
@@ -28,16 +27,13 @@ import '../viewmodels/time_entry.dart';
 /// - 分组按**当前归属**（活动的主分类，不变式 3：展示用快照、统计按当前归属）；
 ///   条目名/色展示用发生时刻快照。
 class TodayPage extends ConsumerStatefulWidget {
-  const TodayPage({super.key, required this.app});
-
-  final AppStore app;
+  const TodayPage({super.key});
 
   @override
   ConsumerState<TodayPage> createState() => _TodayPageState();
 }
 
 class _TodayPageState extends ConsumerState<TodayPage> {
-  AppStore get app => widget.app;
   AppLocalizations get l10n => AppLocalizations.of(context)!;
 
   /// null = 跟随“今天”：跨午夜后 [currentDayProvider] 翻日，页面与查询键
@@ -88,13 +84,12 @@ class _TodayPageState extends ConsumerState<TodayPage> {
     DateTime now,
     String? unassignedActivityId, {
     DateTime? dayStart,
-  }) =>
-      computeDayMetrics(
-        entries,
-        dayStart: dayStart ?? _day,
-        now: now,
-        unassignedActivityId: unassignedActivityId,
-      );
+  }) => computeDayMetrics(
+    entries,
+    dayStart: dayStart ?? _day,
+    now: now,
+    unassignedActivityId: unassignedActivityId,
+  );
 
   /// 迁移期桥接：分类树/设置仍由 ChangeNotifier store 持有（B4 换 Notifier），
   /// build 里 watch 变更计数保证重建，方法体经 read 取当前快照。
@@ -244,12 +239,7 @@ class _TodayPageState extends ConsumerState<TodayPage> {
     final metrics = _metrics(entries, now, unassignedId);
     final prevMetrics = previousEntries == null
         ? null
-        : _metrics(
-            previousEntries,
-            now,
-            unassignedId,
-            dayStart: previousDay,
-          );
+        : _metrics(previousEntries, now, unassignedId, dayStart: previousDay);
 
     final content = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -327,15 +317,15 @@ class _TodayPageState extends ConsumerState<TodayPage> {
             onToggle: () => setState(() {
               final id = group.rootId;
               if (id == null) return;
-              _collapsed.contains(id) ? _collapsed.remove(id) : _collapsed.add(id);
+              _collapsed.contains(id)
+                  ? _collapsed.remove(id)
+                  : _collapsed.add(id);
             }),
           ),
       ],
     );
   }
 }
-
-
 
 /// 今日页子件（页面装配数据的纯展示件）。
 
@@ -381,13 +371,13 @@ class _TodayHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final label = DateFormat('M月d日 EEE', 'zh').format(day);
-    final compact =
-        MediaQuery.sizeOf(context).width < 600;
+    final compact = MediaQuery.sizeOf(context).width < 600;
     Widget step(VoidCallback cb, IconData i, String tip, bool left) =>
         IconButton(
           tooltip: tip,
-          visualDensity:
-              compact ? VisualDensity.compact : VisualDensity.standard,
+          visualDensity: compact
+              ? VisualDensity.compact
+              : VisualDensity.standard,
           icon: Icon(i, size: compact ? 20 : 24),
           onPressed: cb,
         );
@@ -413,8 +403,8 @@ class _TodayHeader extends StatelessWidget {
         step(onPick, Icons.calendar_month_outlined, l10n.todayPickDate, false),
         step(onNext, Icons.chevron_right_rounded, l10n.todayNextDay, false),
         if (!isToday)
-        if (!isToday)
-          TextButton(onPressed: onToday, child: Text(l10n.todayBackToToday)),
+          if (!isToday)
+            TextButton(onPressed: onToday, child: Text(l10n.todayBackToToday)),
         const Spacer(),
       ],
     );
@@ -466,8 +456,7 @@ class _MetricsRow extends StatelessWidget {
                     previous == null
                         ? null
                         : Duration(seconds: previous!.sessions),
-                  final l when l == l10n.todayFocusDuration =>
-                    previous?.focus,
+                  final l when l == l10n.todayFocusDuration => previous?.focus,
                   _ => previous?.rest,
                 },
               ),
@@ -510,39 +499,40 @@ class _MetricCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-          Text(
-            label,
-            style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
-          ),
-          const SizedBox(height: 2),
-          TnumText(
-            isSessions
-                ? '${duration.inSeconds}'
-                : formatHms(duration),
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-              color: scheme.onSurface,
+            Text(
+              label,
+              style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
             ),
-          ),
-          if (delta != null)
-            Row(
-              children: [
-                Icon(
-                  delta >= Duration.zero
-                      ? Icons.arrow_upward_rounded
-                      : Icons.arrow_downward_rounded,
-                  size: 12,
-                  color: delta >= Duration.zero
-                      ? const Color(0xff10b981)
-                      : scheme.onSurfaceVariant,
-                ),
-                Text(
-                  '${l10n.todayVsPrevious} ${formatHms(delta.abs())}',
-                  style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant),
-                ),
-              ],
+            const SizedBox(height: 2),
+            TnumText(
+              isSessions ? '${duration.inSeconds}' : formatHms(duration),
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: scheme.onSurface,
+              ),
             ),
+            if (delta != null)
+              Row(
+                children: [
+                  Icon(
+                    delta >= Duration.zero
+                        ? Icons.arrow_upward_rounded
+                        : Icons.arrow_downward_rounded,
+                    size: 12,
+                    color: delta >= Duration.zero
+                        ? const Color(0xff10b981)
+                        : scheme.onSurfaceVariant,
+                  ),
+                  Text(
+                    '${l10n.todayVsPrevious} ${formatHms(delta.abs())}',
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
           ],
         ),
       ),
@@ -686,7 +676,8 @@ class _GroupCard extends StatelessWidget {
           ActivityColorBar(dotColor, ratio: ratio, height: 4),
           const SizedBox(height: 6),
           if (!collapsed)
-            for (final row in rows) _ActivityGroupRow(row: row, dayTotal: dayTotal),
+            for (final row in rows)
+              _ActivityGroupRow(row: row, dayTotal: dayTotal),
         ],
       ),
     );
@@ -797,14 +788,19 @@ class _TimelinePreview extends StatelessWidget {
             children: [
               Text(
                 l10n.todayPreviewTitle,
-                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
               const Spacer(),
               if (entryCount > 5)
                 Text(
                   l10n.todayPreviewCount(entryCount),
-                  style:
-                      TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: scheme.onSurfaceVariant,
+                  ),
                 ),
             ],
           ),
@@ -854,8 +850,11 @@ class _PreviewRow extends StatelessWidget {
             ),
           ),
           if (entry.isAuto)
-            Icon(Icons.auto_awesome_rounded,
-                size: 12, color: const Color(0xff0ea5e9)),
+            Icon(
+              Icons.auto_awesome_rounded,
+              size: 12,
+              color: const Color(0xff0ea5e9),
+            ),
           const SizedBox(width: 6),
           TnumText(
             formatHms(entry.durationUntil(DateTime.now())),

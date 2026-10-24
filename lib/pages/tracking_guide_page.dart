@@ -39,26 +39,27 @@ class TrackingGuidePage extends StatelessWidget {
                   color: scheme.primary.withValues(alpha: 0.1),
                 ),
                 alignment: Alignment.center,
-                child: Icon(Icons.visibility_outlined,
-                    size: 32, color: scheme.primary),
+                child: Icon(
+                  Icons.visibility_outlined,
+                  size: 32,
+                  color: scheme.primary,
+                ),
               ),
               const SizedBox(height: 20),
               Text(
                 l10n.settingsSecBackground,
                 textAlign: TextAlign.center,
-                style: Theme.of(context)
-                    .textTheme
-                    .headlineSmall
-                    ?.copyWith(fontWeight: FontWeight.w600),
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
               ),
               const SizedBox(height: 6),
               Text(
                 l10n.usageAccessGuide,
                 textAlign: TextAlign.center,
-                style: Theme.of(context)
-                    .textTheme
-                    .bodyMedium
-                    ?.copyWith(color: scheme.onSurfaceVariant),
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
               ),
               const SizedBox(height: 28),
               _SectionHeading(text: l10n.bgGuideWhy),
@@ -69,14 +70,12 @@ class TrackingGuidePage extends StatelessWidget {
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(12),
-                  color:
-                      scheme.primaryContainer.withValues(alpha: 0.35),
+                  color: scheme.primaryContainer.withValues(alpha: 0.35),
                 ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(Icons.lock_outline,
-                        size: 18, color: scheme.primary),
+                    Icon(Icons.lock_outline, size: 18, color: scheme.primary),
                     const SizedBox(width: 10),
                     Expanded(child: Text(l10n.bgGuidePrivacy)),
                   ],
@@ -95,10 +94,9 @@ class TrackingGuidePage extends StatelessWidget {
               Text(
                 l10n.bgGuideNote,
                 textAlign: TextAlign.center,
-                style: Theme.of(context)
-                    .textTheme
-                    .bodySmall
-                    ?.copyWith(color: scheme.onSurfaceVariant),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
               ),
               const SizedBox(height: 10),
               TextButton(
@@ -124,10 +122,9 @@ class _SectionHeading extends StatelessWidget {
   Widget build(BuildContext context) {
     return Text(
       text,
-      style: Theme.of(context)
-          .textTheme
-          .titleSmall
-          ?.copyWith(fontWeight: FontWeight.w600),
+      style: Theme.of(
+        context,
+      ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
     );
   }
 }

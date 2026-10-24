@@ -1,4 +1,4 @@
-﻿/// 设置分区实现 ③：后台记录（平台卡 + 总开关 + 规则列表/表单，契约 §6.2）。
+/// 设置分区实现 ③：后台记录（平台卡 + 总开关 + 规则列表/表单，契约 §6.2）。
 ///
 /// 规则 CRUD 经指令通道（tracking_rule_create/update/delete）——铁律 7；
 /// 总开关写 ProfileSettings（SettingsStore）；平台卡按平台分派：
@@ -20,7 +20,6 @@ import '../l10n/app_localizations.dart';
 import '../providers/data.dart';
 import '../providers/engines.dart';
 import '../providers/services.dart';
-import '../stores/app_store.dart';
 import '../stores/tracking_store.dart' show NoopForegroundDetector;
 import '../utils/result.dart';
 import '../viewmodels/activity.dart';
@@ -32,9 +31,7 @@ import 'tracking_guide_page.dart';
 
 /// 后台记录分区。
 class BackgroundSection extends ConsumerStatefulWidget {
-  const BackgroundSection({super.key, required this.app});
-
-  final AppStore app;
+  const BackgroundSection({super.key});
 
   @override
   ConsumerState<BackgroundSection> createState() => _BackgroundSectionState();
@@ -113,7 +110,6 @@ class _BackgroundSectionState extends ConsumerState<BackgroundSection> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final app = widget.app;
     return Consumer(
       builder: (context, ref, _) {
         ref.watch(trackingChangeProvider);
@@ -132,7 +128,6 @@ class _BackgroundSectionState extends ConsumerState<BackgroundSection> {
           paddedChildren: true,
           children: [
             _PlatformCard(
-              app: app,
               usageGranted: Platform.isAndroid
                   ? (_usageGranted ?? false)
                   : null,
@@ -328,11 +323,8 @@ class _BackgroundSectionState extends ConsumerState<BackgroundSection> {
   Future<void> _openForm(BuildContext context, TrackingRule? existing) async {
     final saved = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => RuleFormDialog(
-        app: widget.app,
-        activities: _activities,
-        existing: existing,
-      ),
+      builder: (dialogContext) =>
+          RuleFormDialog(activities: _activities, existing: existing),
     );
     if (saved == true && mounted) {
       await ref.read(trackingStoreProvider).reloadRules();
@@ -348,13 +340,7 @@ class _BackgroundSectionState extends ConsumerState<BackgroundSection> {
 /// 平台卡：Android = 「使用情况访问」授权状态卡（§6.2）；Windows/其他 =
 /// 常驻说明 + 检测器状态。
 class _PlatformCard extends ConsumerWidget {
-  const _PlatformCard({
-    required this.app,
-    this.usageGranted,
-    this.onOpenUsageSettings,
-  });
-
-  final AppStore app;
+  const _PlatformCard({this.usageGranted, this.onOpenUsageSettings});
 
   /// Android：授权态（null = 非 Android）。
   final bool? usageGranted;
@@ -644,14 +630,7 @@ class _MiniToggle extends StatelessWidget {
 
 /// 规则表单对话框（新建/编辑共用）。
 class RuleFormDialog extends ConsumerStatefulWidget {
-  const RuleFormDialog({
-    super.key,
-    required this.app,
-    required this.activities,
-    this.existing,
-  });
-
-  final AppStore app;
+  const RuleFormDialog({super.key, required this.activities, this.existing});
   final List<Activity> activities;
   final TrackingRule? existing;
 
@@ -1005,4 +984,3 @@ class _KindRadio extends StatelessWidget {
     );
   }
 }
-

@@ -1,4 +1,4 @@
-﻿/// 设置分区实现 ①：通用 / 提醒 / 时间线（批次 4）。
+/// 设置分区实现 ①：通用 / 提醒 / 时间线（批次 4）。
 ///
 /// 三区全部是 ProfileSettings 表单——变更经 [SettingsStore.save] 落库
 /// （即时生效 + undo + LWW 时间戳推进），不另设本地草稿态。
@@ -10,16 +10,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../l10n/app_localizations.dart';
 import '../utils/result.dart';
 import '../providers/engines.dart';
-import '../stores/app_store.dart';
 import '../utils/time_format.dart';
 import '../viewmodels/profile_settings.dart';
 import 'settings_widgets.dart';
 
 /// 通用分区。
 class GeneralSection extends ConsumerWidget {
-  const GeneralSection({super.key, required this.app});
-
-  final AppStore app;
+  const GeneralSection({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -57,7 +54,8 @@ class GeneralSection extends ConsumerWidget {
                   ),
                 ],
                 groupValue: s?.themeMode ?? ThemeModeSetting.light,
-                onChanged: (v) => _save(ref, context, (cur) => cur.copyWith(themeMode: v)),
+                onChanged: (v) =>
+                    _save(ref, context, (cur) => cur.copyWith(themeMode: v)),
               ),
             ),
             SettingsDropdownRow<int>(
@@ -67,9 +65,13 @@ class GeneralSection extends ConsumerWidget {
               items: [
                 SettingsDropdownItem(value: 1, label: l10n.settingsWeekMonday),
                 SettingsDropdownItem(value: 7, label: l10n.settingsWeekSunday),
-                SettingsDropdownItem(value: 6, label: l10n.settingsWeekSaturday),
+                SettingsDropdownItem(
+                  value: 6,
+                  label: l10n.settingsWeekSaturday,
+                ),
               ],
-              onChanged: (v) => _save(ref, context, (cur) => cur.copyWith(weekStartDay: v)),
+              onChanged: (v) =>
+                  _save(ref, context, (cur) => cur.copyWith(weekStartDay: v)),
             ),
             SettingsSegmentedRow(
               title: l10n.settingsTimeFormat,
@@ -93,15 +95,21 @@ class GeneralSection extends ConsumerWidget {
                     label: l10n.settingsMinutesShort(m),
                   ),
               ],
-              onChanged: (v) =>
-                  _save(ref, context, (cur) => cur.copyWith(defaultRecordMinutes: v)),
+              onChanged: (v) => _save(
+                ref,
+                context,
+                (cur) => cur.copyWith(defaultRecordMinutes: v),
+              ),
             ),
             SettingsSwitchRow(
               title: l10n.settingsQuickReminder,
               subtitle: l10n.settingsQuickReminderHint,
               value: s?.quickReminderEnabled ?? true,
-              onChanged: (v) =>
-                  _save(ref, context, (cur) => cur.copyWith(quickReminderEnabled: v)),
+              onChanged: (v) => _save(
+                ref,
+                context,
+                (cur) => cur.copyWith(quickReminderEnabled: v),
+              ),
             ),
           ],
         );
@@ -112,9 +120,7 @@ class GeneralSection extends ConsumerWidget {
 
 /// 提醒分区。
 class ReminderSection extends ConsumerWidget {
-  const ReminderSection({super.key, required this.app});
-
-  final AppStore app;
+  const ReminderSection({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -135,7 +141,9 @@ class ReminderSection extends ConsumerWidget {
               title: l10n.settingsTriggerTime,
               hint: l10n.settingsTriggerTimeHint,
               enabled: quickOn,
-              child: _TriggerTimeField(app: app, minutes: s?.reminderTimeOfDayMinutes ?? 540),
+              child: _TriggerTimeField(
+                minutes: s?.reminderTimeOfDayMinutes ?? 540,
+              ),
             ),
             SettingsSliderRow(
               title: l10n.settingsDurationThreshold,
@@ -146,7 +154,11 @@ class ReminderSection extends ConsumerWidget {
               valueLabel: minutesLabel(l10n, s?.reminderMinutes ?? 45),
               marks: ['15', '60', '120', '180'],
               onChangeEnd: quickOn
-                  ? (v) => _save(ref, context, (cur) => cur.copyWith(reminderMinutes: v))
+                  ? (v) => _save(
+                      ref,
+                      context,
+                      (cur) => cur.copyWith(reminderMinutes: v),
+                    )
                   : (v) {},
             ),
             SettingsSliderRow(
@@ -159,7 +171,10 @@ class ReminderSection extends ConsumerWidget {
               marks: ['5', '15', '30', '60'],
               onChangeEnd: quickOn
                   ? (v) => _save(
-                      ref, context, (cur) => cur.copyWith(reminderIntervalMinutes: v))
+                      ref,
+                      context,
+                      (cur) => cur.copyWith(reminderIntervalMinutes: v),
+                    )
                   : (v) {},
             ),
             _Field(
@@ -188,8 +203,11 @@ class ReminderSection extends ConsumerWidget {
                   ),
                 ],
                 groupValue: s?.reminderMethod ?? ReminderMethod.dialog,
-                onChanged: (v) =>
-                    _save(ref, context, (cur) => cur.copyWith(reminderMethod: v)),
+                onChanged: (v) => _save(
+                  ref,
+                  context,
+                  (cur) => cur.copyWith(reminderMethod: v),
+                ),
               ),
             ),
           ],
@@ -201,9 +219,7 @@ class ReminderSection extends ConsumerWidget {
 
 /// 时间线分区。
 class TimelineSection extends ConsumerWidget {
-  const TimelineSection({super.key, required this.app});
-
-  final AppStore app;
+  const TimelineSection({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -231,17 +247,18 @@ class TimelineSection extends ConsumerWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(l10n.settingsMergeThreshold,
-                              style: Theme.of(context).textTheme.bodyMedium),
+                          Text(
+                            l10n.settingsMergeThreshold,
+                            style: Theme.of(context).textTheme.bodyMedium,
+                          ),
                           const SizedBox(height: 2),
                           Text(
                             l10n.settingsMergeThresholdHint,
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
+                            style: Theme.of(context).textTheme.bodySmall
                                 ?.copyWith(
-                                  color:
-                                      Theme.of(context).colorScheme.onSurfaceVariant,
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurfaceVariant,
                                 ),
                           ),
                         ],
@@ -251,9 +268,9 @@ class TimelineSection extends ConsumerWidget {
                     Text(
                       minutesLabel(l10n, value),
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: Theme.of(context).colorScheme.primary,
-                            fontWeight: FontWeight.w600,
-                          ),
+                        color: Theme.of(context).colorScheme.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ],
                 ),
@@ -267,7 +284,8 @@ class TimelineSection extends ConsumerWidget {
                   onChangeEnd: (v) => _save(
                     ref,
                     context,
-                    (cur) => cur.copyWith(mergeNeighborThresholdMinutes: v.round()),
+                    (cur) =>
+                        cur.copyWith(mergeNeighborThresholdMinutes: v.round()),
                   ),
                 ),
                 Row(
@@ -277,9 +295,8 @@ class TimelineSection extends ConsumerWidget {
                       Text(
                         mark,
                         style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                              color:
-                                  Theme.of(context).colorScheme.onSurfaceVariant,
-                            ),
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
                       ),
                   ],
                 ),
@@ -323,10 +340,9 @@ class _Field extends StatelessWidget {
               const SizedBox(height: 2),
               Text(
                 hint!,
-                style: Theme.of(context)
-                    .textTheme
-                    .bodySmall
-                    ?.copyWith(color: scheme.onSurfaceVariant),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
               ),
             ],
             const SizedBox(height: 10),
@@ -340,23 +356,22 @@ class _Field extends StatelessWidget {
 
 /// 触发时刻选择（分钟 ↔ TimeOfDay）。
 class _TriggerTimeField extends ConsumerWidget {
-  const _TriggerTimeField({required this.app, required this.minutes});
-
-  final AppStore app;
+  const _TriggerTimeField({required this.minutes});
   final int minutes;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
-    final time = TimeOfDay(
-      hour: minutes ~/ 60,
-      minute: minutes % 60,
-    );
+    final time = TimeOfDay(hour: minutes ~/ 60, minute: minutes % 60);
     // 跟随 24 小时制偏好（偏好已全局接线，此处曾固定 24h 渲染漏改）。
-    final use24 = ref.read(settingsStoreProvider).current?.use24HourFormat ?? true;
+    final use24 =
+        ref.read(settingsStoreProvider).current?.use24HourFormat ?? true;
     return InkWell(
       onTap: () async {
-        final picked = await showTimePicker(context: context, initialTime: time);
+        final picked = await showTimePicker(
+          context: context,
+          initialTime: time,
+        );
         if (picked == null || !context.mounted) return;
         final value = picked.hour * 60 + picked.minute;
         await _save(
@@ -370,7 +385,9 @@ class _TriggerTimeField extends ConsumerWidget {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.6)),
+          border: Border.all(
+            color: scheme.outlineVariant.withValues(alpha: 0.6),
+          ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -378,8 +395,8 @@ class _TriggerTimeField extends ConsumerWidget {
             Text(
               formatClock(time.hour, time.minute, use24: use24),
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    fontFeatures: const [FontFeature.tabularFigures()],
-                  ),
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
             ),
             const SizedBox(width: 6),
             Icon(Icons.schedule, size: 16, color: scheme.onSurfaceVariant),

@@ -7,16 +7,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../l10n/app_localizations.dart';
 import '../providers/engines.dart';
 import '../providers/services.dart';
-import '../stores/app_store.dart';
 import '../stores/update_store.dart';
 import '../viewmodels/commands/command_invocation.dart';
 import 'settings_widgets.dart';
 
 /// 版本更新分区。
 class UpdateSection extends ConsumerWidget {
-  const UpdateSection({super.key, required this.app});
-
-  final AppStore app;
+  const UpdateSection({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -61,7 +58,7 @@ class UpdateSection extends ConsumerWidget {
               ],
             ),
             const SizedBox(height: 14),
-            _UpdateStateCard(app: app),
+            _UpdateStateCard(),
             const SizedBox(height: 12),
             SettingsInfoBanner(
               compact: true,
@@ -138,9 +135,7 @@ class _VersionCell extends StatelessWidget {
 /// 状态机主卡：按当前状态渲染主操作区（idle/available/downloading/
 /// verifying/installing/restartRequired/failed/upToDate/checking）。
 class _UpdateStateCard extends ConsumerWidget {
-  const _UpdateStateCard({required this.app});
-
-  final AppStore app;
+  const _UpdateStateCard();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -365,9 +360,7 @@ class _ProgressBlock extends StatelessWidget {
 
 /// 关于分区。
 class AboutSection extends ConsumerWidget {
-  const AboutSection({super.key, required this.app});
-
-  final AppStore app;
+  const AboutSection({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

@@ -6,7 +6,6 @@ import '../pages/stats_page.dart';
 import '../pages/timeline_page.dart';
 import '../pages/timer_page.dart';
 import '../pages/today_page.dart';
-import '../stores/app_store.dart';
 
 /// 路由表（阶段 4 批次 1：StatefulShellRoute 5 主页面保活壳）。
 ///
@@ -19,28 +18,28 @@ import '../stores/app_store.dart';
 class AppRouter {
   AppRouter._();
 
-  /// 组装 GoRouter；[app] 供壳（AppShell）注入 store 与指令通道。
-  static GoRouter create(AppStore app) {
+  /// 组装 GoRouter。状态与指令通道一律经 Riverpod 容器获取。
+  static GoRouter create() {
     return GoRouter(
       initialLocation: '/timer',
       routes: [
         StatefulShellRoute.indexedStack(
           builder: (context, state, navigationShell) {
-            return AppShell(app: app, navigationShell: navigationShell);
+            return AppShell(navigationShell: navigationShell);
           },
           branches: [
-            _branch('/timer', 'timer', (context, state) => TimerPage(app: app)),
-            _branch('/today', 'today', (context, state) => TodayPage(app: app)),
+            _branch('/timer', 'timer', (context, state) => TimerPage()),
+            _branch('/today', 'today', (context, state) => TodayPage()),
             _branch(
               '/timeline',
               'timeline',
-              (context, state) => TimelinePage(app: app),
+              (context, state) => TimelinePage(),
             ),
-            _branch('/stats', 'stats', (context, state) => StatsPage(app: app)),
+            _branch('/stats', 'stats', (context, state) => StatsPage()),
             _branch(
               '/settings',
               'settings',
-              (context, state) => SettingsPage(app: app),
+              (context, state) => SettingsPage(),
             ),
           ],
         ),
@@ -54,13 +53,7 @@ class AppRouter {
     GoRouterWidgetBuilder builder,
   ) {
     return StatefulShellBranch(
-      routes: [
-        GoRoute(
-          path: path,
-          name: name,
-          builder: builder,
-        ),
-      ],
+      routes: [GoRoute(path: path, name: name, builder: builder)],
     );
   }
 }

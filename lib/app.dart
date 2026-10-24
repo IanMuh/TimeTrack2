@@ -30,12 +30,7 @@ import 'viewmodels/profile_settings.dart' show ThemeModeSetting;
 ///   超出部分钳制（大计时数字/统计树行/活动卡等临界布局按 1.3 上限设计，
 ///   无钳制时极端放大会全屏溢出）。
 class TimeTrack2App extends StatefulWidget {
-  const TimeTrack2App({
-    super.key,
-    this.locale,
-    this.appStore,
-    this.container,
-  });
+  const TimeTrack2App({super.key, this.locale, this.appStore, this.container});
 
   final Locale? locale;
   final AppStore? appStore;
@@ -65,7 +60,7 @@ class _TimeTrack2AppState extends State<TimeTrack2App> {
     super.initState();
     final store = widget.appStore;
     if (store != null) {
-      _router = AppRouter.create(store);
+      _router = AppRouter.create();
     }
   }
 
@@ -217,12 +212,8 @@ class _ShellPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     return Scaffold(
-      appBar: AppBar(
-        title: Text(l10n.appTitle),
-      ),
-      body: Center(
-        child: Text(l10n.appSubtitle),
-      ),
+      appBar: AppBar(title: Text(l10n.appTitle)),
+      body: Center(child: Text(l10n.appSubtitle)),
     );
   }
 }

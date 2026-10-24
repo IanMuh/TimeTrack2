@@ -1,21 +1,19 @@
-﻿/// 设置分区实现 ②：云同步（登录/登出/摘要/立即同步）+ AI 配置二期占位。
+/// 设置分区实现 ②：云同步（登录/登出/摘要/立即同步）+ AI 配置二期占位。
 library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../l10n/app_localizations.dart';import '../providers/engines.dart';
+import '../l10n/app_localizations.dart';
+import '../providers/engines.dart';
 import '../utils/result.dart';
 import '../viewmodels/commands/command_invocation.dart';
-import '../stores/app_store.dart';
 import '../stores/sync_store.dart';
 import 'settings_widgets.dart';
 
 /// 云同步分区。
 class SyncSection extends ConsumerWidget {
-  const SyncSection({super.key, required this.app});
-
-  final AppStore app;
+  const SyncSection({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -61,7 +59,7 @@ class SyncSection extends ConsumerWidget {
                 // 未配置/未登录：登录入口。
                 if (sync.isConfigured && sync.userId == null)
                   OutlinedButton.icon(
-                    onPressed: () => _openLoginDialog(context, app),
+                    onPressed: () => _openLoginDialog(context),
                     icon: const Icon(Icons.login, size: 16),
                     label: Text(l10n.settingsLoginTitle),
                   ),
@@ -75,8 +73,9 @@ class SyncSection extends ConsumerWidget {
 
   Future<void> _syncNow(BuildContext context, WidgetRef ref) async {
     // 经指令通道（铁律 7）：'sync' 指令已注册——与深链/AI/未来快捷键同入口。
-    final result =
-        await ref.read(commandDispatcherProvider).dispatch(CommandInvocation(name: 'sync'));
+    final result = await ref
+        .read(commandDispatcherProvider)
+        .dispatch(CommandInvocation(name: 'sync'));
     if (!context.mounted) return;
     final l10n = AppLocalizations.of(context)!;
     final messenger = ScaffoldMessenger.of(context);
@@ -142,22 +141,20 @@ class _SyncStatusCard extends StatelessWidget {
                   configured
                       ? l10n.settingsSyncConfigured
                       : l10n.settingsSyncNotConfigured,
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodyMedium
-                      ?.copyWith(fontWeight: FontWeight.w600),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
                 ),
                 const SizedBox(height: 2),
                 Text(
                   !configured
                       ? l10n.settingsSyncNotConfiguredHint
                       : loggedIn
-                          ? l10n.settingsSyncLoggedInAs(
-                              sync.userId ?? '')
-                          : l10n.settingsSyncNotLoggedIn,
+                      ? l10n.settingsSyncLoggedInAs(sync.userId ?? '')
+                      : l10n.settingsSyncNotLoggedIn,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                      ),
+                    color: scheme.onSurfaceVariant,
+                  ),
                   overflow: TextOverflow.ellipsis,
                 ),
               ],
@@ -165,7 +162,9 @@ class _SyncStatusCard extends StatelessWidget {
           ),
           const SizedBox(width: 8),
           _StatusDot(
-            label: configured ? l10n.settingsSyncOnline : l10n.settingsSyncOffline,
+            label: configured
+                ? l10n.settingsSyncOnline
+                : l10n.settingsSyncOffline,
             active: online,
           ),
         ],
@@ -201,9 +200,9 @@ class _StatusDot extends StatelessWidget {
           Text(
             label,
             style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: color,
-                  fontWeight: FontWeight.w600,
-                ),
+              color: color,
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ],
       ),
@@ -223,15 +222,14 @@ class _SyncSummaryGrid extends StatelessWidget {
     final lastText = lastAt == null
         ? l10n.settingsSyncNever
         : DateTime.now().difference(lastAt) < const Duration(minutes: 1)
-            ? l10n.settingsSyncJustNow
-            : '${lastAt.difference(DateTime.now()).inMinutes.abs()} min';
+        ? l10n.settingsSyncJustNow
+        : '${lastAt.difference(DateTime.now()).inMinutes.abs()} min';
     final pulled = sync.lastPulled;
     final pushed = sync.lastPushed;
     return Row(
       children: [
         Expanded(
-          child: _SummaryCell(
-              label: l10n.settingsSyncLastAt, value: lastText),
+          child: _SummaryCell(label: l10n.settingsSyncLastAt, value: lastText),
         ),
         const SizedBox(width: 10),
         Expanded(
@@ -271,19 +269,18 @@ class _SummaryCell extends StatelessWidget {
         children: [
           Text(
             label,
-            style: Theme.of(context)
-                .textTheme
-                .labelSmall
-                ?.copyWith(color: scheme.onSurfaceVariant),
+            style: Theme.of(
+              context,
+            ).textTheme.labelSmall?.copyWith(color: scheme.onSurfaceVariant),
             overflow: TextOverflow.ellipsis,
           ),
           const SizedBox(height: 2),
           Text(
             value,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  fontWeight: FontWeight.w600,
-                  fontFeatures: const [FontFeature.tabularFigures()],
-                ),
+              fontWeight: FontWeight.w600,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
             overflow: TextOverflow.ellipsis,
           ),
         ],
@@ -293,17 +290,15 @@ class _SummaryCell extends StatelessWidget {
 }
 
 /// 登录对话框：magic link 邮箱 → 验证码 OTP（加载/失败态）。
-Future<void> _openLoginDialog(BuildContext context, AppStore app) async {
+Future<void> _openLoginDialog(BuildContext context) async {
   await showDialog<void>(
     context: context,
-    builder: (dialogContext) => _LoginDialog(app: app),
+    builder: (dialogContext) => _LoginDialog(),
   );
 }
 
 class _LoginDialog extends ConsumerStatefulWidget {
-  const _LoginDialog({required this.app});
-
-  final AppStore app;
+  const _LoginDialog();
 
   @override
   ConsumerState<_LoginDialog> createState() => _LoginDialogState();
@@ -359,7 +354,9 @@ class _LoginDialogState extends ConsumerState<_LoginDialog> {
       _verifying = true;
       _error = null;
     });
-    final result = await ref.read(syncStoreProvider).verifyEmailOtp(email, code);
+    final result = await ref
+        .read(syncStoreProvider)
+        .verifyEmailOtp(email, code);
     if (!mounted) return;
     switch (result) {
       case AppSuccess<String>():
@@ -387,10 +384,9 @@ class _LoginDialogState extends ConsumerState<_LoginDialog> {
           children: [
             Text(
               l10n.settingsLoginSubtitle,
-              style: Theme.of(context)
-                  .textTheme
-                  .bodySmall
-                  ?.copyWith(color: scheme.onSurfaceVariant),
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
             ),
             const SizedBox(height: 16),
             TextField(
@@ -414,8 +410,7 @@ class _LoginDialogState extends ConsumerState<_LoginDialog> {
                       ? const SizedBox(
                           width: 14,
                           height: 14,
-                          child:
-                              CircularProgressIndicator(strokeWidth: 2),
+                          child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : Text(l10n.settingsLoginSendCode),
                 ),
@@ -425,9 +420,9 @@ class _LoginDialogState extends ConsumerState<_LoginDialog> {
               const SizedBox(height: 14),
               Text(
                 l10n.settingsLoginCodeSent,
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: const Color(0xFF10B981),
-                    ),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: const Color(0xFF10B981)),
               ),
               const SizedBox(height: 10),
               TextField(
@@ -451,8 +446,7 @@ class _LoginDialogState extends ConsumerState<_LoginDialog> {
                       ? const SizedBox(
                           width: 14,
                           height: 14,
-                          child:
-                              CircularProgressIndicator(strokeWidth: 2),
+                          child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : Text(l10n.settingsLoginVerify),
                 ),
@@ -462,24 +456,24 @@ class _LoginDialogState extends ConsumerState<_LoginDialog> {
               const SizedBox(height: 12),
               Container(
                 width: double.infinity,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 8,
+                ),
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(8),
                   color: scheme.error.withValues(alpha: 0.08),
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.error_outline,
-                        size: 14, color: scheme.error),
+                    Icon(Icons.error_outline, size: 14, color: scheme.error),
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
                         l10n.settingsLoginFailed(_error!),
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodySmall
-                            ?.copyWith(color: scheme.error),
+                        style: Theme.of(
+                          context,
+                        ).textTheme.bodySmall?.copyWith(color: scheme.error),
                       ),
                     ),
                   ],
@@ -518,8 +512,11 @@ class AiSection extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(Icons.schedule_outlined,
-                  size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              Icon(
+                Icons.schedule_outlined,
+                size: 16,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
               const SizedBox(width: 8),
               Expanded(child: Text(l10n.settingsAiPhase2Note)),
             ],
@@ -529,12 +526,3 @@ class AiSection extends StatelessWidget {
     );
   }
 }
-
-
-
-
-
-
-
-
-

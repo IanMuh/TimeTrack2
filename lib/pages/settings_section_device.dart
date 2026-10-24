@@ -14,7 +14,6 @@ import '../providers/data.dart';
 import '../providers/engines.dart';
 import '../providers/services.dart';
 import '../providers/foundation.dart';
-import '../stores/app_store.dart';
 import '../stores/lan_store.dart';
 import '../utils/result.dart';
 import '../viewmodels/commands/command_invocation.dart';
@@ -22,9 +21,7 @@ import 'settings_widgets.dart';
 
 /// 备份与导出分区。
 class BackupSection extends ConsumerWidget {
-  const BackupSection({super.key, required this.app});
-
-  final AppStore app;
+  const BackupSection({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -189,9 +186,7 @@ class BackupSection extends ConsumerWidget {
 
 /// 设备互通分区。
 class DeviceSection extends ConsumerStatefulWidget {
-  const DeviceSection({super.key, required this.app});
-
-  final AppStore app;
+  const DeviceSection({super.key});
 
   @override
   ConsumerState<DeviceSection> createState() => _DeviceSectionState();

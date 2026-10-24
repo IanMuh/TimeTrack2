@@ -8,7 +8,6 @@ library;
 import 'package:flutter/material.dart';
 
 import '../l10n/app_localizations.dart';
-import '../stores/app_store.dart';
 import 'settings_section_background.dart';
 import 'settings_section_device.dart';
 import 'settings_section_general.dart';
@@ -16,9 +15,7 @@ import 'settings_section_sync.dart';
 import 'settings_section_update.dart';
 
 class SettingsPage extends StatefulWidget {
-  const SettingsPage({super.key, required this.app});
-
-  final AppStore app;
+  const SettingsPage({super.key});
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -36,13 +33,7 @@ class _SettingsPageState extends State<SettingsPage> {
     _rebuildSections();
   }
 
-  @override
-  void didUpdateWidget(SettingsPage oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.app != oldWidget.app) _rebuildSections();
-  }
-
-  void _rebuildSections() => _sections = buildSettingsSections(widget.app);
+  void _rebuildSections() => _sections = buildSettingsSections();
 
   @override
   Widget build(BuildContext context) {
@@ -64,8 +55,8 @@ class _SettingsPageState extends State<SettingsPage> {
           child: Text(
             l10n.settingsInstantHint,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ),
         ),
         const SizedBox(height: 12),
@@ -93,32 +84,32 @@ class SettingsSectionSpec {
 }
 
 /// 组装十分区（顺序 = 契约表格顺序）。
-List<SettingsSectionSpec> buildSettingsSections(AppStore app) {
+List<SettingsSectionSpec> buildSettingsSections() {
   return [
     SettingsSectionSpec(
       key: GlobalKey(debugLabel: 'sec-general'),
       title: 'settingsSecGeneral',
-      builder: (_) => GeneralSection(app: app),
+      builder: (_) => GeneralSection(),
     ),
     SettingsSectionSpec(
       key: GlobalKey(debugLabel: 'sec-backup'),
       title: 'settingsSecBackup',
-      builder: (_) => BackupSection(app: app),
+      builder: (_) => BackupSection(),
     ),
     SettingsSectionSpec(
       key: GlobalKey(debugLabel: 'sec-reminder'),
       title: 'settingsSecReminder',
-      builder: (_) => ReminderSection(app: app),
+      builder: (_) => ReminderSection(),
     ),
     SettingsSectionSpec(
       key: GlobalKey(debugLabel: 'sec-timeline'),
       title: 'settingsSecTimeline',
-      builder: (_) => TimelineSection(app: app),
+      builder: (_) => TimelineSection(),
     ),
     SettingsSectionSpec(
       key: GlobalKey(debugLabel: 'sec-sync'),
       title: 'settingsSecSync',
-      builder: (_) => SyncSection(app: app),
+      builder: (_) => SyncSection(),
     ),
     SettingsSectionSpec(
       key: GlobalKey(debugLabel: 'sec-ai'),
@@ -128,22 +119,22 @@ List<SettingsSectionSpec> buildSettingsSections(AppStore app) {
     SettingsSectionSpec(
       key: GlobalKey(debugLabel: 'sec-background'),
       title: 'settingsSecBackground',
-      builder: (_) => BackgroundSection(app: app),
+      builder: (_) => BackgroundSection(),
     ),
     SettingsSectionSpec(
       key: GlobalKey(debugLabel: 'sec-device'),
       title: 'settingsSecDevice',
-      builder: (_) => DeviceSection(app: app),
+      builder: (_) => DeviceSection(),
     ),
     SettingsSectionSpec(
       key: GlobalKey(debugLabel: 'sec-update'),
       title: 'settingsSecUpdate',
-      builder: (_) => UpdateSection(app: app),
+      builder: (_) => UpdateSection(),
     ),
     SettingsSectionSpec(
       key: GlobalKey(debugLabel: 'sec-about'),
       title: 'settingsSecAbout',
-      builder: (_) => AboutSection(app: app),
+      builder: (_) => AboutSection(),
     ),
   ];
 }

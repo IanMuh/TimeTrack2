@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../components/activity_picker/activity_picker.dart';
@@ -10,7 +10,6 @@ import '../l10n/app_localizations.dart';
 import '../providers/data.dart';
 import '../providers/engines.dart';
 import '../providers/foundation.dart';
-import '../stores/app_store.dart';
 import '../utils/day_metrics.dart';
 import '../viewmodels/action_log.dart';
 import '../viewmodels/activity.dart';
@@ -28,17 +27,13 @@ import 'timeline_widgets.dart';
 /// - add 指令的 start/end 仅支持当日时刻（跨日移动条目能力未收口）；
 /// - "最长连续" 口径暂取单条最大时长（未接合并阈值设置）。
 class TimelinePage extends ConsumerStatefulWidget {
-  const TimelinePage({super.key, required this.app});
-
-  final AppStore app;
+  const TimelinePage({super.key});
 
   @override
   ConsumerState<TimelinePage> createState() => _TimelinePageState();
 }
 
 class _TimelinePageState extends ConsumerState<TimelinePage> {
-  AppStore get app => widget.app;
-
   /// 时制偏好（设置即时生效——设置保存会 bump 修订号，查询 provider 失效重建）。
   bool get _use24 =>
       ref.read(settingsStoreProvider).current?.use24HourFormat ?? true;
@@ -73,10 +68,8 @@ class _TimelinePageState extends ConsumerState<TimelinePage> {
     return DateTime(n.year, n.month, n.day);
   }
 
-  (DateTime, DateTime) get _range => (
-        _anchor,
-        _anchor.add(Duration(days: _spans[_spanIndex])),
-      );
+  (DateTime, DateTime) get _range =>
+      (_anchor, _anchor.add(Duration(days: _spans[_spanIndex])));
 
   bool get _isFuture => _anchor.isAfter(_today());
 
@@ -94,11 +87,11 @@ class _TimelinePageState extends ConsumerState<TimelinePage> {
   }
 
   DayMetrics _metricsAt(DateTime now) => computeDayMetrics(
-        _entries,
-        dayStart: _range.$1,
-        now: now,
-        unassignedActivityId: _unassignedId,
-      );
+    _entries,
+    dayStart: _range.$1,
+    now: now,
+    unassignedActivityId: _unassignedId,
+  );
 
   // ---------------------------------------------------------------------------
   // 指令通道动作
@@ -115,12 +108,9 @@ class _TimelinePageState extends ConsumerState<TimelinePage> {
     return null;
   }
 
-
   /// CommandResult 成败（fold 语义——CommandResult 无 isSuccess getter）。
-  bool _ok(CommandResult r) => r.fold(
-        onSuccess: (_) => true,
-        onFailure: (_) => false,
-      );
+  bool _ok(CommandResult r) =>
+      r.fold(onSuccess: (_) => true, onFailure: (_) => false);
 
   Future<bool> _submitEntry(EntryEditDraft draft) async {
     // --end 三态：keepRunning = 不传（部分更新语义下运行条目保持无 end，
@@ -140,27 +130,38 @@ class _TimelinePageState extends ConsumerState<TimelinePage> {
       // 会预填首个活动，无条件传会把条目静默改挂——不传 = 部分更新语义
       // 下的"保持现有活动"。
       final target = _activityById(draft.activityId);
-      final r = await ref.read(commandDispatcherProvider).dispatch(CommandInvocation(
-        name: 'entry_update',
-        args: [draft.entryId!],
-        options: {
-          ...options,
-          if (target != null && target.id != _editorInitialActivityId)
-            'activity': target.name,
-        },
-      ));
+      final r = await ref
+          .read(commandDispatcherProvider)
+          .dispatch(
+            CommandInvocation(
+              name: 'entry_update',
+              args: [draft.entryId!],
+              options: {
+                ...options,
+                if (target != null && target.id != _editorInitialActivityId)
+                  'activity': target.name,
+              },
+            ),
+          );
       return _ok(r);
     }
-    final targetNew = _activityById(draft.activityId) ?? _activities.firstOrNull;
+    final targetNew =
+        _activityById(draft.activityId) ?? _activities.firstOrNull;
     if (targetNew == null) return false;
-    final r = await ref.read(commandDispatcherProvider).dispatch(
-      CommandInvocation(name: 'add', args: [targetNew.name], options: {
-        ...options,
-        // add 指令需要 HH:MM（不支持 now 特值）；新条目必在今日，HH:MM
-        // 锚定无漂移。
-        'end': _hm(draft.end ?? DateTime.now()),
-      }),
-    );
+    final r = await ref
+        .read(commandDispatcherProvider)
+        .dispatch(
+          CommandInvocation(
+            name: 'add',
+            args: [targetNew.name],
+            options: {
+              ...options,
+              // add 指令需要 HH:MM（不支持 now 特值）；新条目必在今日，HH:MM
+              // 锚定无漂移。
+              'end': _hm(draft.end ?? DateTime.now()),
+            },
+          ),
+        );
     return _ok(r);
   }
 
@@ -198,23 +199,48 @@ class _TimelinePageState extends ConsumerState<TimelinePage> {
       },
       existing: _entries,
       onSubmit: _submitEntry,
-      onDelete: (id) async => _ok(await ref.read(commandDispatcherProvider)
-          .dispatch(CommandInvocation(name: 'delete', args: [id]))),
-      onMerge: (id, direction) async => _ok(await ref.read(commandDispatcherProvider).dispatch(
-          CommandInvocation(
-              name: 'merge', args: [id], options: {'direction': direction}))),
-      onSplit: (id, at) async => _ok(await ref.read(commandDispatcherProvider).dispatch(
-          CommandInvocation(
-              name: 'split', args: [id], options: {'at': _hm(at)}))),
+      onDelete: (id) async => _ok(
+        await ref
+            .read(commandDispatcherProvider)
+            .dispatch(CommandInvocation(name: 'delete', args: [id])),
+      ),
+      onMerge: (id, direction) async => _ok(
+        await ref
+            .read(commandDispatcherProvider)
+            .dispatch(
+              CommandInvocation(
+                name: 'merge',
+                args: [id],
+                options: {'direction': direction},
+              ),
+            ),
+      ),
+      onSplit: (id, at) async => _ok(
+        await ref
+            .read(commandDispatcherProvider)
+            .dispatch(
+              CommandInvocation(
+                name: 'split',
+                args: [id],
+                options: {'at': _hm(at)},
+              ),
+            ),
+      ),
       onExtendToNow: (id) async {
         // 延伸 = 单条 entry_update（--end=now 绝对语义，跨天遗留条目也
         // 精确结束在当前时刻；HH:MM 会按条目所在日还原，≥2 天前的条目
         // 会算错）。
-        return _ok(await ref.read(commandDispatcherProvider).dispatch(CommandInvocation(
-          name: 'entry_update',
-          args: [id],
-          options: const {'end': 'now'},
-        )));
+        return _ok(
+          await ref
+              .read(commandDispatcherProvider)
+              .dispatch(
+                CommandInvocation(
+                  name: 'entry_update',
+                  args: [id],
+                  options: const {'end': 'now'},
+                ),
+              ),
+        );
       },
     );
   }
@@ -315,10 +341,7 @@ class _TimelinePageState extends ConsumerState<TimelinePage> {
         ),
         const SizedBox(height: 14),
         if (_isFuture)
-          AppBanner(
-            type: AppBannerType.info,
-            title: l10n.tlFutureBanner,
-          ),
+          AppBanner(type: AppBannerType.info, title: l10n.tlFutureBanner),
         const SizedBox(height: 8),
         if (!_viewEntries) ..._buildLogs(),
         if (_viewEntries) ...[
@@ -328,7 +351,8 @@ class _TimelinePageState extends ConsumerState<TimelinePage> {
               title: l10n.todayEmptyDay,
               message: l10n.startRecordingHint,
             )
-          else ..._buildEntriesArea(scheme),
+          else
+            ..._buildEntriesArea(scheme),
         ],
       ],
     );
@@ -401,8 +425,10 @@ class _TimelinePageState extends ConsumerState<TimelinePage> {
             GestureDetector(
               onTap: () => onSelect(i),
               child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 5,
+                ),
                 decoration: BoxDecoration(
                   color: i == selected ? scheme.surface : Colors.transparent,
                   borderRadius: BorderRadius.circular(6),
@@ -411,9 +437,12 @@ class _TimelinePageState extends ConsumerState<TimelinePage> {
                   options[i],
                   style: TextStyle(
                     fontSize: 12,
-                    fontWeight:
-                        i == selected ? FontWeight.w600 : FontWeight.w500,
-                    color: i == selected ? scheme.onSurface : scheme.onSurfaceVariant,
+                    fontWeight: i == selected
+                        ? FontWeight.w600
+                        : FontWeight.w500,
+                    color: i == selected
+                        ? scheme.onSurface
+                        : scheme.onSurfaceVariant,
                   ),
                 ),
               ),
@@ -478,15 +507,18 @@ class _TimelinePageState extends ConsumerState<TimelinePage> {
         Wrap(
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            Text(l10n.tlZoom,
-                style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
+            Text(
+              l10n.tlZoom,
+              style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+            ),
             IconButton(
               iconSize: 16,
               visualDensity: VisualDensity.compact,
               icon: const Icon(Icons.remove_rounded),
               onPressed: _zoom <= 1.0
                   ? null
-                  : () => setState(() => _zoom = (_zoom - 0.25).clamp(1.0, 3.0)),
+                  : () =>
+                        setState(() => _zoom = (_zoom - 0.25).clamp(1.0, 3.0)),
             ),
             IconButton(
               iconSize: 16,
@@ -494,11 +526,14 @@ class _TimelinePageState extends ConsumerState<TimelinePage> {
               icon: const Icon(Icons.add_rounded),
               onPressed: _zoom >= 3.0
                   ? null
-                  : () => setState(() => _zoom = (_zoom + 0.25).clamp(1.0, 3.0)),
+                  : () =>
+                        setState(() => _zoom = (_zoom + 0.25).clamp(1.0, 3.0)),
             ),
             const SizedBox(width: 16),
-            Text(l10n.tlSegments,
-                style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
+            Text(
+              l10n.tlSegments,
+              style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+            ),
             IconButton(
               iconSize: 16,
               visualDensity: VisualDensity.compact,
@@ -576,32 +611,31 @@ class _TimelinePageState extends ConsumerState<TimelinePage> {
   }
 
   String _logLabel(ActionType t) => switch (t) {
-        ActionType.switch_ => l10n.logSwitch,
-        ActionType.stop => l10n.logStop,
-        ActionType.edit => l10n.logEdit,
-        ActionType.delete => l10n.logDelete,
-        ActionType.undo => l10n.logUndo,
-        ActionType.redo => l10n.logRedo,
-        ActionType.merge => l10n.logMerge,
-        ActionType.manual => l10n.logManual,
-        ActionType.split => l10n.logSplit,
-        ActionType.activityDelete => l10n.logActivityDelete,
-        ActionType.categoryCreate => l10n.logCategoryCreate,
-        ActionType.categoryUpdate => l10n.logCategoryUpdate,
-        _ => t.name,
-      };
+    ActionType.switch_ => l10n.logSwitch,
+    ActionType.stop => l10n.logStop,
+    ActionType.edit => l10n.logEdit,
+    ActionType.delete => l10n.logDelete,
+    ActionType.undo => l10n.logUndo,
+    ActionType.redo => l10n.logRedo,
+    ActionType.merge => l10n.logMerge,
+    ActionType.manual => l10n.logManual,
+    ActionType.split => l10n.logSplit,
+    ActionType.activityDelete => l10n.logActivityDelete,
+    ActionType.categoryCreate => l10n.logCategoryCreate,
+    ActionType.categoryUpdate => l10n.logCategoryUpdate,
+    _ => t.name,
+  };
 
   Color _logColor(ActionType t) => switch (t) {
-        ActionType.switch_ => const Color(0xff6366f1),
-        ActionType.stop => const Color(0xfff43f5e),
-        ActionType.edit => const Color(0xff0ea5e9),
-        ActionType.delete => const Color(0xffdc2626),
-        ActionType.undo => const Color(0xff8b5cf6),
-        ActionType.redo => const Color(0xffa78bfa),
-        ActionType.merge => const Color(0xfff59e0b),
-        ActionType.manual => const Color(0xff10b981),
-        ActionType.split => const Color(0xff14b8a6),
-        _ => const Color(0xff71717a),
-      };
+    ActionType.switch_ => const Color(0xff6366f1),
+    ActionType.stop => const Color(0xfff43f5e),
+    ActionType.edit => const Color(0xff0ea5e9),
+    ActionType.delete => const Color(0xffdc2626),
+    ActionType.undo => const Color(0xff8b5cf6),
+    ActionType.redo => const Color(0xffa78bfa),
+    ActionType.merge => const Color(0xfff59e0b),
+    ActionType.manual => const Color(0xff10b981),
+    ActionType.split => const Color(0xff14b8a6),
+    _ => const Color(0xff71717a),
+  };
 }
-

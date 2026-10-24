@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,7 +11,6 @@ import '../l10n/app_localizations.dart';
 import '../providers/data.dart';
 import '../providers/engines.dart';
 import '../providers/foundation.dart';
-import '../stores/app_store.dart';
 import '../stores/category_store.dart';
 import '../utils/day_metrics.dart';
 import '../viewmodels/activity.dart';
@@ -33,16 +32,13 @@ import 'timer_widgets.dart';
 /// 指令通道——单条撤销记录（undo=软删/redo=复活）；分类关联仍走
 /// CategoryStore.setActivityCategories（指令通道化挂账不变）。
 class TimerPage extends ConsumerStatefulWidget {
-  const TimerPage({super.key, required this.app});
-
-  final AppStore app;
+  const TimerPage({super.key});
 
   @override
   ConsumerState<TimerPage> createState() => _TimerPageState();
 }
 
 class _TimerPageState extends ConsumerState<TimerPage> {
-  AppStore get app => widget.app;
   AppLocalizations get l10n => AppLocalizations.of(context)!;
 
   // ---------------------------------------------------------------------------
@@ -89,13 +85,18 @@ class _TimerPageState extends ConsumerState<TimerPage> {
 
   Future<void> _dispatch(CommandInvocation invocation) async {
     final messenger = ScaffoldMessenger.of(context);
-    final result = await ref.read(commandDispatcherProvider).dispatch(invocation);
+    final result = await ref
+        .read(commandDispatcherProvider)
+        .dispatch(invocation);
     if (!mounted) return;
     messenger.hideCurrentSnackBar();
     messenger.showSnackBar(
       SnackBar(
         content: Text(
-          result.fold(onSuccess: (s) => s.message ?? l10n.commandDone, onFailure: (f) => f.reason),
+          result.fold(
+            onSuccess: (s) => s.message ?? l10n.commandDone,
+            onFailure: (f) => f.reason,
+          ),
         ),
       ),
     );
@@ -111,19 +112,17 @@ class _TimerPageState extends ConsumerState<TimerPage> {
     final events = ActivityPickerEvents(
       onSelectActivity: _switchTo,
       onCreateActivity: _createActivity,
-      onCreateCategory: (d) async =>
-            (await _categories.createCategory(
-              name: d.name,
-              color: d.color,
-              parentId: d.parentId,
-            )).isSuccess,
-      onEditCategory: (c) async =>
-            (await _categories.updateCategory(
-              name: c.name,
-              color: c.color,
-              parentId: c.parentId,
-              category: c,
-            )).isSuccess,
+      onCreateCategory: (d) async => (await _categories.createCategory(
+        name: d.name,
+        color: d.color,
+        parentId: d.parentId,
+      )).isSuccess,
+      onEditCategory: (c) async => (await _categories.updateCategory(
+        name: c.name,
+        color: c.color,
+        parentId: c.parentId,
+        category: c,
+      )).isSuccess,
       onDeleteCategory: (c) async =>
           (await _categories.deleteCategory(c.id)).isSuccess,
       onEditActivity: _editActivity,
@@ -174,32 +173,42 @@ class _TimerPageState extends ConsumerState<TimerPage> {
   Future<bool> _createActivity(ActivityDraft draft) async {
     // 经指令通道新建（activity_create，单条撤销记录）；从结果载荷取回
     // 新活动实体以继续分类关联。
-    final result = await ref.read(commandDispatcherProvider).dispatch(CommandInvocation(
-      name: 'activity_create',
-      args: [draft.name],
-      options: {
-        'color': draft.color.toString(),
-        if (draft.oneOff) 'one_off': 'true',
-      },
-    ));
+    final result = await ref
+        .read(commandDispatcherProvider)
+        .dispatch(
+          CommandInvocation(
+            name: 'activity_create',
+            args: [draft.name],
+            options: {
+              'color': draft.color.toString(),
+              if (draft.oneOff) 'one_off': 'true',
+            },
+          ),
+        );
     final created = _payloadOf(result);
     if (created is! Activity) return false;
-    return _applyLinks(created.id, draft.mainCategoryId, draft.secondaryCategoryIds);
+    return _applyLinks(
+      created.id,
+      draft.mainCategoryId,
+      draft.secondaryCategoryIds,
+    );
   }
 
   /// CommandResult 载荷提取（成功返回 data；失败/空载返回 null）。
   static Object? _payloadOf(CommandResult result) => switch (result) {
-        final CommandSuccess success => success.data,
-        final CommandFailure _ => null,
-      };
+    final CommandSuccess success => success.data,
+    final CommandFailure _ => null,
+  };
 
   Future<bool> _editActivity(Activity activity) async {
     // 名/色支持；isOneOff 切换落库能力批次 5（仓储 updateActivity 仅名/色）。
-    final result = await ref.read(activityRepositoryProvider).updateActivity(
-      activity: activity,
-      name: activity.name,
-      color: activity.color,
-    );
+    final result = await ref
+        .read(activityRepositoryProvider)
+        .updateActivity(
+          activity: activity,
+          name: activity.name,
+          color: activity.color,
+        );
     return result.isSuccess;
   }
 
@@ -230,15 +239,21 @@ class _TimerPageState extends ConsumerState<TimerPage> {
       activity = existing;
     } else {
       // 创建同样经 activity_create 指令通道（单条撤销记录，批次 5a）。
-      final result = await ref.read(commandDispatcherProvider).dispatch(CommandInvocation(
-        name: 'activity_create',
-        args: [name],
-        options: {
-          'color':
-              ActivityPalette.of(ActivityPalette.amber, dark: false).toString(),
-          'one_off': 'true',
-        },
-      ));
+      final result = await ref
+          .read(commandDispatcherProvider)
+          .dispatch(
+            CommandInvocation(
+              name: 'activity_create',
+              args: [name],
+              options: {
+                'color': ActivityPalette.of(
+                  ActivityPalette.amber,
+                  dark: false,
+                ).toString(),
+                'one_off': 'true',
+              },
+            ),
+          );
       final created = _payloadOf(result);
       if (created is! Activity) {
         if (mounted) {
@@ -251,7 +266,6 @@ class _TimerPageState extends ConsumerState<TimerPage> {
     if (!mounted) return;
     _switchTo(activity);
   }
-
 
   // ---------------------------------------------------------------------------
   // 构建
@@ -280,7 +294,9 @@ class _TimerPageState extends ConsumerState<TimerPage> {
     }
     final running = ref.watch(timerSnapshotProvider);
     // 1Hz 只在有运行条目时订阅：空闲页面不随秒重建。
-    final now = !running.isRunning ? DateTime.now() : ref.watch(clockTickProvider);
+    final now = !running.isRunning
+        ? DateTime.now()
+        : ref.watch(clockTickProvider);
     final recording = running.isRunning && running.activityId != unassignedId;
     if (activities.isEmpty) {
       return EmptyStateView(
@@ -322,7 +338,9 @@ class _TimerPageState extends ConsumerState<TimerPage> {
           runningName: running.activityName,
           runningColor: running.activityColor,
           runningPath: _pathOfActivity(running.activityId),
-          elapsed: running.isRunning ? now.difference(running.startAt!) : Duration.zero,
+          elapsed: running.isRunning
+              ? now.difference(running.startAt!)
+              : Duration.zero,
           todayTotal: _todayTotal(today, now, unassignedId),
           todaySessions: _todaySessions,
           onStop: recording
@@ -409,4 +427,3 @@ class _TimerPageState extends ConsumerState<TimerPage> {
     _switchTo(activity);
   }
 }
-
