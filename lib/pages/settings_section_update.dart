@@ -183,12 +183,12 @@ class _UpdateStateCard extends ConsumerWidget {
                   if (status.state == UpdateState.available) ...[
                     FilledButton.icon(
                       key: const ValueKey('update-download'),
-                      onPressed: _download,
+                      onPressed: () => _download(ref),
                       icon: const Icon(Icons.download, size: 16),
                       label: Text(l10n.settingsUpdateDownload),
                     ),
                     OutlinedButton(
-                      onPressed: () => _ignoreVersion(context),
+                      onPressed: () => _ignoreVersion(context, ref),
                       child: Text(l10n.settingsUpdateIgnoreVersion),
                     ),
                     OutlinedButton(
@@ -286,11 +286,11 @@ class _UpdateStateCard extends ConsumerWidget {
 
   /// 下载 + 内联校验（verifying → install 可用）。无同名注册指令，暂直调
   ///（挂账：update_download 指令化——连同 signOut/ignoreVersion 收口）。
-  Future<void> _download() async => app.update.download();
+  Future<void> _download(WidgetRef ref) async => ref.read(updateStoreProvider).download();
 
-  Future<void> _ignoreVersion(BuildContext context) async {
+  Future<void> _ignoreVersion(BuildContext context, WidgetRef ref) async {
     final l10n = AppLocalizations.of(context)!;
-    await app.update.ignoreCurrentVersion();
+    await ref.read(updateStoreProvider).ignoreCurrentVersion();
     if (!context.mounted) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
@@ -456,6 +456,8 @@ class AboutSection extends ConsumerWidget {
     );
   }
 }
+
+
 
 
 

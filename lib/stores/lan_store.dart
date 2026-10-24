@@ -1,4 +1,4 @@
-/// LAN 设备互通编排 store（批次 4 设置页设备互通分区）。
+﻿/// LAN 设备互通编排 store（批次 4 设置页设备互通分区）。
 ///
 /// 职责（薄编排——协议/绑定/配对码语义在 api/lan 层）：
 /// - **主机**：手动启动/停止（不变式 10：无任何自动开启路径）+ 绑定端口
@@ -12,7 +12,6 @@
 ///（两者均无跨操作可变状态，重建无副作用）。
 library;
 
-import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
 import '../api/lan/lan_sync_client.dart';
@@ -25,7 +24,9 @@ import '../data/sync/sync_bundle_repository.dart';
 import '../utils/result.dart';
 import 'data_revision.dart';
 
-class LanStore extends ChangeNotifier {
+class LanStore {
+  /// 状态变更回调（唯一订阅槽，迁移期由 provider 挂载，替代 ChangeNotifier）。
+  void Function()? onChanged;
   LanStore({
     required this.bundleRepository,
     required this.peerStore,
@@ -81,7 +82,7 @@ class LanStore extends ChangeNotifier {
     if (_disposed) return;
     if (result.isSuccess) {
       _clientPeer = result.requireValue();
-      notifyListeners();
+      onChanged?.call();
     }
   }
 
@@ -144,7 +145,7 @@ class LanStore extends ChangeNotifier {
     if (_disposed || _hostBusy || hostRunning) return;
     _hostBusy = true;
     _lastError = null;
-    notifyListeners();
+    onChanged?.call();
     try {
       final server = await _requireServer();
       if (_disposed) return;
@@ -152,17 +153,17 @@ class LanStore extends ChangeNotifier {
       if (_disposed) return;
       if (result case AppFailure<int> failure) {
         _lastError = failure.message;
-        notifyListeners();
+        onChanged?.call();
         return;
       }
       final port = result.requireValue();
       // 配对码与设备身份绑定：本机 id 作为生成入参（冒用防护语义在 server 层）。
       _pairingCode = server.generatePairingCode(deviceId: server.sourceDeviceId);
       _hostPort = port;
-      notifyListeners();
+      onChanged?.call();
     } finally {
       _hostBusy = false;
-      if (!_disposed) notifyListeners();
+      if (!_disposed) onChanged?.call();
     }
   }
 
@@ -170,17 +171,17 @@ class LanStore extends ChangeNotifier {
   Future<void> stopHost() async {
     if (_disposed || _hostBusy) return;
     _hostBusy = true;
-    notifyListeners();
+    onChanged?.call();
     try {
       await _server?.stop();
       if (_disposed) return;
       _pairingCode = null;
       _hostPort = null;
       _lastError = null;
-      notifyListeners();
+      onChanged?.call();
     } finally {
       _hostBusy = false;
-      if (!_disposed) notifyListeners();
+      if (!_disposed) onChanged?.call();
     }
   }
 
@@ -189,7 +190,7 @@ class LanStore extends ChangeNotifier {
     if (_disposed || _clientBusy) return;
     _clientBusy = true;
     _lastError = null;
-    notifyListeners();
+    onChanged?.call();
     try {
       final client = await _requireClient();
       if (_disposed) return;
@@ -212,15 +213,15 @@ class LanStore extends ChangeNotifier {
       if (_disposed) return;
       if (result case AppFailure<SyncPeer> failure) {
         _lastError = failure.message;
-        notifyListeners();
+        onChanged?.call();
         return;
       }
       _clientPeer = result.requireValue();
       dataRevision.bump(); // LAN 同步后数据可能变化
-      notifyListeners();
+      onChanged?.call();
     } finally {
       _clientBusy = false;
-      if (!_disposed) notifyListeners();
+      if (!_disposed) onChanged?.call();
     }
   }
 
@@ -229,12 +230,12 @@ class LanStore extends ChangeNotifier {
     if (_disposed || _clientBusy) return;
     if (_clientPeer == null) {
       _lastError = '尚未配对 LAN 主机';
-      notifyListeners();
+      onChanged?.call();
       return;
     }
     _clientBusy = true;
     _lastError = null;
-    notifyListeners();
+    onChanged?.call();
     try {
       final client = await _requireClient();
       if (_disposed) return;
@@ -242,18 +243,17 @@ class LanStore extends ChangeNotifier {
       if (_disposed) return;
       if (result case AppFailure failure) {
         _lastError = failure.message;
-        notifyListeners();
+        onChanged?.call();
         return;
       }
       dataRevision.bump();
-      notifyListeners();
+      onChanged?.call();
     } finally {
       _clientBusy = false;
-      if (!_disposed) notifyListeners();
+      if (!_disposed) onChanged?.call();
     }
   }
 
-  @override
   void dispose() {
     _disposed = true;
     final running = _server;
@@ -261,6 +261,10 @@ class LanStore extends ChangeNotifier {
       // fire-and-forget：dispose 不能 async，尽力停止监听。
       running.stop().catchError((Object e) {});
     }
-    super.dispose();
   }
 }
+
+
+
+
+

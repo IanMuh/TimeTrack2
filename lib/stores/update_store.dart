@@ -1,4 +1,4 @@
-/// 更新 store（模块 3c②）：检查/下载/校验/安装的有限状态机编排。
+﻿/// 更新 store（模块 3c②）：检查/下载/校验/安装的有限状态机编排。
 ///
 /// 设计（阶段 3 框架结论）：
 /// - **显式迁移表**（非散落 switch）：`Map<UpdateState, Set<UpdateState>>`
@@ -43,6 +43,7 @@ enum UpdateState {
 
 /// 更新编排状态（状态 + 数据字段）。
 class UpdateStatus {
+  /// 状态变更回调（唯一订阅槽，迁移期由 provider 挂载，替代 ChangeNotifier）。
   const UpdateStatus({
     required this.state,
     this.receivedBytes = 0,
@@ -94,7 +95,9 @@ class UpdateStatus {
 }
 
 /// 更新 store（状态机编排）。
-class UpdateStore extends ChangeNotifier implements UpdateActions {
+class UpdateStore implements UpdateActions {
+  /// 状态变更回调（唯一订阅槽，迁移期由 provider 挂载，替代 ChangeNotifier）。
+  void Function()? onChanged;
   UpdateStore({
     required this.manifestService,
     required this.verifier,
@@ -156,7 +159,7 @@ class UpdateStore extends ChangeNotifier implements UpdateActions {
     // 旧值），须统一覆盖 state，防"迁移后状态停留旧值"（copyWith 不自动
     // 设 state 的陷阱）。
     _status = (withStatus ?? _status).copyWith(state: next);
-    if (!_closed) notifyListeners(); // dispose 后不通知（进度回调异步驱动）
+    if (!_closed) onChanged?.call(); // dispose 后不通知（进度回调异步驱动）
   }
 
   // ---------------------------------------------------------------------------
@@ -251,7 +254,7 @@ class UpdateStore extends ChangeNotifier implements UpdateActions {
               receivedBytes: received,
               totalBytes: total,
             );
-            if (!_closed) notifyListeners(); // dispose 后不通知
+            if (!_closed) onChanged?.call(); // dispose 后不通知
           }
         },
       );
@@ -268,7 +271,7 @@ class UpdateStore extends ChangeNotifier implements UpdateActions {
         receivedBytes: 0,
         clearTotalBytes: true,
       );
-      if (!_closed) notifyListeners(); // dispose 后不通知（async 驱动路径）
+      if (!_closed) onChanged?.call(); // dispose 后不通知（async 驱动路径）
       return failure;
     }
     final verified = result.requireValue();
@@ -346,7 +349,7 @@ class UpdateStore extends ChangeNotifier implements UpdateActions {
       receivedBytes: 0,
       clearTotalBytes: true,
     );
-    if (!_closed) notifyListeners(); // dispose 后不通知
+    if (!_closed) onChanged?.call(); // dispose 后不通知
     return AppFailure(message);
   }
 
@@ -415,9 +418,11 @@ class UpdateStore extends ChangeNotifier implements UpdateActions {
     }
   }
 
-  @override
   void dispose() {
     _closed = true;
-    super.dispose();
   }
 }
+
+
+
+

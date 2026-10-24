@@ -158,7 +158,7 @@ class _AppShellState extends ConsumerState<AppShell>
     }
     final l10n = AppLocalizations.of(context)!;
     String content = '';
-    final matchedId = app.tracking.lastMatchedActivityId;
+    final matchedId = ref.read(trackingStoreProvider).lastMatchedActivityId;
     if (matchedId != null) {
       final activity = await ref.read(activityRepositoryProvider).activityById(matchedId);
       if (!mounted) return;
@@ -171,7 +171,7 @@ class _AppShellState extends ConsumerState<AppShell>
         content = l10n.bgNotifyForeground(detected);
       }
     }
-    final paused = app.tracking.sessionPaused;
+    final paused = ref.read(trackingStoreProvider).sessionPaused;
     final signature =
         'on|$paused|$content|${l10n.bgNotifyTitleRecording}|$l10n.localeName';
     if (signature == _lastAndroidSync) return;
@@ -337,7 +337,7 @@ class _AppShellState extends ConsumerState<AppShell>
     unawaited(widget.app.tray.configure(
       mode: _trayCloseMode,
       recording: recording,
-      paused: widget.app.tracking.sessionPaused,
+      paused: ref.read(trackingStoreProvider).sessionPaused,
       activity: activity,
       // 铁律 6：托盘可见文案 ARB 本地化后下发，原生不硬编码。
       tipRecording: l10n?.trayTipRecordingPrefix ?? 'Recording: ',
@@ -630,7 +630,7 @@ class _AppShellState extends ConsumerState<AppShell>
           TextButton(
             onPressed: () {
               messenger.hideCurrentSnackBar();
-              unawaited(widget.app.update.ignoreCurrentVersion());
+              unawaited(ref.read(updateStoreProvider).ignoreCurrentVersion());
             },
             child: Text(l10n.updateIgnoreAction,
                 style: const TextStyle(color: Color(0xffa1a1aa))),
@@ -1258,4 +1258,5 @@ class _SyncStatusText extends StatelessWidget {
     );
   }
 }
+
 

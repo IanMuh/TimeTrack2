@@ -1,12 +1,14 @@
-﻿import 'package:flutter/foundation.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+﻿import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../stores/app_store.dart';
 import '../stores/command_dispatcher.dart';
 import '../stores/category_store.dart';
 import '../stores/reminder_store.dart';
 import '../stores/settings_store.dart';
+import '../stores/lan_store.dart';
+import '../stores/sync_store.dart';
 import '../stores/timer_store.dart';
+import '../stores/tracking_store.dart';
 import '../stores/update_store.dart';
 import 'stores.dart';
 
@@ -237,8 +239,10 @@ class UpdateSnapshotNotifier extends Notifier<UpdateSnapshot> {
       state = UpdateSnapshot.from(store);
     }
 
-    store.addListener(onChange);
-    ref.onDispose(() => store.removeListener(onChange));
+    store.onChanged = onChange;
+    ref.onDispose(() {
+      if (identical(store.onChanged, onChange)) store.onChanged = null;
+    });
     return UpdateSnapshot.from(store);
   }
 }
@@ -302,38 +306,14 @@ class CategoryChangeNotifier extends Notifier<int> {
   }
 }
 
-/// 通用"引擎变更计数"：把任意 `Listenable` 的通知折算成 int 递增。
-///
-/// 迁移期用于引擎 store（timer/tracking/lan/sync/update）——它们仍是
-/// `ChangeNotifier`，页面不再 `ListenableBuilder`，而是
-/// `ref.watch(xxxChangeProvider)` + `ref.read(...StoreProvider)`。
-class _EngineChangeNotifier extends Notifier<int> {
-  _EngineChangeNotifier(this._listen);
-
-  final Listenable Function(AppStore) _listen;
-
-  @override
-  int build() {
-    final listenable = _listen(ref.watch(appStoreInstanceProvider));
-    void onChange() {
-      if (!ref.mounted) return;
-      state = state + 1;
-    }
-
-    listenable.addListener(onChange);
-    ref.onDispose(() => listenable.removeListener(onChange));
-    return 0;
-  }
-}
-
+/// 计时变更计数（手动会话保持/运行条目/写路径成功 → +1）。
 final timerChangeProvider =
     NotifierProvider<TimerChangeNotifier, int>(TimerChangeNotifier.new);
 
-/// 计时变更计数（手动会话保持/运行条目/写路径成功 → +1）。
 class TimerChangeNotifier extends Notifier<int> {
   @override
   int build() {
-    final store = ref.watch(appStoreInstanceProvider).timer;
+    final store = ref.watch(timerStoreProvider);
     void onChange() {
       if (!ref.mounted) return;
       state = state + 1;
@@ -344,26 +324,103 @@ class TimerChangeNotifier extends Notifier<int> {
     return 0;
   }
 }
+/// 引擎变更计数（`SyncStore`）——`onChanged` → state+1。
+final syncChangeProvider =
+    NotifierProvider<SyncChangeNotifier, int>(SyncChangeNotifier.new);
 
-final trackingChangeProvider = NotifierProvider<_EngineChangeNotifier, int>(
-  () => _EngineChangeNotifier((store) => store.tracking),
+class SyncChangeNotifier extends Notifier<int> {
+  @override
+  int build() {
+    final store = ref.watch(syncStoreProvider);
+    void onChange() {
+      if (!ref.mounted) return;
+      state = state + 1;
+    }
+
+    store.onChanged = onChange;
+    ref.onDispose(() {
+      if (identical(store.onChanged, onChange)) store.onChanged = null;
+    });
+    return 0;
+  }
+}
+
+/// 引擎变更计数（`UpdateStore`）。
+final updateChangeProvider =
+    NotifierProvider<UpdateChangeNotifier, int>(UpdateChangeNotifier.new);
+
+class UpdateChangeNotifier extends Notifier<int> {
+  @override
+  int build() {
+    final store = ref.watch(updateStoreProvider);
+    void onChange() {
+      if (!ref.mounted) return;
+      state = state + 1;
+    }
+
+    store.onChanged = onChange;
+    ref.onDispose(() {
+      if (identical(store.onChanged, onChange)) store.onChanged = null;
+    });
+    return 0;
+  }
+}
+
+/// 引擎变更计数（`TrackingStore`）。
+final trackingChangeProvider =
+    NotifierProvider<TrackingChangeNotifier, int>(TrackingChangeNotifier.new);
+
+class TrackingChangeNotifier extends Notifier<int> {
+  @override
+  int build() {
+    final store = ref.watch(trackingStoreProvider);
+    void onChange() {
+      if (!ref.mounted) return;
+      state = state + 1;
+    }
+
+    store.onChanged = onChange;
+    ref.onDispose(() {
+      if (identical(store.onChanged, onChange)) store.onChanged = null;
+    });
+    return 0;
+  }
+}
+
+/// 引擎变更计数（`LanStore`）。
+final lanChangeProvider =
+    NotifierProvider<LanChangeNotifier, int>(LanChangeNotifier.new);
+
+class LanChangeNotifier extends Notifier<int> {
+  @override
+  int build() {
+    final store = ref.watch(lanStoreProvider);
+    void onChange() {
+      if (!ref.mounted) return;
+      state = state + 1;
+    }
+
+    store.onChanged = onChange;
+    ref.onDispose(() {
+      if (identical(store.onChanged, onChange)) store.onChanged = null;
+    });
+    return 0;
+  }
+}
+
+/// 引擎实例访问器（迁移期读 AppStore 装配的实例）。
+final syncStoreProvider =
+    Provider<SyncStore>((ref) => ref.watch(appStoreInstanceProvider).sync);
+
+final updateStoreProvider =
+    Provider<UpdateStore>((ref) => ref.watch(appStoreInstanceProvider).update);
+
+final trackingStoreProvider = Provider<TrackingStore>(
+  (ref) => ref.watch(appStoreInstanceProvider).tracking,
 );
 
-final lanChangeProvider = NotifierProvider<_EngineChangeNotifier, int>(
-  () => _EngineChangeNotifier((store) => store.lan),
-);
-
-final syncChangeProvider = NotifierProvider<_EngineChangeNotifier, int>(
-  () => _EngineChangeNotifier((store) => store.sync),
-);
-
-final updateChangeProvider = NotifierProvider<_EngineChangeNotifier, int>(
-  () => _EngineChangeNotifier((store) => store.update),
-);
-
-
-
-
+final lanStoreProvider =
+    Provider<LanStore>((ref) => ref.watch(appStoreInstanceProvider).lan);
 /// 命令分发器（迁移期：仍由 AppStore 装配，PR5 改由 provider 直接构造）。
 final commandDispatcherProvider = Provider<CommandDispatcher>(
   (ref) => ref.watch(appStoreInstanceProvider).dispatcher,
@@ -379,4 +436,9 @@ final timerStoreProvider = Provider<TimerStore>(
 final reminderStoreProvider = Provider<ReminderStore>(
   (ref) => ref.watch(appStoreInstanceProvider).reminder,
 );
+
+
+
+
+
 

@@ -53,7 +53,7 @@ class SyncSection extends ConsumerWidget {
                 ),
                 if (sync.userId != null)
                   OutlinedButton.icon(
-                    onPressed: () => _signOut(context),
+                    onPressed: () => _signOut(context, ref),
                     icon: const Icon(Icons.logout, size: 16),
                     label: Text(l10n.settingsSyncSignOut),
                   ),
@@ -87,8 +87,8 @@ class SyncSection extends ConsumerWidget {
     }
   }
 
-  Future<void> _signOut(BuildContext context) async {
-    final result = await app.sync.signOut();
+  Future<void> _signOut(BuildContext context, WidgetRef ref) async {
+    final result = await ref.read(syncStoreProvider).signOut();
     if (!context.mounted) return;
     final l10n = AppLocalizations.of(context)!;
     if (result.isSuccess) {
@@ -301,16 +301,16 @@ Future<void> _openLoginDialog(BuildContext context, AppStore app) async {
   );
 }
 
-class _LoginDialog extends StatefulWidget {
+class _LoginDialog extends ConsumerStatefulWidget {
   const _LoginDialog({required this.app});
 
   final AppStore app;
 
   @override
-  State<_LoginDialog> createState() => _LoginDialogState();
+  ConsumerState<_LoginDialog> createState() => _LoginDialogState();
 }
 
-class _LoginDialogState extends State<_LoginDialog> {
+class _LoginDialogState extends ConsumerState<_LoginDialog> {
   final _emailController = TextEditingController();
   final _codeController = TextEditingController();
   bool _sending = false;
@@ -335,7 +335,7 @@ class _LoginDialogState extends State<_LoginDialog> {
       _sending = true;
       _error = null;
     });
-    final result = await widget.app.sync.sendMagicLink(email);
+    final result = await ref.read(syncStoreProvider).sendMagicLink(email);
     if (!mounted) return;
     setState(() {
       _sending = false;
@@ -360,7 +360,7 @@ class _LoginDialogState extends State<_LoginDialog> {
       _verifying = true;
       _error = null;
     });
-    final result = await widget.app.sync.verifyEmailOtp(email, code);
+    final result = await ref.read(syncStoreProvider).verifyEmailOtp(email, code);
     if (!mounted) return;
     switch (result) {
       case AppSuccess<String>():
@@ -530,6 +530,9 @@ class AiSection extends StatelessWidget {
     );
   }
 }
+
+
+
 
 
 

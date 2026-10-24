@@ -1,4 +1,4 @@
-/// 同步编排 store（模块 3c①）：云同步 + 认证 + 清理编排的单一入口。
+﻿/// 同步编排 store（模块 3c①）：云同步 + 认证 + 清理编排的单一入口。
 ///
 /// 职责：
 /// - **认证流**：订阅 [SyncBackend.authStateStream]（broadcast，未配置 →
@@ -20,7 +20,6 @@ library;
 import 'dart:async';
 import 'dart:io' show stderr;
 
-import 'package:flutter/foundation.dart';
 
 import '../api/supabase/sync_backend.dart';
 import '../api/supabase/sync_status_store.dart';
@@ -32,7 +31,9 @@ import 'command_contracts.dart';
 import 'data_revision.dart';
 
 /// 同步编排 store。
-class SyncStore extends ChangeNotifier implements SyncNowProvider {
+class SyncStore implements SyncNowProvider {
+  /// 状态变更回调（唯一订阅槽，迁移期由 provider 挂载，替代 ChangeNotifier）。
+  void Function()? onChanged;
   SyncStore({
     required this.backend,
     required this.syncStatus,
@@ -45,7 +46,7 @@ class SyncStore extends ChangeNotifier implements SyncNowProvider {
       onError: (Object e) {
         if (_disposed) return;
         _lastError = '认证流错误：$e';
-        notifyListeners();
+        onChanged?.call();
       },
     );
   }
@@ -107,7 +108,7 @@ class SyncStore extends ChangeNotifier implements SyncNowProvider {
       _lastPulled = null;
       _lastPushed = null;
     }
-    notifyListeners();
+    onChanged?.call();
   }
 
   /// 发起邮箱 OTP 登录（发送魔法链接）。
@@ -128,7 +129,7 @@ class SyncStore extends ChangeNotifier implements SyncNowProvider {
       _lastError = null; // 登出完全重置编排状态（防上一会话残留展示）
       _lastPulled = null;
       _lastPushed = null;
-      notifyListeners();
+      onChanged?.call();
     }
     return result;
   }
@@ -145,7 +146,7 @@ class SyncStore extends ChangeNotifier implements SyncNowProvider {
     }
     _syncing = true;
     _lastError = null;
-    notifyListeners();
+    onChanged?.call();
     // 同步开始时刻（墓碑水位）：同步期间新建墓碑 deleted_at > startedAt，
     // 清理 cutoff 用此水位天然保护未推送墓碑。
     final startedAt = DateTime.now();
@@ -199,7 +200,7 @@ class SyncStore extends ChangeNotifier implements SyncNowProvider {
         _pendingSyncUserId = null;
         if (_userId != null) syncNow();
       }
-      if (!_disposed) notifyListeners(); // await 期间可能已 dispose
+      if (!_disposed) onChanged?.call(); // await 期间可能已 dispose
     }
   }
 
@@ -238,7 +239,7 @@ class SyncStore extends ChangeNotifier implements SyncNowProvider {
       );
     } finally {
       _cleanupRunning = false;
-      if (!_disposed) notifyListeners(); // await 期间可能已 dispose
+      if (!_disposed) onChanged?.call(); // await 期间可能已 dispose
     }
   }
 
@@ -307,10 +308,13 @@ class SyncStore extends ChangeNotifier implements SyncNowProvider {
     return Future.value(const AppFailure('导入编排未就绪（随阶段 3d 启用）'));
   }
 
-  @override
   void dispose() {
     _disposed = true;
     _authSubscription.cancel();
-    super.dispose();
   }
 }
+
+
+
+
+

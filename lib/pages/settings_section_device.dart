@@ -170,8 +170,8 @@ class BackupSection extends ConsumerWidget {
     await ref.read(categoryStoreProvider).reload();
     await ref.read(settingsStoreProvider).reload();
     await ref.read(timerStoreProvider).refresh();
-    await app.tracking.reloadRules();
-    await app.lan.reloadPeer(); // sync_peers 已清空，内存配对态同步失效
+    await ref.read(trackingStoreProvider).reloadRules();
+    await ref.read(lanStoreProvider).reloadPeer(); // sync_peers 已清空，内存配对态同步失效
     // 时间线/统计页监听 dataRevision 自动失效缓存（bump 即全页一致）。
     app.dataRevision.bump();
     // 撤销/重做历史指向已物理删除的数据——清空防"可撤销"语义失真。
@@ -200,7 +200,7 @@ class _DeviceSectionState extends ConsumerState<DeviceSection> {
   @override
   void initState() {
     super.initState();
-    widget.app.lan.reloadPeer();
+    ref.read(lanStoreProvider).reloadPeer();
   }
 
   @override
@@ -598,6 +598,7 @@ class _LanClientCard extends StatelessWidget {
     await lan.pairClient(host: hostController.text, code: codeController.text);
   }
 }
+
 
 
 

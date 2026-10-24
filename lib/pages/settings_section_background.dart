@@ -52,7 +52,7 @@ class _BackgroundSectionState extends ConsumerState<BackgroundSection> {
 
   Future<void> _load() async {
     final result = await ref.read(activityRepositoryProvider).activities(includeDeleted: false);
-    await widget.app.tracking.reloadRules();
+    await ref.read(trackingStoreProvider).reloadRules();
     if (!mounted) return;
     if (result.isSuccess) {
       setState(() => _activities = result.requireValue());
@@ -111,7 +111,7 @@ class _BackgroundSectionState extends ConsumerState<BackgroundSection> {
         ref.watch(settingsChangeProvider);
         ref.watch(timerChangeProvider);
         final settings = ref.read(settingsStoreProvider).current;
-        final rules = app.tracking.ruleList;
+        final rules = ref.read(trackingStoreProvider).ruleList;
         // §6.2：Android 未授权时总开关禁用（引导用户先去系统设置授权）。
         final androidNeedsPermission =
             Platform.isAndroid && _usageGranted == false;
@@ -298,7 +298,7 @@ class _BackgroundSectionState extends ConsumerState<BackgroundSection> {
       ),
     );
     if (saved == true && mounted) {
-      await widget.app.tracking.reloadRules();
+      await ref.read(trackingStoreProvider).reloadRules();
       if (!mounted) return;
       final l10n = AppLocalizations.of(this.context)!;
       ScaffoldMessenger.of(this.context)
@@ -310,7 +310,7 @@ class _BackgroundSectionState extends ConsumerState<BackgroundSection> {
 
 /// 平台卡：Android = 「使用情况访问」授权状态卡（§6.2）；Windows/其他 =
 /// 常驻说明 + 检测器状态。
-class _PlatformCard extends StatelessWidget {
+class _PlatformCard extends ConsumerWidget {
   const _PlatformCard({
     required this.app,
     this.usageGranted,
@@ -324,14 +324,14 @@ class _PlatformCard extends StatelessWidget {
   final VoidCallback? onOpenUsageSettings;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     if (usageGranted != null) {
-      return _androidCard(context);
+      return _androidCard(context, ref);
     }
-    return _windowsCard(context);
+    return _windowsCard(context, ref);
   }
 
-  Widget _androidCard(BuildContext context) {
+  Widget _androidCard(BuildContext context, WidgetRef ref) {
     final l10n = AppLocalizations.of(context)!;
     final scheme = Theme.of(context).colorScheme;
     final granted = usageGranted == true;
@@ -394,11 +394,11 @@ class _PlatformCard extends StatelessWidget {
     );
   }
 
-  Widget _windowsCard(BuildContext context) {
+  Widget _windowsCard(BuildContext context, WidgetRef ref) {
     final l10n = AppLocalizations.of(context)!;
     final scheme = Theme.of(context).colorScheme;
-    final detectorReady = app.tracking.detector is! NoopForegroundDetector;
-    final lastNote = app.tracking.lastMatchNote;
+    final detectorReady = ref.read(trackingStoreProvider).detector is! NoopForegroundDetector;
+    final lastNote = ref.read(trackingStoreProvider).lastMatchNote;
     return SettingsInfoBanner(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -942,6 +942,8 @@ class _KindRadio extends StatelessWidget {
     );
   }
 }
+
+
 
 
 

@@ -376,8 +376,7 @@ void main() {
 
       // 暂停：命中规则也不切换（且不进入手动保持——两闸门独立）。
       var notifyCount = 0;
-      void listener() => notifyCount++;
-      h.tracking.addListener(listener);
+      h.tracking.onChanged = () => notifyCount++;
       h.tracking.setSessionPaused(true);
       expect(h.tracking.sessionPaused, isTrue);
       h.tracking.setSessionPaused(true); // 幂等：同值不再通知
@@ -387,11 +386,13 @@ void main() {
       expect(await h.entries.runningEntry(), isNull, reason: '挂起时不自动开始');
 
       // 恢复：自动检测照常工作。
-      h.tracking.removeListener(listener);
+      h.tracking.onChanged = null;
       h.tracking.setSessionPaused(false);
       await h.tracking.poll();
       expect((await h.entries.runningEntry())!.activityId, a.id);
     });
   });
 }
+
+
 
