@@ -145,7 +145,7 @@ class _UpdateStateCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final l10n = AppLocalizations.of(context)!;
     final scheme = Theme.of(context).colorScheme;
-    final update = app.update;
+    final update = ref.read(updateStoreProvider);
     final status = update.status;
     final busy = switch (status.state) {
       UpdateState.checking ||
@@ -456,6 +456,7 @@ class AboutSection extends ConsumerWidget {
     );
   }
 }
+
 
 
 

@@ -8,6 +8,7 @@ import '../l10n/app_localizations.dart';import '../providers/engines.dart';
 import '../utils/result.dart';
 import '../viewmodels/commands/command_invocation.dart';
 import '../stores/app_store.dart';
+import '../stores/sync_store.dart';
 import 'settings_widgets.dart';
 
 /// 云同步分区。
@@ -30,9 +31,9 @@ class SyncSection extends ConsumerWidget {
           subtitle: l10n.settingsSecSyncSub,
           paddedChildren: true,
           children: [
-            _SyncStatusCard(app: app),
+            _SyncStatusCard(sync: ref.read(syncStoreProvider)),
             const SizedBox(height: 12),
-            _SyncSummaryGrid(app: app),
+            _SyncSummaryGrid(sync: ref.read(syncStoreProvider)),
             const SizedBox(height: 12),
             Wrap(
               spacing: 8,
@@ -100,15 +101,14 @@ class SyncSection extends ConsumerWidget {
 }
 
 class _SyncStatusCard extends StatelessWidget {
-  const _SyncStatusCard({required this.app});
+  const _SyncStatusCard({required this.sync});
 
-  final AppStore app;
+  final SyncStore sync;
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final scheme = Theme.of(context).colorScheme;
-    final sync = app.sync;
     final configured = sync.isConfigured;
     final loggedIn = sync.userId != null;
     final online = configured && !sync.syncing;
@@ -212,14 +212,13 @@ class _StatusDot extends StatelessWidget {
 }
 
 class _SyncSummaryGrid extends StatelessWidget {
-  const _SyncSummaryGrid({required this.app});
+  const _SyncSummaryGrid({required this.sync});
 
-  final AppStore app;
+  final SyncStore sync;
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final sync = app.sync;
     final lastAt = sync.lastSyncAt;
     final lastText = lastAt == null
         ? l10n.settingsSyncNever
@@ -530,6 +529,9 @@ class AiSection extends StatelessWidget {
     );
   }
 }
+
+
+
 
 
 

@@ -364,7 +364,7 @@ class _AppShellState extends ConsumerState<AppShell>
 
   void _onUpdateChanged() {
     if (!mounted) return;
-    final update = widget.app.update;
+    final update = ref.read(updateStoreProvider);
     if (update.state != UpdateState.available) return;
     if (update.status.required) {
       // 强制更新：不可跳过对话框（唯一操作"立即更新"，无关闭）——每会话一次。
@@ -643,7 +643,7 @@ class _AppShellState extends ConsumerState<AppShell>
   /// §5.2 场景 5：强制更新对话框（不可跳过、无关闭、唯一操作）。
   Future<void> _showForcedUpdateDialog() async {
     if (!mounted) return;
-    final update = widget.app.update;
+    final update = ref.read(updateStoreProvider);
     final l10n = AppLocalizations.of(context)!;
     await showDialog<void>(
       context: context,
@@ -1258,5 +1258,6 @@ class _SyncStatusText extends StatelessWidget {
     );
   }
 }
+
 
 
