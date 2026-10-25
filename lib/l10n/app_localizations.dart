@@ -2216,6 +2216,12 @@ abstract class AppLocalizations {
   /// **'开始记录'**
   String get timerStartRecording;
 
+  /// No description provided for @timerCurrentSession.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前会话'**
+  String get timerCurrentSession;
+
   /// No description provided for @timerLoadFailed.
   ///
   /// In zh, this message translates to:

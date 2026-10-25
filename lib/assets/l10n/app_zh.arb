@@ -363,6 +363,7 @@
   "categoryDeleteHint": "将删除此分类、N 个子分类与 N 个活动的关联（可撤销）",
   "categoryUpdated": "分类已更新",
   "timerStartRecording": "开始记录",
+  "timerCurrentSession": "当前会话",
   "timerLoadFailed": "数据加载失败，请重试",
   "todayPrevDay": "前一天",
   "todayNextDay": "后一天",

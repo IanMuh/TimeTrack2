@@ -1130,6 +1130,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get timerStartRecording => 'Start recording';
 
   @override
+  String get timerCurrentSession => 'Current session';
+
+  @override
   String get timerLoadFailed => 'Failed to load. Try again.';
 
   @override

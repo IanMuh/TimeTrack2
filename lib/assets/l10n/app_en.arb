@@ -363,6 +363,7 @@
   "categoryDeleteHint": "This deletes N sub-categories and N activity links (single undo)",
   "categoryUpdated": "Category updated",
   "timerStartRecording": "Start recording",
+  "timerCurrentSession": "Current session",
   "timerLoadFailed": "Failed to load. Try again.",
   "todayPrevDay": "Previous day",
   "todayNextDay": "Next day",

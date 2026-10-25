@@ -1114,6 +1114,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get timerStartRecording => '开始记录';
 
   @override
+  String get timerCurrentSession => '当前会话';
+
+  @override
   String get timerLoadFailed => '数据加载失败，请重试';
 
   @override
