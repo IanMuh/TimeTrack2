@@ -306,6 +306,29 @@ void main() {
     expect(find.byType(UpdateSection), findsOneWidget);
     store.dispose();
   });
+
+  testWidgets('窄屏深链无栈直达分区：返回键兜底回列表页（canPop=false 路径）',
+      (tester) async {
+    final store = await _createStore();
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      TimeTrack2App(container: store.container, locale: const Locale('zh')),
+    );
+    await tester.pumpAndSettle();
+    // 窄屏无品牌侧栏（底部导航形态），从底部导航取壳层上下文。
+    final ctx = tester.element(find.byType(NavigationBar));
+    GoRouter.of(ctx).go('/settings/update');
+    await tester.pumpAndSettle();
+    expect(find.byType(UpdateSection), findsOneWidget);
+    // go 直达（非 push）无返回栈：返回键走 go('/settings') 兜底 → 列表页。
+    await tester.tap(find.byIcon(Icons.arrow_back_rounded));
+    await tester.pumpAndSettle();
+    expect(find.byType(SettingsIndexPage), findsOneWidget);
+    expect(find.byType(UpdateSection), findsNothing);
+    store.dispose();
+  });
 }
 
 
