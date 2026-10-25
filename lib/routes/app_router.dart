@@ -67,11 +67,15 @@ class AppRouter {
   ///
   /// redirect 只在导航时运行、不随窗口尺寸重跑；"窄屏停留列表后拉宽"
   /// 停留在列表页（仍可用，点行即进分区主从）。
+  ///
+  /// 页面一律 [NoTransitionPage]：分区切换/点入/返回是同层级内容替换，
+  /// 默认 Zoom 过渡期间新旧两页叠显成"虚影"，非意图动画，禁用。
   static GoRoute _settingsRoute() {
     return GoRoute(
       path: '/settings',
       name: 'settings',
-      builder: (context, state) => const SettingsIndexPage(),
+      pageBuilder: (context, state) =>
+          const NoTransitionPage(child: SettingsIndexPage()),
       redirect: (context, state) {
         // matchedLocation 在子路由导航时是父路由自身的匹配段（/settings），
         // 会把 /settings/<section> 深链一并劫持——必须用完整目标 uri 判定。
@@ -87,8 +91,10 @@ class AppRouter {
           GoRoute(
             path: spec.id,
             name: 'settings-${spec.id}',
-            builder: (context, state) =>
-                SettingsSectionPage(sectionId: spec.id),
+            pageBuilder: (context, state) => NoTransitionPage(
+              key: state.pageKey,
+              child: SettingsSectionPage(sectionId: spec.id),
+            ),
           ),
       ],
     );
