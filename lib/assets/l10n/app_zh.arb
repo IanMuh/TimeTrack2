@@ -739,6 +739,7 @@
   "settingsAboutLicenseHint": "MIT License · 含第三方依赖许可",
   "settingsAboutCheckUpdate": "检查更新",
   "settingsInstantHint": "所有设置即时生效并自动保存，更改后相关页面即时一致。",
+  "settingsBackToSections": "返回分区列表",
 
   "remOngoingSubtitle": "运行提醒 · 提醒方式：对话框",
   "remOngoingBody": "「{activity}」已记录 {elapsed}，是否仍在进行？",

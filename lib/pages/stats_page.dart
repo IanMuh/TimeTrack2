@@ -261,7 +261,7 @@ class _StatsPageState extends ConsumerState<StatsPage> {
       confirmLabel: l10n.stAiGoSettings,
       cancelLabel: l10n.stAiNotNow,
     ).then((go) {
-      if (go == true && mounted) context.go('/settings');
+      if (go == true && mounted) context.go('/settings/ai');
     });
   }
 

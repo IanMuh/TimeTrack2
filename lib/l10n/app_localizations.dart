@@ -3926,6 +3926,12 @@ abstract class AppLocalizations {
   /// **'所有设置即时生效并自动保存，更改后相关页面即时一致。'**
   String get settingsInstantHint;
 
+  /// No description provided for @settingsBackToSections.
+  ///
+  /// In zh, this message translates to:
+  /// **'返回分区列表'**
+  String get settingsBackToSections;
+
   /// No description provided for @remOngoingSubtitle.
   ///
   /// In zh, this message translates to:

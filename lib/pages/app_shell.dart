@@ -677,7 +677,8 @@ class _AppShellState extends ConsumerState<AppShell>
             TextButton(
               onPressed: () {
                 messenger.hideCurrentSnackBar();
-                widget.navigationShell.goBranch(4, initialLocation: true);
+                // 深链直达更新分区（路由化主从：/settings/update）。
+                context.go('/settings/update');
               },
               child: Text(
                 l10n.viewInSettings,

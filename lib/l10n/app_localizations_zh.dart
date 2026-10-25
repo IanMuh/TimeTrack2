@@ -2006,6 +2006,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsInstantHint => '所有设置即时生效并自动保存，更改后相关页面即时一致。';
 
   @override
+  String get settingsBackToSections => '返回分区列表';
+
+  @override
   String get remOngoingSubtitle => '运行提醒 · 提醒方式：对话框';
 
   @override

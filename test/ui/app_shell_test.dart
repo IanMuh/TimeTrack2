@@ -155,7 +155,8 @@ void main() {
       await switchTo(1, Icons.calendar_today_outlined, TodayPage, '');
       await switchTo(2, Icons.view_timeline_outlined, TimelinePage, '时间线');
       await switchTo(3, Icons.pie_chart_outline, StatsPage, '统计');
-      await switchTo(4, Icons.settings_outlined, SettingsPage, '设置');
+      // 窄屏：/settings 为分区列表页（宽屏才 redirect 主从）。
+      await switchTo(4, Icons.settings_outlined, SettingsIndexPage, '设置');
       await switchTo(0, Icons.timer_outlined, TimerPage, '');
       store.dispose();
     });
@@ -198,7 +199,8 @@ void main() {
       await switchTo(1, Icons.calendar_today_outlined, TodayPage, '');
       await switchTo(2, Icons.view_timeline_outlined, TimelinePage, '时间线');
       await switchTo(3, Icons.pie_chart_outline, StatsPage, '统计');
-      await switchTo(4, Icons.settings_outlined, SettingsPage, '设置');
+      // 宽屏：/settings redirect 直达 /settings/general 主从形态。
+      await switchTo(4, Icons.settings_outlined, SettingsSectionPage, '设置');
       await switchTo(0, Icons.timer_outlined, TimerPage, '');
       store.dispose();
     });
@@ -285,7 +287,7 @@ void main() {
         (1, Icons.calendar_today_outlined, TodayPage, '今日'),
         (2, Icons.view_timeline_outlined, TimelinePage, '时间线'),
         (3, Icons.pie_chart_outline, StatsPage, '统计'),
-        (4, Icons.settings_outlined, SettingsPage, '设置'),
+        (4, Icons.settings_outlined, SettingsSectionPage, '设置'),
       ];
       for (final (index, icon, pageType, title) in visits) {
         await tester.tap(find.byIcon(icon));
@@ -303,7 +305,7 @@ void main() {
         TodayPage,
         TimelinePage,
         StatsPage,
-        SettingsPage,
+        SettingsSectionPage,
       ]) {
         expect(
           find.byType(pageType, skipOffstage: false),

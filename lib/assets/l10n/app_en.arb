@@ -739,6 +739,7 @@
   "settingsAboutLicenseHint": "MIT License · third-party licenses included",
   "settingsAboutCheckUpdate": "Check for updates",
   "settingsInstantHint": "All settings apply instantly and persist; pages stay consistent after changes.",
+  "settingsBackToSections": "Back to settings sections",
 
   "remOngoingSubtitle": "Running reminder · Dialog style",
   "remOngoingBody": "\"{activity}\" has been recorded for {elapsed}. Still going?",
