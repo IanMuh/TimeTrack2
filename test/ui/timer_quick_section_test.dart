@@ -108,6 +108,23 @@ void main() {
     });
   }
 
+  testWidgets('>=1200 时行按列流动，单分类也铺满宽度', (tester) async {
+    await pumpAt(tester, 1280, section());
+    final xs = [
+      for (final name in ['阅读', '写作', '背单词'])
+        tester.getTopLeft(find.text(name)).dx,
+    ];
+    // 三列：三个条目分别落在不同列（x 各不相同），而不是全部挤在左侧单列。
+    expect(xs.toSet().length, 3);
+
+    await pumpAt(tester, 480, section());
+    final compact = [
+      for (final name in ['阅读', '写作', '背单词'])
+        tester.getTopLeft(find.text(name)).dx,
+    ];
+    expect(compact.toSet().length, 1);
+  });
+
   testWidgets('搜索按名称过滤并显示空态', (tester) async {
     await pumpAt(tester, 800, section());
     await tester.enterText(find.byType(TextField), '阅');

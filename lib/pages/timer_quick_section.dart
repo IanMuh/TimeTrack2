@@ -206,25 +206,15 @@ class _TimerQuickSectionState extends State<TimerQuickSection> {
                   children: [for (final g in groups) _groupBlock(g)],
                 );
               }
-              final buckets = List.generate(columns, (_) => <_Group>[]);
-              final heights = List<int>.filled(columns, 0);
-              for (final g in groups) {
-                var target = 0;
-                for (var i = 1; i < columns; i++) {
-                  if (heights[i] < heights[target]) target = i;
-                }
-                buckets[target].add(g);
-                heights[target] += 28 + g.items.length * 60;
-              }
+              // 按“行”跨列填充：同一分类的条目连续分发到各列，列首重绘分类头。
+              // 只按“整组”分桶会让单分类（如未分类）只占一列、宽屏右侧全空。
               return Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   for (var i = 0; i < columns; i++) ...[
                     if (i > 0) const SizedBox(width: 16),
                     Expanded(
-                      child: Column(
-                        children: [for (final g in buckets[i]) _groupBlock(g)],
-                      ),
+                      child: Column(children: _columnItems(groups, i, columns)),
                     ),
                   ],
                 ],
@@ -324,52 +314,78 @@ class _TimerQuickSectionState extends State<TimerQuickSection> {
     );
   }
 
+  /// 把分组展开成「分类头 + 活动行」序列，按条目数均分到各列。
+  List<Widget> _columnItems(List<_Group> groups, int index, int columns) {
+    final refs = <(_Group, Activity)>[];
+    for (final g in groups) {
+      for (final a in g.items) {
+        refs.add((g, a));
+      }
+    }
+    final base = refs.length ~/ columns;
+    final extra = refs.length % columns;
+    final start = index * base + (index < extra ? index : extra);
+    final count = base + (index < extra ? 1 : 0);
+    final slice = refs.sublist(start, start + count);
+    final children = <Widget>[];
+    _Group? current;
+    for (final (group, activity) in slice) {
+      if (!identical(current, group)) {
+        children.add(_groupHeader(group));
+        current = group;
+      }
+      children.add(_row(activity));
+    }
+    return children;
+  }
+
   Widget _groupBlock(_Group group) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        children: [_groupHeader(group), for (final a in group.items) _row(a)],
+      ),
+    );
+  }
+
+  Widget _groupHeader(_Group group) {
+    return SizedBox(
+      height: 28,
+      child: Row(
         children: [
-          SizedBox(
-            height: 28,
-            child: Row(
-              children: [
-                if (group.color != null) ...[
-                  ActivityColorDot(Color(group.color!), size: 8, ringWidth: 0),
-                  const SizedBox(width: 6),
-                ],
-                Text(
-                  group.label,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  '${group.items.length}',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
+          if (group.color != null) ...[
+            ActivityColorDot(Color(group.color!), size: 8, ringWidth: 0),
+            const SizedBox(width: 6),
+          ],
+          Text(
+            group.label,
+            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            '${group.items.length}',
+            style: TextStyle(
+              fontSize: 12,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
           ),
-          for (final a in group.items)
-            _ActivityRow(
-              activity: a,
-              path: _pathOf(a.id),
-              running: widget.runningActivityId == a.id,
-              pending: widget.pendingActivityId == a.id,
-              today: widget.todayByActivity[a.id] ?? Duration.zero,
-              l10n: widget.l10n,
-              onTap: () => widget.onActivityTap(a),
-              onDoubleTap: () => widget.onActivityDoubleTap(a),
-              onLongPress: () => widget.onActivityLongPress(a),
-            ),
         ],
       ),
+    );
+  }
+
+  Widget _row(Activity a) {
+    return _ActivityRow(
+      activity: a,
+      path: _pathOf(a.id),
+      running: widget.runningActivityId == a.id,
+      pending: widget.pendingActivityId == a.id,
+      today: widget.todayByActivity[a.id] ?? Duration.zero,
+      l10n: widget.l10n,
+      onTap: () => widget.onActivityTap(a),
+      onDoubleTap: () => widget.onActivityDoubleTap(a),
+      onLongPress: () => widget.onActivityLongPress(a),
     );
   }
 }
