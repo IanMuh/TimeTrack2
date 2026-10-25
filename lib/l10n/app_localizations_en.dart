@@ -1087,6 +1087,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get searchActivities => 'Search activities and categories…';
 
   @override
+  String get timerNoMatch => 'No matching activities';
+
+  @override
   String get activityNameRequired => 'Name is required';
 
   @override
@@ -1125,6 +1128,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get timerStartRecording => 'Start recording';
+
+  @override
+  String get timerCurrentSession => 'Current session';
 
   @override
   String get timerLoadFailed => 'Failed to load. Try again.';

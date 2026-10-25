@@ -1072,6 +1072,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get searchActivities => '搜索活动与分类…';
 
   @override
+  String get timerNoMatch => '没有匹配的活动';
+
+  @override
   String get activityNameRequired => '名称不能为空';
 
   @override
@@ -1109,6 +1112,9 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get timerStartRecording => '开始记录';
+
+  @override
+  String get timerCurrentSession => '当前会话';
 
   @override
   String get timerLoadFailed => '数据加载失败，请重试';

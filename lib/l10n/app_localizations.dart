@@ -2132,6 +2132,12 @@ abstract class AppLocalizations {
   /// **'搜索活动与分类…'**
   String get searchActivities;
 
+  /// No description provided for @timerNoMatch.
+  ///
+  /// In zh, this message translates to:
+  /// **'没有匹配的活动'**
+  String get timerNoMatch;
+
   /// No description provided for @activityNameRequired.
   ///
   /// In zh, this message translates to:
@@ -2209,6 +2215,12 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'开始记录'**
   String get timerStartRecording;
+
+  /// No description provided for @timerCurrentSession.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前会话'**
+  String get timerCurrentSession;
 
   /// No description provided for @timerLoadFailed.
   ///
