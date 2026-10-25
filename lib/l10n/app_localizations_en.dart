@@ -2071,6 +2071,9 @@ class AppLocalizationsEn extends AppLocalizations {
       'All settings apply instantly and persist; pages stay consistent after changes.';
 
   @override
+  String get settingsBackToSections => 'Back to settings sections';
+
+  @override
   String get remOngoingSubtitle => 'Running reminder · Dialog style';
 
   @override
