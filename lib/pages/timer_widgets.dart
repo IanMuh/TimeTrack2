@@ -1,16 +1,18 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../components/activity_color_dot.dart';
-import '../components/controls.dart' show AppChip;
 import '../components/tnum_text.dart';
 import '../l10n/app_localizations.dart';
-import '../viewmodels/activity.dart';
-import '../viewmodels/activity_category.dart';
 
-/// 计时页子件（对照 design/timer.html：居中式会话焦点区 + 快捷活动区）。
+/// 计时页子件：缺口圆环焦点区 + 紧凑活动区。
+///
+/// 环：固定缺口的圆弧（缺口在正下方），白天模式蓝绿、夜间模式青绿；运行中
+/// 一段高亮沿弧从左往右循环传递（由 1Hz tick 驱动的 1s 线性补间，无无限
+/// AnimationController，测试可收敛），停止后高亮停在起始位置并压暗。
 
-/// 会话焦点区（设计稿：居中列——呼吸徽标 / 48-72px 大计时 / 活动行 /
-/// 统计行 / 按钮组 / 说明小字；无卡片底）。
+/// 会话焦点区：宽屏为「环 + 右侧控制栏」横排，窄屏为环 + 统计行 + 按钮。
 class TimerFocusSection extends StatelessWidget {
   const TimerFocusSection({
     super.key,
@@ -41,144 +43,191 @@ class TimerFocusSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final width = MediaQuery.sizeOf(context).width;
-    final timerStyle = TextStyle(
-      fontSize: width >= 840 ? 72.0 : (width >= 600 ? 60.0 : 48.0),
-      fontWeight: FontWeight.w600,
-      letterSpacing: -2,
-      height: 1.05,
-      color: recording ? scheme.onSurface : scheme.onSurfaceVariant,
-    );
-    final accent = const Color(0xfff43f5e); // rose-500（运行色系）
+    final scheme = Theme.of(context).colorScheme;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final wide = constraints.maxWidth >= 1024;
+        final ringSize = wide
+            ? 236.0
+            : (constraints.maxWidth >= 600 ? 196.0 : 168.0);
+        final ring = _SessionRing(
+          size: ringSize,
+          recording: recording,
+          elapsed: elapsed,
+          runningName: runningName,
+          runningColor: runningColor,
+          l10n: l10n,
+        );
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        const SizedBox(height: 40),
-        _StatusPill(recording: recording, accent: accent),
-        const SizedBox(height: 20),
-        // FittedBox：系统字号放大/超长计时（100+ 小时）下 48px 大数字可能
-        // 超出焦点区宽——等比缩小而非溢出。
-        FittedBox(
-          fit: BoxFit.scaleDown,
-          child: TnumText(formatHms(elapsed), style: timerStyle),
-        ),
-        const SizedBox(height: 12),
-        if (recording)
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ActivityColorDot(
-                runningColor == null ? accent : Color(runningColor!),
-                size: 8,
-                ringWidth: 0,
-              ),
-              const SizedBox(width: 8),
-              Flexible(
-                child: Text(
-                  runningName ?? '',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                    color: scheme.onSurface,
-                  ),
-                ),
-              ),
-              if (runningPath != null && runningPath!.isNotEmpty) ...[
-                const SizedBox(width: 6),
-                Text('·', style: TextStyle(color: scheme.outline)),
-                const SizedBox(width: 6),
-                Flexible(
-                  child: Text(
-                    runningPath!,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ),
-                ),
+        if (wide) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                ring,
+                const SizedBox(width: 40),
+                SizedBox(width: 262, child: _controls(context, scheme)),
               ],
-            ],
-          ),
-        const SizedBox(height: 24),
-        // Wrap：textScale 放大时 标签+值+分隔线+标签+值 超出焦点区宽——
-        // 换行而非溢出。
-        Wrap(
-          alignment: WrapAlignment.center,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            Text(l10n.timerTodayTotal, style: _statLabel(scheme)),
-            const SizedBox(width: 6),
-            TnumText(_hm(todayTotal), style: _statValue(scheme)),
-            const SizedBox(width: 20),
-            Container(width: 1, height: 12, color: scheme.outline),
-            const SizedBox(width: 20),
-            Text(l10n.timerTodaySessions, style: _statLabel(scheme)),
-            const SizedBox(width: 6),
-            TnumText('$todaySessions', style: _statValue(scheme)),
-          ],
-        ),
-        const SizedBox(height: 32),
-        if (recording) ...[
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              OutlinedButton.icon(
-                onPressed: onStop,
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: scheme.error,
-                  side: BorderSide(color: scheme.outlineVariant),
-                ),
-                icon: const Icon(Icons.stop_rounded, size: 16),
-                label: Text(l10n.stop),
-              ),
-              const SizedBox(width: 12),
-              FilledButton.icon(
-                onPressed: onSwitch,
-                icon: const Icon(Icons.swap_horiz_rounded, size: 16),
-                label: Text(l10n.switchActivity),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            width: 420,
-            child: Text(
-              l10n.timerSwitchHint,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 12,
-                height: 1.6,
-                color: scheme.onSurfaceVariant.withValues(alpha: 0.8),
-              ),
             ),
+          );
+        }
+        return Column(
+          children: [
+            const SizedBox(height: 4),
+            ring,
+            const SizedBox(height: 12),
+            _statsRow(scheme),
+            const SizedBox(height: 14),
+            _buttons(scheme),
+            const SizedBox(height: 4),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _controls(BuildContext context, ColorScheme scheme) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _statsColumn(scheme),
+        const SizedBox(height: 18),
+        _buttons(scheme, alignment: MainAxisAlignment.start),
+        if (recording) ...[const SizedBox(height: 10), _hint(scheme)],
+      ],
+    );
+  }
+
+  /// 宽屏：两行「标签 / 值」；窄屏：一行 Wrap。
+  Widget _statsColumn(ColorScheme scheme) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _statLine(scheme, l10n.timerTodayTotal, _hm(todayTotal)),
+        const SizedBox(height: 6),
+        _statLine(scheme, l10n.timerTodaySessions, '$todaySessions'),
+      ],
+    );
+  }
+
+  Widget _statLine(ColorScheme scheme, String label, String value) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          label,
+          style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
+        ),
+        const SizedBox(width: 10),
+        TnumText(
+          value,
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+            color: scheme.onSurface,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _statsRow(ColorScheme scheme) {
+    return Wrap(
+      alignment: WrapAlignment.center,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        Text(
+          l10n.timerTodayTotal,
+          style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
+        ),
+        const SizedBox(width: 6),
+        TnumText(
+          _hm(todayTotal),
+          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(width: 16),
+        Container(width: 1, height: 12, color: scheme.outlineVariant),
+        const SizedBox(width: 16),
+        Text(
+          l10n.timerTodaySessions,
+          style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
+        ),
+        const SizedBox(width: 6),
+        TnumText(
+          '$todaySessions',
+          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(width: 10),
+        Tooltip(
+          message: l10n.timerSwitchHint,
+          child: Icon(
+            Icons.info_outline,
+            size: 14,
+            color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buttons(
+    ColorScheme scheme, {
+    MainAxisAlignment alignment = MainAxisAlignment.center,
+  }) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      mainAxisAlignment: alignment,
+      children: [
+        if (recording) ...[
+          OutlinedButton.icon(
+            onPressed: onStop,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: scheme.error,
+              side: BorderSide(color: scheme.outlineVariant),
+              minimumSize: const Size(92, 42),
+              shape: const StadiumBorder(),
+            ),
+            icon: const Icon(Icons.stop_rounded, size: 17),
+            label: Text(l10n.stop),
+          ),
+          const SizedBox(width: 12),
+          FilledButton.icon(
+            onPressed: onSwitch,
+            style: FilledButton.styleFrom(
+              minimumSize: const Size(116, 42),
+              shape: const StadiumBorder(),
+            ),
+            icon: const Icon(Icons.swap_horiz_rounded, size: 17),
+            label: Text(l10n.switchActivity),
           ),
         ] else
           FilledButton.icon(
             onPressed: onStart,
-            icon: const Icon(Icons.play_arrow_rounded, size: 18),
+            style: FilledButton.styleFrom(
+              minimumSize: const Size(140, 46),
+              shape: const StadiumBorder(),
+            ),
+            icon: const Icon(Icons.play_arrow_rounded, size: 20),
             label: Text(l10n.timerStartRecording),
           ),
-        const SizedBox(height: 16),
       ],
     );
   }
 
-  TextStyle _statLabel(ColorScheme scheme) =>
-      TextStyle(fontSize: 14, color: scheme.onSurfaceVariant);
-  TextStyle _statValue(ColorScheme scheme) => TextStyle(
-    fontSize: 14,
-    fontWeight: FontWeight.w600,
-    color: scheme.onSurface,
-  );
+  Widget _hint(ColorScheme scheme, {TextAlign align = TextAlign.center}) {
+    return Text(
+      l10n.timerSwitchHint,
+      textAlign: align,
+      style: TextStyle(
+        fontSize: 12,
+        height: 1.5,
+        color: scheme.onSurfaceVariant.withValues(alpha: 0.8),
+      ),
+    );
+  }
 
-  /// H:MM（设计稿今日累计短格式，如 10:42）。
+  /// H:MM（今日累计短格式，如 10:42）。
   static String _hm(Duration d) {
     final h = d.inHours;
     final m = d.inMinutes.remainder(60);
@@ -186,497 +235,213 @@ class TimerFocusSection extends StatelessWidget {
   }
 }
 
-/// 状态徽标（rose 呼吸 / 灰弱化）。
-class _StatusPill extends StatelessWidget {
-  const _StatusPill({required this.recording, required this.accent});
-
-  final bool recording;
-  final Color accent;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final l10n = AppLocalizations.of(context)!;
-    final color = recording ? accent : scheme.onSurfaceVariant;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withValues(alpha: 0.25)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TweenAnimationBuilder<double>(
-            tween: Tween(begin: 0.35, end: 1),
-            duration: const Duration(milliseconds: 900),
-            builder: (context, opacity, _) => Opacity(
-              opacity: recording ? opacity : 0.6,
-              child: Container(
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            recording ? l10n.timerRunning : l10n.notRecording,
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w500,
-              color: recording
-                  ? const Color(0xffe11d48)
-                  : scheme.onSurfaceVariant,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// 快捷活动区（设计稿：标题行 + 分类 chip 行 + 分组说明行 + 2/3/4 列网格）。
-class TimerQuickSection extends StatelessWidget {
-  const TimerQuickSection({
-    super.key,
+/// 缺口圆环 + 环内计时/会话信息。
+class _SessionRing extends StatelessWidget {
+  const _SessionRing({
+    required this.size,
+    required this.recording,
+    required this.elapsed,
+    required this.runningName,
+    required this.runningColor,
     required this.l10n,
-    required this.categoryFilterId,
-    required this.rootCategories,
-    required this.childrenByParent,
-    required this.ancestorChain,
-    required this.descendantsOf,
-    required this.activities,
-    required this.categoryIdsByActivity,
-    required this.runningActivityId,
-    required this.pendingActivityId,
-    required this.todayByActivity,
-    required this.onFilter,
-    required this.onActivityTap,
-    required this.onActivityDoubleTap,
-    required this.onActivityLongPress,
-    required this.onTemporary,
-    required this.onNewActivity,
   });
 
+  final double size;
+  final bool recording;
+  final Duration elapsed;
+  final String? runningName;
+  final int? runningColor;
   final AppLocalizations l10n;
-  final String? categoryFilterId;
-  final List<ActivityCategory> rootCategories;
-  final Map<String?, List<ActivityCategory>> childrenByParent;
-  final Map<String, List<String>> ancestorChain;
-  final Map<String, Set<String>> descendantsOf;
-  final List<Activity> activities;
-  final Map<String, Set<String>> categoryIdsByActivity;
-  final String? runningActivityId;
-  final String? pendingActivityId;
-  final Map<String, Duration> todayByActivity;
-  final ValueChanged<String?> onFilter;
-  final ValueChanged<Activity> onActivityTap;
-  final ValueChanged<Activity> onActivityDoubleTap;
-  final ValueChanged<Activity> onActivityLongPress;
-  final VoidCallback onTemporary;
-  final VoidCallback onNewActivity;
-
-  bool _inCategory(String activityId, String categoryId) {
-    final set = categoryIdsByActivity[activityId] ?? const {};
-    final desc = descendantsOf[categoryId] ?? const <String>{};
-    return set.contains(categoryId) || set.any(desc.contains);
-  }
-
-  int _countFor(String categoryId) => activities
-      .where((a) => !a.isUnassigned && _inCategory(a.id, categoryId))
-      .length;
-
-  String _pathOf(String activityId) {
-    final set = categoryIdsByActivity[activityId] ?? const {};
-    for (final c in set) {
-      final chain = ancestorChain[c];
-      if (chain != null && chain.isNotEmpty) return chain.join(' / ');
-    }
-    return '';
-  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final selected = categoryFilterId;
-    final visible = selected == null
-        ? activities
-        : activities
-              .where((a) => !a.isUnassigned && _inCategory(a.id, selected))
-              .toList();
+    final dark = theme.brightness == Brightness.dark;
+    final palette = dark
+        ? const [_Palette.mint, _Palette.aqua]
+        : const [_Palette.cyan, _Palette.emerald];
+    final timeSize = size * 0.17;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // 标题行（左：快捷活动；右：交互约定小字——设计稿同排）。
-        Row(
-          children: [
-            Text(
-              l10n.timerQuickSection,
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w500,
-                letterSpacing: -0.2,
+    // 高亮沿弧传递：3s 一圈；由 1Hz tick 驱动的 1s 线性补间连续推进。
+    final phase = recording ? (elapsed.inMilliseconds % 3000) / 3000.0 : 0.06;
+
+    return Semantics(
+      label: recording
+          ? '${l10n.timerRunning} ${runningName ?? ''}'
+          : l10n.notRecording,
+      child: SizedBox(
+        width: size,
+        height: size,
+        child: TweenAnimationBuilder<double>(
+          tween: Tween<double>(end: phase),
+          duration: Duration(milliseconds: recording ? 1000 : 300),
+          curve: Curves.linear,
+          builder: (context, animatedPhase, _) {
+            return CustomPaint(
+              painter: _RingPainter(
+                phase: animatedPhase,
+                running: recording,
+                colors: palette,
               ),
-            ),
-            const Spacer(),
-            Flexible(
-              child: Text(
-                l10n.timerInteractionHint,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: scheme.onSurfaceVariant.withValues(alpha: 0.8),
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        // 分类 chip 行（固定入口以竖分割线区隔，常驻行尾）。
-        SizedBox(
-          height: 34,
-          child: ListView(
-            scrollDirection: Axis.horizontal,
-            children: [
-              AppChip(
-                label: l10n.timerAll,
-                count: activities.length,
-                selected: selected == null,
-                onTap: () => onFilter(null),
-              ),
-              const SizedBox(width: 8),
-              for (final c in rootCategories) ...[
-                AppChip(
-                  label: c.name,
-                  dotColor: Color(c.color),
-                  count: _countFor(c.id),
-                  selected: selected == c.id,
-                  onTap: () => onFilter(c.id),
-                ),
-                const SizedBox(width: 8),
-              ],
-              Container(width: 1, height: 20, color: scheme.outline),
-              const SizedBox(width: 8),
-              AppChip(label: l10n.timerTemporaryActivity, onTap: onTemporary),
-              const SizedBox(width: 8),
-              AppChip(label: l10n.timerNewActivity, onTap: onNewActivity),
-            ],
-          ),
-        ),
-        const SizedBox(height: 14),
-        _GroupHeaderLine(
-          scheme: scheme,
-          selected: selected,
-          rootCategories: rootCategories,
-          childrenByParent: childrenByParent,
-          countFor: _countFor,
-          visibleCount: visible.length,
-          l10n: l10n,
-        ),
-        const SizedBox(height: 16),
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final columns = constraints.maxWidth >= 840
-                ? 4
-                : constraints.maxWidth >= 600
-                ? 3
-                : 2;
-            // 卡片纵横比随系统字号放大放高：内容最小高度随字号线性增长，
-            // 固定 1.75 在放大档纵向溢出（app 层钳制 1.3 → 最扁 1.35）。
-            final textScale = MediaQuery.textScalerOf(context).scale(1.0);
-            return GridView.count(
-              crossAxisCount: columns,
-              mainAxisSpacing: 12,
-              crossAxisSpacing: 12,
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              childAspectRatio: 1.75 / textScale,
-              children: [
-                for (final a in visible)
-                  _ActivityCard(
-                    activity: a,
-                    path: _pathOf(a.id),
-                    running: runningActivityId == a.id,
-                    pending: pendingActivityId == a.id,
-                    today: todayByActivity[a.id] ?? Duration.zero,
-                    scheme: scheme,
-                    l10n: l10n,
-                    onTap: () => onActivityTap(a),
-                    onDoubleTap: () => onActivityDoubleTap(a),
-                    onLongPress: () => onActivityLongPress(a),
-                  ),
-              ],
-            );
-          },
-        ),
-      ],
-    );
-  }
-}
-
-/// 分组说明行：全部态"全部活动 · 共 N 个"；选中态"色点 分类 / 子组 · N、…"。
-class _GroupHeaderLine extends StatelessWidget {
-  const _GroupHeaderLine({
-    required this.scheme,
-    required this.selected,
-    required this.rootCategories,
-    required this.childrenByParent,
-    required this.countFor,
-    required this.visibleCount,
-    required this.l10n,
-  });
-
-  final ColorScheme scheme;
-  final String? selected;
-  final List<ActivityCategory> rootCategories;
-  final Map<String?, List<ActivityCategory>> childrenByParent;
-  final int Function(String) countFor;
-  final int visibleCount;
-  final AppLocalizations l10n;
-
-  @override
-  Widget build(BuildContext context) {
-    final muted = scheme.onSurfaceVariant;
-    if (selected == null) {
-      return Row(
-        children: [
-          Icon(Icons.layers_outlined, size: 14, color: muted),
-          const SizedBox(width: 6),
-          Text(
-            l10n.timerAllActivities,
-            style: TextStyle(fontSize: 12, color: muted),
-          ),
-          const SizedBox(width: 6),
-          Text('·', style: TextStyle(fontSize: 12, color: scheme.outline)),
-          const SizedBox(width: 6),
-          Text(
-            l10n.timerGroupCount(visibleCount),
-            style: TextStyle(fontSize: 12, color: muted),
-          ),
-        ],
-      );
-    }
-    final cat = rootCategories.where((c) => c.id == selected).firstOrNull;
-    if (cat == null) return const SizedBox(height: 16);
-    final subs = childrenByParent[cat.id] ?? const [];
-    final subText = subs.map((s) => '${s.name} · ${countFor(s.id)}').join('、');
-    return Row(
-      children: [
-        ActivityColorDot(Color(cat.color), size: 8, ringWidth: 0),
-        const SizedBox(width: 6),
-        Text(
-          cat.name,
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w500,
-            color: scheme.onSurface,
-          ),
-        ),
-        const SizedBox(width: 6),
-        Text('/', style: TextStyle(fontSize: 12, color: scheme.outline)),
-        const SizedBox(width: 6),
-        Expanded(
-          child: Text(
-            subText.isEmpty
-                ? l10n.timerGroupCount(visibleCount)
-                : '$subText（${l10n.timerGroupCount(visibleCount)}）',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontSize: 12, color: muted),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-/// 活动卡（设计稿：竖排 rounded-2xl p-3——色点+名(+运行徽标) / 祖先链 /
-/// 底行 今日时长+悬停铅笔；待确认 = 描边 + 卡底内嵌提示条）。
-class _ActivityCard extends StatelessWidget {
-  const _ActivityCard({
-    required this.activity,
-    required this.path,
-    required this.running,
-    required this.pending,
-    required this.today,
-    required this.scheme,
-    required this.l10n,
-    required this.onTap,
-    required this.onDoubleTap,
-    required this.onLongPress,
-  });
-
-  final Activity activity;
-  final String path;
-  final bool running;
-  final bool pending;
-  final Duration today;
-  final ColorScheme scheme;
-  final AppLocalizations l10n;
-  final VoidCallback onTap;
-  final VoidCallback onDoubleTap;
-  final VoidCallback onLongPress;
-
-  @override
-  Widget build(BuildContext context) {
-    final rose = const Color(0xfff43f5e);
-    final accent = running ? rose : (pending ? scheme.primary : null);
-    final dot = Color(activity.color);
-    final body = Padding(
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              ActivityColorDot(dot, size: 10, ringWidth: 0),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  activity.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ),
-              if (running)
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 6,
-                    vertical: 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: rose.withValues(alpha: 0.08),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: Row(
+              child: Center(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(horizontal: size * 0.16),
+                  child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      TweenAnimationBuilder<double>(
-                        tween: Tween(begin: 0.3, end: 1),
-                        duration: const Duration(milliseconds: 900),
-                        builder: (context, o, _) => Opacity(
-                          opacity: o,
-                          child: Container(
-                            width: 4,
-                            height: 4,
-                            decoration: BoxDecoration(
-                              color: rose,
-                              shape: BoxShape.circle,
-                            ),
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: TnumText(
+                          formatHms(elapsed),
+                          style: TextStyle(
+                            fontSize: timeSize,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: -1.4,
+                            height: 1.0,
+                            color: recording
+                                ? scheme.onSurface
+                                : scheme.onSurfaceVariant,
                           ),
                         ),
                       ),
-                      const SizedBox(width: 4),
+                      SizedBox(height: size * 0.03),
                       Text(
-                        l10n.timerRunning,
+                        recording
+                            ? l10n.timerCurrentSession
+                            : l10n.notRecording,
                         style: TextStyle(
-                          fontSize: 10,
+                          fontSize: 11,
                           fontWeight: FontWeight.w500,
-                          color: const Color(0xffe11d48),
+                          letterSpacing: 0.6,
+                          color: scheme.onSurfaceVariant,
                         ),
+                      ),
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 240),
+                        child: recording && runningName != null
+                            ? Padding(
+                                key: const ValueKey('running'),
+                                padding: EdgeInsets.only(top: size * 0.05),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    ActivityColorDot(
+                                      runningColor == null
+                                          ? palette.last
+                                          : Color(runningColor!),
+                                      size: 8,
+                                      ringWidth: 0,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Flexible(
+                                      child: Text(
+                                        runningName!,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w500,
+                                          color: scheme.onSurface,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              )
+                            : const SizedBox.shrink(key: ValueKey('idle')),
                       ),
                     ],
                   ),
                 ),
-            ],
-          ),
-          const SizedBox(height: 3),
-          Text(
-            path,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-          ),
-          const Spacer(),
-          Row(
-            children: [
-              Text(
-                l10n.timerTodayShort,
-                style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
               ),
-              const SizedBox(width: 4),
-              TnumText(
-                _hm(today),
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: -0.2,
-                  color: running ? rose : scheme.onSurface,
-                ),
-              ),
-              const Spacer(),
-              Icon(Icons.edit_outlined, size: 14, color: scheme.outlineVariant),
-            ],
-          ),
-        ],
-      ),
-    );
-    return GestureDetector(
-      onTap: onTap,
-      onDoubleTap: onDoubleTap,
-      onLongPress: onLongPress,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 120),
-        clipBehavior: Clip.antiAlias,
-        decoration: BoxDecoration(
-          color: scheme.surface,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: accent ?? scheme.outline,
-            width: accent != null ? 1.5 : 1,
-          ),
+            );
+          },
         ),
-        child: pending
-            ? Column(
-                children: [
-                  Expanded(child: body),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 6,
-                    ),
-                    color: scheme.primary.withValues(alpha: 0.08),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.touch_app_rounded,
-                          size: 12,
-                          color: scheme.primary,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          l10n.timerTapToConfirm,
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w500,
-                            color: scheme.primary,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              )
-            : body,
       ),
     );
+  }
+}
+
+/// 环配色：白天蓝绿、夜间青绿（低饱和高亮度，避免夜间刺眼）。
+abstract final class _Palette {
+  static const Color cyan = Color(0xff06b6d4);
+  static const Color emerald = Color(0xff10b981);
+  static const Color aqua = Color(0xff22d3ee);
+  static const Color mint = Color(0xff34d399);
+}
+
+class _RingPainter extends CustomPainter {
+  _RingPainter({
+    required this.phase,
+    required this.running,
+    required this.colors,
+  });
+
+  final double phase;
+  final bool running;
+  final List<Color> colors;
+
+  /// 固定缺口：正下方 22% 周长。
+  static const double _gap = 0.22 * 2 * math.pi;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final stroke = size.width * 0.034;
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = (size.shortestSide - stroke) / 2;
+    final rect = Rect.fromCircle(center: center, radius: radius);
+
+    // 缺口居中于正下方（90°）：从右下角起顺时针扫过，止于左下角。
+    final start = math.pi / 2 + _gap / 2;
+    final sweep = 2 * math.pi - _gap;
+
+    // 底弧：两色低透明度渐变。
+    final base = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke
+      ..strokeCap = StrokeCap.round
+      ..shader = SweepGradient(
+        transform: GradientRotation(start),
+        colors: [
+          colors[0].withValues(alpha: running ? 0.38 : 0.22),
+          colors[1].withValues(alpha: running ? 0.38 : 0.22),
+        ],
+      ).createShader(rect);
+    canvas.drawArc(rect, start, sweep, false, base);
+
+    // 高潮：沿弧传递的彗星高亮（运行中才显著）。
+    final waveAlpha = running ? 1.0 : 0.35;
+    final angle = start + phase * sweep;
+    final wave = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke
+      ..strokeCap = StrokeCap.round
+      ..shader = SweepGradient(
+        transform: GradientRotation(angle - math.pi),
+        colors: [
+          colors[1].withValues(alpha: 0),
+          colors[1].withValues(alpha: 0.05 * waveAlpha),
+          colors[0].withValues(alpha: 0.95 * waveAlpha),
+          colors[1].withValues(alpha: 0.35 * waveAlpha),
+          colors[0].withValues(alpha: 0),
+        ],
+        stops: const [0.0, 0.34, 0.47, 0.55, 0.72],
+      ).createShader(rect);
+    canvas.drawArc(rect, start, sweep, false, wave);
+
+    if (running) {
+      final glow = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = stroke * 1.9
+        ..strokeCap = StrokeCap.round
+        ..color = colors[1].withValues(alpha: 0.16)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 9);
+      canvas.drawArc(rect, start, sweep, false, glow);
+    }
   }
 
-  static String _hm(Duration d) {
-    final h = d.inHours;
-    final m = d.inMinutes.remainder(60);
-    return '$h:${m.toString().padLeft(2, '0')}';
-  }
+  @override
+  bool shouldRepaint(_RingPainter old) =>
+      old.phase != phase || old.running != running || old.colors != colors;
 }

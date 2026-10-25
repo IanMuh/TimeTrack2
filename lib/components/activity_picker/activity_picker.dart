@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../../viewmodels/activity.dart';
@@ -78,11 +80,7 @@ class ActivityDraft {
 
 /// 新建分类草稿（含父分类 id，null = 根分类）。
 class CategoryDraft {
-  const CategoryDraft({
-    required this.name,
-    required this.color,
-    this.parentId,
-  });
+  const CategoryDraft({required this.name, required this.color, this.parentId});
 
   final String name;
   final int color;
@@ -189,11 +187,18 @@ Future<void> showActivityCategoryPicker(
   return showDialog<void>(
     context: context,
     barrierColor: const Color(0x66000000),
-    builder: (_) => Dialog(
-      insetPadding: const EdgeInsets.all(24),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      clipBehavior: Clip.antiAlias,
-      child: host,
-    ),
+    builder: (dialogContext) {
+      final media = MediaQuery.sizeOf(dialogContext);
+      return Dialog(
+        insetPadding: const EdgeInsets.all(24),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        clipBehavior: Clip.antiAlias,
+        child: SizedBox(
+          width: math.min(620, media.width - 48),
+          height: math.min(520, media.height - 96),
+          child: host,
+        ),
+      );
+    },
   );
 }

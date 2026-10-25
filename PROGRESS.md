@@ -322,8 +322,9 @@ slicesForRange/computeDayMetrics）+ 自然语言→指令解析。
 方案见 `docs/UI重建方案.md`（已确认：计时页紧凑分组列表、设置路由化主从、设置 10 项扁平导航）。
 
 - **PR-A（feat/ui-rebuild-foundation）**：新增布局令牌 `lib/constants/layout.dart`（断点 600/840/1280、内容宽 timer 1440·today 1120·stats 1440·settings 1280·form 760）、`lib/components/page_frame.dart`；壳层去掉全壳统一 1024 限宽，内容宽度由各页面声明；计时/今日/统计/设置页包 `PageFrame`；Windows 窗口最小尺寸 960×640（`WM_GETMINMAXINFO`）；`test/components/page_frame_test.dart` 3 例。验收：analyze 0 / 全部测试绿。
-- **PR-D 设置部分（feat/ui-settings-routes）**：设置路由化主从——`/settings` 父路由 + 十分区子路由 `/settings/:section`；宽屏 redirect 直达 `/settings/general`（左 240 扁平导航 + 右单分区 760），窄屏列表页（行 56，push 进入/返回可回）；只构建当前分区。已知坑两条：go_router 父路由 redirect 的 `state.matchedLocation` 恒为父段（判定必须用 `state.uri.path`）；分支挂载时列表页可能离屏构建，build 期宽屏补跳会劫持子路由深链（不做补跳）。更新 Snackbar 深链 `/settings/update`、统计页 AI 引导 `/settings/ai`。
-- 后续：PR-B 计时页（焦点区压缩 + 分组列表 + 自适应列）、PR-C 统计页（两栏 + 响应式图表 + 分类树表）、PR-D 撤销/重做改版。
+- **PR-B（feat/ui-timer-page）**：计时页重做——焦点区留白压缩；活动区从 4 列大卡片改为**按分类分组的紧凑列表**（行高 56：色点 + 名称 15 + 分类路径 12 + 今日时长 13；运行中左侧主色条 + 淡底；待确认主色描边 + 静态提示图标）；搜索框即时过滤（名称/路径）+ 空态；列数 <640 单列 / ≥640 双列 / ≥1200 三列（每列最小 320）。新增 `lib/pages/timer_quick_section.dart`（旧 `TimerQuickSection`/`_ActivityCard` 从 timer_widgets 移除）；新增 `timerNoMatch` 文案（中/英）。测试：`test/ui/timer_quick_section_test.dart` 5 例（480/800/1280 三档、搜索过滤+空态、运行时长、待确认提示）。验收：analyze 0 / 815 测试绿。
+- **PR-D 设置部分（feat/ui-settings-routes）**：设置路由化主从——`/settings` 父路由 + 十分区子路由 `/settings/:section`；宽屏 redirect 直达 `/settings/general`（左 240 扁平导航 + 右单分区 760），窄屏列表页（行 56，push 进入/返回可回）；只构建当前分区；页面切换 NoTransitionPage（默认 Zoom 过渡叠显虚影非意图）。已知坑两条：go_router 父路由 redirect 的 `state.matchedLocation` 恒为父段（判定必须用 `state.uri.path`）；分支挂载时列表页可能离屏构建，build 期宽屏补跳会劫持子路由深链（不做补跳）。更新 Snackbar 深链 `/settings/update`、统计页 AI 引导 `/settings/ai`。
+- 后续：PR-C 统计页（两栏 + 响应式图表 + 分类树表）、PR-D 撤销/重做改版。
 
 ## 关键约定（实现勿破坏）
 
